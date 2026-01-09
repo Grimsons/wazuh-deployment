@@ -64,8 +64,8 @@
 - name: Wait for Wazuh Indexer to be ready
   ansible.builtin.uri:
     url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_cluster/health"
-    user: "{{ wazuh_indexer_admin_user }}"
-    password: "{{ wazuh_indexer_admin_password }}"
+    user: "admin"
+    password: "admin"
     force_basic_auth: true
     validate_certs: false
     status_code: [200]
@@ -74,4 +74,10 @@
   until: indexer_health.status == 200
   retries: 30
   delay: 10
+  run_once: true
+
+- name: Display cluster health
+  ansible.builtin.debug:
+    msg: "Cluster status: {{ (indexer_health.content | from_json).status | default('unknown') }}"
+  when: indexer_health is defined and indexer_health.status == 200
   run_once: true
