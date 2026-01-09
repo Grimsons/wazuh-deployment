@@ -61,7 +61,8 @@
   ansible.builtin.include_tasks: security_init.yml
   when: indexer_cluster_initial_master | default(false)
 
-- name: Wait for Wazuh Indexer to be ready
+# Verify indexer is responding with default credentials before changing password
+- name: Wait for Wazuh Indexer security to be ready
   ansible.builtin.uri:
     url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_cluster/health"
     user: "admin"
@@ -70,14 +71,41 @@
     validate_certs: false
     status_code: [200]
     return_content: true
-  register: indexer_health
-  until: indexer_health.status == 200
+  register: indexer_health_initial
+  until: indexer_health_initial.status == 200
   retries: 30
   delay: 10
   run_once: true
 
+# Configure secure admin password (run only on first master after security init)
+- name: Configure secure admin password
+  ansible.builtin.include_tasks: security_users.yml
+  when: indexer_cluster_initial_master | default(false)
+
+# Final health check with new password
+- name: Wait for Wazuh Indexer to be ready with new credentials
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_cluster/health"
+    user: "admin"
+    password: "{{ wazuh_admin_password }}"
+    force_basic_auth: true
+    validate_certs: false
+    status_code: [200]
+    return_content: true
+  register: indexer_health
+  until: indexer_health.status == 200
+  retries: 10
+  delay: 5
+  run_once: true
+  when: wazuh_admin_password is defined
+
 - name: Display cluster health
   ansible.builtin.debug:
-    msg: "Cluster status: {{ (indexer_health.content | from_json).status | default('unknown') }}"
+    msg: |
+      ═══════════════════════════════════════════════════════════════
+      Wazuh Indexer is ready!
+      Cluster status: {{ (indexer_health.content | from_json).status | default('unknown') }}
+      Credentials saved to: {{ playbook_dir }}/credentials/indexer_admin_password.txt
+      ═══════════════════════════════════════════════════════════════
   when: indexer_health is defined and indexer_health.status == 200
   run_once: true

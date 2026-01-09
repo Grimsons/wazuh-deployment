@@ -1,0 +1,113 @@
+---
+# Wazuh Indexer - Security Users Configuration
+# This configures the admin user with a secure random password
+
+- name: Generate random admin password
+  ansible.builtin.set_fact:
+    wazuh_indexer_admin_password_generated: "{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits,punctuation') | regex_replace('[\"\\\\]', '') }}"
+  run_once: true
+  when: wazuh_indexer_admin_password_generated is not defined
+
+- name: Set admin password (use provided or generated)
+  ansible.builtin.set_fact:
+    wazuh_admin_password: "{{ wazuh_indexer_admin_password | default(wazuh_indexer_admin_password_generated) }}"
+  run_once: true
+
+- name: Display generated password location notice
+  ansible.builtin.debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════════
+      IMPORTANT: Admin password has been generated/configured.
+      The password will be saved to: {{ playbook_dir }}/credentials/indexer_admin_password.txt
+      ═══════════════════════════════════════════════════════════════
+  run_once: true
+
+- name: Create credentials directory on controller
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/credentials"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Save admin password to file on controller
+  ansible.builtin.copy:
+    content: |
+      # Wazuh Indexer Admin Credentials
+      # Generated: {{ ansible_date_time.iso8601 }}
+      # Host: {{ inventory_hostname }}
+
+      Username: admin
+      Password: {{ wazuh_admin_password }}
+
+      URL: https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}
+
+      # IMPORTANT: Keep this file secure and delete after noting the password!
+    dest: "{{ playbook_dir }}/credentials/indexer_admin_password.txt"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Hash the admin password using OpenSearch security tools
+  ansible.builtin.shell: |
+    export JAVA_HOME=/usr/share/wazuh-indexer/jdk
+    /usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p '{{ wazuh_admin_password }}'
+  become: true
+  register: password_hash
+  changed_when: false
+  no_log: true
+
+- name: Extract hashed password
+  ansible.builtin.set_fact:
+    admin_password_hash: "{{ password_hash.stdout_lines | last }}"
+  no_log: true
+
+- name: Backup original internal_users.yml
+  ansible.builtin.copy:
+    src: /etc/wazuh-indexer/opensearch-security/internal_users.yml
+    dest: /etc/wazuh-indexer/opensearch-security/internal_users.yml.bak
+    remote_src: true
+    mode: '0600'
+  become: true
+
+- name: Update admin user password in internal_users.yml
+  ansible.builtin.replace:
+    path: /etc/wazuh-indexer/opensearch-security/internal_users.yml
+    regexp: '^(\s*admin:\s*\n\s*hash:\s*)"[^"]*"'
+    replace: '\1"{{ admin_password_hash }}"'
+  become: true
+  no_log: true
+
+- name: Alternative - Update admin password using lineinfile if replace didn't work
+  ansible.builtin.lineinfile:
+    path: /etc/wazuh-indexer/opensearch-security/internal_users.yml
+    regexp: '^\s*hash:\s*"\$2[aby]\$.*"'
+    line: '  hash: "{{ admin_password_hash }}"'
+    insertafter: '^admin:'
+  become: true
+  no_log: true
+
+- name: Apply security configuration with new password
+  ansible.builtin.shell: |
+    export JAVA_HOME=/usr/share/wazuh-indexer/jdk
+    /usr/share/wazuh-indexer/plugins/opensearch-security/tools/securityadmin.sh \
+      -cd /etc/wazuh-indexer/opensearch-security \
+      -cacert {{ wazuh_indexer_certs_path }}/root-ca.pem \
+      -cert {{ wazuh_indexer_certs_path }}/admin.pem \
+      -key {{ wazuh_indexer_certs_path }}/admin-key.pem \
+      -h 127.0.0.1 \
+      -p {{ wazuh_indexer_http_port }} \
+      -icl -nhnv
+  become: true
+  register: security_update
+  changed_when: security_update.rc == 0
+  run_once: true
+
+- name: Display security update result
+  ansible.builtin.debug:
+    msg: "Security configuration updated successfully with new admin password"
+  when: security_update.rc == 0
+  run_once: true
