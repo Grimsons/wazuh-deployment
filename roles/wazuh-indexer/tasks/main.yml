@@ -1,0 +1,59 @@
+---
+# Wazuh Indexer Role - Main Tasks
+
+- name: Include OS-specific variables
+  ansible.builtin.include_vars: "{{ item }}"
+  with_first_found:
+    - "{{ ansible_distribution }}-{{ ansible_distribution_major_version }}.yml"
+    - "{{ ansible_distribution }}.yml"
+    - "{{ ansible_os_family }}.yml"
+    - "default.yml"
+  ignore_errors: true
+
+- name: Install prerequisites
+  ansible.builtin.include_tasks: prerequisites.yml
+
+- name: Configure Wazuh repository
+  ansible.builtin.include_tasks: repository.yml
+
+- name: Install Wazuh Indexer
+  ansible.builtin.include_tasks: install.yml
+
+- name: Configure certificates
+  ansible.builtin.include_tasks: certificates.yml
+
+- name: Configure Wazuh Indexer
+  ansible.builtin.include_tasks: configure.yml
+
+- name: Configure JVM settings
+  ansible.builtin.include_tasks: jvm.yml
+
+- name: Configure firewall
+  ansible.builtin.include_tasks: firewall.yml
+  when: wazuh_configure_firewall | default(true)
+
+- name: Start and enable Wazuh Indexer service
+  ansible.builtin.service:
+    name: "{{ wazuh_indexer_service_name }}"
+    state: started
+    enabled: true
+  become: true
+
+- name: Initialize security (run only on first master)
+  ansible.builtin.include_tasks: security_init.yml
+  when: indexer_cluster_initial_master | default(false)
+
+- name: Wait for Wazuh Indexer to be ready
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_cluster/health"
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: false
+    status_code: [200]
+    return_content: true
+  register: indexer_health
+  until: indexer_health.status == 200
+  retries: 30
+  delay: 10
+  run_once: true

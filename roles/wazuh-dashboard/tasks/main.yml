@@ -1,0 +1,47 @@
+---
+# Wazuh Dashboard Role - Main Tasks
+
+- name: Include OS-specific variables
+  ansible.builtin.include_vars: "{{ item }}"
+  with_first_found:
+    - "{{ ansible_distribution }}-{{ ansible_distribution_major_version }}.yml"
+    - "{{ ansible_distribution }}.yml"
+    - "{{ ansible_os_family }}.yml"
+    - "default.yml"
+  ignore_errors: true
+
+- name: Install prerequisites
+  ansible.builtin.include_tasks: prerequisites.yml
+
+- name: Configure Wazuh repository
+  ansible.builtin.include_tasks: repository.yml
+
+- name: Install Wazuh Dashboard
+  ansible.builtin.include_tasks: install.yml
+
+- name: Configure certificates
+  ansible.builtin.include_tasks: certificates.yml
+
+- name: Configure Wazuh Dashboard
+  ansible.builtin.include_tasks: configure.yml
+
+- name: Configure firewall
+  ansible.builtin.include_tasks: firewall.yml
+  when: wazuh_configure_firewall | default(true)
+
+- name: Start and enable Wazuh Dashboard service
+  ansible.builtin.service:
+    name: "{{ wazuh_dashboard_service_name }}"
+    state: started
+    enabled: true
+  become: true
+
+- name: Wait for Wazuh Dashboard to be ready
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/app/login"
+    validate_certs: false
+    status_code: [200, 302]
+  register: dashboard_health
+  until: dashboard_health.status in [200, 302]
+  retries: 30
+  delay: 10

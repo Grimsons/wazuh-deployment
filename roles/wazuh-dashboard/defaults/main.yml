@@ -1,0 +1,28 @@
+---
+# Wazuh Dashboard Role - Default Variables
+
+# Package settings
+wazuh_dashboard_package_name: "wazuh-dashboard"
+wazuh_dashboard_service_name: "wazuh-dashboard"
+
+# Dashboard configuration
+wazuh_dashboard_config_path: /etc/wazuh-dashboard
+wazuh_dashboard_data_path: /var/lib/wazuh-dashboard
+wazuh_dashboard_log_path: /var/log/wazuh-dashboard
+
+# Network settings
+wazuh_dashboard_port: 443
+wazuh_dashboard_host: "0.0.0.0"
+
+# SSL/TLS settings
+wazuh_dashboard_ssl_enabled: true
+
+# Session settings
+wazuh_dashboard_session_timeout: 60
+
+# Security settings
+wazuh_dashboard_admin_user: "admin"
+wazuh_dashboard_admin_password: "admin"
+
+# Paths
+wazuh_dashboard_certs_path: /etc/wazuh-dashboard/certs

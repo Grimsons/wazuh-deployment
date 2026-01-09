@@ -1,0 +1,23 @@
+---
+# Wazuh Agent Role - Main Tasks
+
+- name: Include OS-specific variables
+  ansible.builtin.include_vars: "{{ item }}"
+  with_first_found:
+    - "{{ ansible_distribution }}-{{ ansible_distribution_major_version }}.yml"
+    - "{{ ansible_distribution }}.yml"
+    - "{{ ansible_os_family }}.yml"
+    - "default.yml"
+  ignore_errors: true
+
+- name: Include Linux tasks
+  ansible.builtin.include_tasks: linux.yml
+  when: ansible_system == 'Linux'
+
+- name: Include Windows tasks
+  ansible.builtin.include_tasks: windows.yml
+  when: ansible_os_family == 'Windows'
+
+- name: Include macOS tasks
+  ansible.builtin.include_tasks: macos.yml
+  when: ansible_system == 'Darwin'
