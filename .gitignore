@@ -14,13 +14,15 @@ inventory/hosts.yml
 group_vars/all.yml
 ansible.cfg
 
-# Generated certificates
-files/certs/
-certs/
+# Generated certificates (keep directory structure, ignore cert files)
+files/certs/*.pem
+files/certs/*.crt
+files/certs/*.csr
+files/certs/*.srl
+/certs/
 *.crt
 *.csr
 *.srl
-*.pem
 
 # Ansible runtime files
 *.retry

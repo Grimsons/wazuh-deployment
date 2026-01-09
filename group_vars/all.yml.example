@@ -68,15 +68,22 @@ wazuh_dashboard_nodes:
 # ═══════════════════════════════════════════════════════════════
 # SSL/TLS Configuration
 # ═══════════════════════════════════════════════════════════════
-wazuh_generate_certs: true
 
-# If using your own certificates:
-# wazuh_generate_certs: false
-# wazuh_ca_cert_path: "/path/to/ca.pem"
-# wazuh_ca_key_path: "/path/to/ca-key.pem"
+# Local path where certificates are stored (source for Ansible copy)
+# Run ./generate-certs.sh to create certificates in this directory
+wazuh_certs_path: "files/certs"
 
-# Certificate paths (on target hosts)
-wazuh_certs_path: /etc/wazuh-indexer/certs
+# Certificate paths on target hosts (destination)
+wazuh_indexer_certs_path: /etc/wazuh-indexer/certs
+wazuh_manager_certs_path: /var/ossec/etc/certs
+wazuh_dashboard_certs_path: /etc/wazuh-dashboard/certs
+
+# If using your own certificates, place them in files/certs/ with these names:
+#   - root-ca.pem, root-ca-key.pem (Root CA)
+#   - admin.pem, admin-key.pem (Admin certificate)
+#   - indexer-1.pem, indexer-1-key.pem (Indexer certificate, name must match indexer_node_name)
+#   - manager-1.pem, manager-1-key.pem (Manager certificate, name must match manager_node_name)
+#   - dashboard.pem, dashboard-key.pem (Dashboard certificate)
 
 # ═══════════════════════════════════════════════════════════════
 # Feature Toggles
