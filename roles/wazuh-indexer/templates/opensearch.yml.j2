@@ -43,11 +43,11 @@ plugins.security.ssl.http.pemtrustedcas_filepath: certs/root-ca.pem
 
 plugins.security.nodes_dn:
 {% for node in wazuh_indexer_nodes %}
-  - CN={{ node.name }},OU=Wazuh,O={{ organization_name | default('Wazuh') }},L=California,C=US
+  - CN={{ node.name }},OU=Wazuh,O=Wazuh,L=California,ST=California,C=US
 {% endfor %}
 
 plugins.security.authcz.admin_dn:
-  - CN=admin,OU=Wazuh,O={{ organization_name | default('Wazuh') }},L=California,C=US
+  - CN=admin,OU=Wazuh,O=Wazuh,L=California,ST=California,C=US
 
 plugins.security.allow_unsafe_democertificates: false
 plugins.security.allow_default_init_securityindex: true
