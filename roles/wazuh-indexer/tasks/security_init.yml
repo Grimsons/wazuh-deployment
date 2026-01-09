@@ -8,14 +8,62 @@
     timeout: 120
   become: true
 
-- name: Initialize Wazuh Indexer security
+- name: Check if admin certificates exist
+  ansible.builtin.stat:
+    path: "{{ wazuh_indexer_certs_path }}/admin.pem"
+  register: admin_cert_check
+  become: true
+
+- name: Check if admin key exists
+  ansible.builtin.stat:
+    path: "{{ wazuh_indexer_certs_path }}/admin-key.pem"
+  register: admin_key_check
+  become: true
+
+- name: Display certificate paths for debugging
+  ansible.builtin.debug:
+    msg: |
+      Certificates path: {{ wazuh_indexer_certs_path }}
+      admin.pem exists: {{ admin_cert_check.stat.exists | default(false) }}
+      admin-key.pem exists: {{ admin_key_check.stat.exists | default(false) }}
+
+- name: Fail if admin certificates are missing
+  ansible.builtin.fail:
+    msg: "Admin certificates not found in {{ wazuh_indexer_certs_path }}. Ensure certificates.yml ran successfully."
+  when: not (admin_cert_check.stat.exists | default(false)) or not (admin_key_check.stat.exists | default(false))
+
+# Try the built-in script first
+- name: Try built-in security init script
   ansible.builtin.command: /usr/share/wazuh-indexer/bin/indexer-security-init.sh
   become: true
-  register: security_init
-  changed_when: security_init.rc == 0
+  register: security_init_builtin
+  changed_when: security_init_builtin.rc == 0
+  failed_when: false
   run_once: true
+
+# If built-in script fails, run securityadmin manually
+- name: Initialize Wazuh Indexer security manually
+  ansible.builtin.shell: |
+    export JAVA_HOME=/usr/share/wazuh-indexer/jdk
+    runuser wazuh-indexer --shell=/bin/bash --command="/usr/share/wazuh-indexer/plugins/opensearch-security/tools/securityadmin.sh \
+      -cd /etc/wazuh-indexer/opensearch-security \
+      -cacert {{ wazuh_indexer_certs_path }}/root-ca.pem \
+      -cert {{ wazuh_indexer_certs_path }}/admin.pem \
+      -key {{ wazuh_indexer_certs_path }}/admin-key.pem \
+      -h 127.0.0.1 \
+      -p {{ wazuh_indexer_http_port }} \
+      -icl -nhnv"
+  become: true
+  register: security_init_manual
+  changed_when: security_init_manual.rc == 0
+  when: security_init_builtin.rc != 0
+  run_once: true
+
+- name: Set security init result
+  ansible.builtin.set_fact:
+    security_init: "{{ security_init_builtin if security_init_builtin.rc == 0 else security_init_manual }}"
 
 - name: Display security initialization result
   ansible.builtin.debug:
-    var: security_init.stdout_lines
+    msg: "{{ security_init.stdout_lines | default(['Security initialization completed']) }}"
   when: security_init is defined
