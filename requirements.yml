@@ -4,3 +4,6 @@ collections:
   - name: community.docker
   - name: ansible.windows
   - name: community.windows
+  - name: ansible.posix
+  - name: ansible.utils
+  - name: ansible.netcommon

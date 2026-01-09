@@ -13,7 +13,32 @@
   changed_when: false
   failed_when: false
 
-# Install UFW on Debian/Ubuntu if not present
+# Auto-detect network subnet from default interface
+- name: Get default network interface
+  ansible.builtin.set_fact:
+    default_interface: "{{ ansible_default_ipv4.interface | default('eth0') }}"
+    default_ip: "{{ ansible_default_ipv4.address | default('0.0.0.0') }}"
+    default_netmask: "{{ ansible_default_ipv4.netmask | default('255.255.255.0') }}"
+    default_network: "{{ ansible_default_ipv4.network | default('0.0.0.0') }}"
+
+- name: Calculate CIDR prefix from netmask
+  ansible.builtin.set_fact:
+    cidr_prefix: "{{ (default_netmask | ansible.utils.ipaddr('prefix')) | default(24) }}"
+
+- name: Set auto-detected subnet
+  ansible.builtin.set_fact:
+    auto_detected_subnet: "{{ default_network }}/{{ cidr_prefix }}"
+
+- name: Display detected network
+  ansible.builtin.debug:
+    msg: "Auto-detected subnet: {{ auto_detected_subnet }} (Interface: {{ default_interface }}, IP: {{ default_ip }})"
+
+# Use auto-detected subnet if not explicitly configured
+- name: Set allowed networks (use auto-detect if not configured)
+  ansible.builtin.set_fact:
+    effective_cluster_networks: "{{ wazuh_allowed_cluster_networks | default([auto_detected_subnet]) }}"
+
+# Install UFW on Debian/Ubuntu if not present and no firewalld
 - name: Install UFW (Debian/Ubuntu)
   ansible.builtin.apt:
     name: ufw
@@ -40,14 +65,38 @@
   when: ufw_check.rc == 0
   become: true
 
-- name: Enable UFW
-  community.general.ufw:
-    state: enabled
+# Allow SSH first before enabling UFW to prevent lockout
+- name: Pre-enable - Allow SSH port via iptables (prevent lockout)
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: 22
+    jump: ACCEPT
   become: true
   when:
     - ufw_check.rc == 0
     - ufw_status.stdout is defined
     - "'inactive' in ufw_status.stdout.lower()"
+  ignore_errors: true
+
+- name: Enable UFW with default deny incoming
+  community.general.ufw:
+    state: enabled
+    policy: deny
+    direction: incoming
+  become: true
+  when:
+    - ufw_check.rc == 0
+    - ufw_status.stdout is defined
+    - "'inactive' in ufw_status.stdout.lower()"
+
+- name: Set UFW default allow outgoing
+  community.general.ufw:
+    policy: allow
+    direction: outgoing
+  become: true
+  when:
+    - ufw_check.rc == 0
 
 - name: Re-check UFW status after enabling
   ansible.builtin.command: ufw status
@@ -64,26 +113,30 @@
     - ufw_status.stdout is defined
     - "'active' in ufw_status.stdout.lower()"
   block:
-    - name: Allow SSH port (prevent lockout)
+    - name: Allow SSH from anywhere
       community.general.ufw:
         rule: allow
         port: "22"
         proto: tcp
       become: true
 
-    - name: Allow Wazuh Indexer HTTP port
+    - name: Allow Wazuh Indexer HTTP port from cluster networks
       community.general.ufw:
         rule: allow
         port: "{{ wazuh_indexer_http_port }}"
         proto: tcp
+        from_ip: "{{ item }}"
       become: true
+      loop: "{{ effective_cluster_networks }}"
 
-    - name: Allow Wazuh Indexer transport port
+    - name: Allow Wazuh Indexer transport port from cluster networks
       community.general.ufw:
         rule: allow
-        port: "{{ wazuh_indexer_transport_port }}"
+        port: "{{ wazuh_indexer_transport_port | default(9300) }}"
         proto: tcp
+        from_ip: "{{ item }}"
       become: true
+      loop: "{{ effective_cluster_networks }}"
 
 # Firewalld (RHEL/CentOS)
 - name: Configure firewalld rules
@@ -96,18 +149,28 @@
         enabled: true
       become: true
 
+    - name: Allow SSH
+      ansible.posix.firewalld:
+        service: ssh
+        permanent: true
+        state: enabled
+      become: true
+
     - name: Allow Wazuh Indexer HTTP port
       ansible.posix.firewalld:
         port: "{{ wazuh_indexer_http_port }}/tcp"
         permanent: true
         state: enabled
       become: true
-      notify: reload firewalld
 
     - name: Allow Wazuh Indexer transport port
       ansible.posix.firewalld:
-        port: "{{ wazuh_indexer_transport_port }}/tcp"
+        port: "{{ wazuh_indexer_transport_port | default(9300) }}/tcp"
         permanent: true
         state: enabled
       become: true
-      notify: reload firewalld
+
+    - name: Reload firewalld
+      ansible.builtin.command: firewall-cmd --reload
+      become: true
+      changed_when: true
