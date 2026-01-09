@@ -39,6 +39,24 @@
     enabled: true
   become: true
 
+# Flush handlers to ensure indexer restarts with new config before security init
+- name: Flush handlers before security initialization
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure Wazuh Indexer is running with latest config
+  ansible.builtin.service:
+    name: "{{ wazuh_indexer_service_name }}"
+    state: restarted
+  become: true
+  changed_when: false
+
+- name: Wait for Indexer to be ready after restart
+  ansible.builtin.wait_for:
+    port: "{{ wazuh_indexer_http_port }}"
+    delay: 5
+    timeout: 120
+  become: true
+
 - name: Initialize security (run only on first master)
   ansible.builtin.include_tasks: security_init.yml
   when: indexer_cluster_initial_master | default(false)
