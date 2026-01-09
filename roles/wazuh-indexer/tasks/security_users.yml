@@ -30,6 +30,8 @@
   delegate_to: localhost
   become: false
   run_once: true
+  vars:
+    ansible_become: false
 
 - name: Save admin password to file on controller
   ansible.builtin.copy:
@@ -50,6 +52,8 @@
   become: false
   run_once: true
   no_log: true
+  vars:
+    ansible_become: false
 
 - name: Hash the admin password using OpenSearch security tools
   ansible.builtin.shell: |
