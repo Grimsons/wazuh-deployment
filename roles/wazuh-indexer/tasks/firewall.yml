@@ -13,10 +13,64 @@
   changed_when: false
   failed_when: false
 
+# Install UFW on Debian/Ubuntu if not present
+- name: Install UFW (Debian/Ubuntu)
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+    update_cache: true
+  become: true
+  when:
+    - ansible_os_family == 'Debian'
+    - ufw_check.rc != 0
+    - firewalld_check.rc != 0
+
+- name: Re-check if ufw is installed after installation
+  ansible.builtin.command: which ufw
+  register: ufw_check
+  changed_when: false
+  failed_when: false
+  when: ansible_os_family == 'Debian'
+
+- name: Check if UFW is active
+  ansible.builtin.command: ufw status
+  register: ufw_status
+  changed_when: false
+  failed_when: false
+  when: ufw_check.rc == 0
+  become: true
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+  become: true
+  when:
+    - ufw_check.rc == 0
+    - ufw_status.stdout is defined
+    - "'inactive' in ufw_status.stdout.lower()"
+
+- name: Re-check UFW status after enabling
+  ansible.builtin.command: ufw status
+  register: ufw_status
+  changed_when: false
+  failed_when: false
+  when: ufw_check.rc == 0
+  become: true
+
 # UFW (Debian/Ubuntu)
 - name: Configure UFW rules
-  when: ufw_check.rc == 0
+  when:
+    - ufw_check.rc == 0
+    - ufw_status.stdout is defined
+    - "'active' in ufw_status.stdout.lower()"
   block:
+    - name: Allow SSH port (prevent lockout)
+      community.general.ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+      become: true
+
     - name: Allow Wazuh Indexer HTTP port
       community.general.ufw:
         rule: allow
@@ -35,6 +89,13 @@
 - name: Configure firewalld rules
   when: firewalld_check.rc == 0
   block:
+    - name: Ensure firewalld is running
+      ansible.builtin.service:
+        name: firewalld
+        state: started
+        enabled: true
+      become: true
+
     - name: Allow Wazuh Indexer HTTP port
       ansible.posix.firewalld:
         port: "{{ wazuh_indexer_http_port }}/tcp"
