@@ -4,6 +4,9 @@ keys/
 *_key
 *_key.pub
 
+# Generated credentials (SENSITIVE - never commit!)
+credentials/
+
 # Client preparation package (contains SSH public key)
 client-prep/
 wazuh-client-prep.tar.gz

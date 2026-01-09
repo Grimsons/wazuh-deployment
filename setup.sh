@@ -17,8 +17,9 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Default values
-DEFAULT_WAZUH_VERSION="4.9.0"
+DEFAULT_WAZUH_VERSION="4.14.1"
 DEFAULT_INDEXER_HTTP_PORT="9200"
+DEFAULT_INDEXER_TRANSPORT_PORT="9300"
 DEFAULT_DASHBOARD_PORT="443"
 DEFAULT_MANAGER_API_PORT="55000"
 DEFAULT_AGENT_PORT="1514"
@@ -236,34 +237,44 @@ main() {
     # ═══════════════════════════════════════════════════════════════
     print_section "Security Configuration"
 
-    print_info "Setting up authentication credentials..."
+    print_info "All passwords are auto-generated during deployment for security."
+    print_info "Credentials are saved to ./credentials/ directory."
+    echo
+    print_info "Generated credentials files:"
+    print_info "  - ./credentials/indexer_admin_password.txt"
+    print_info "  - ./credentials/api_password.txt"
     echo
 
-    # Generate default passwords
-    DEFAULT_ADMIN_PASS=$(generate_password)
-    DEFAULT_API_PASS=$(generate_password)
-    DEFAULT_INDEXER_PASS=$(generate_password)
+    prompt_yes_no "Provide custom passwords instead of auto-generating?" "no" "CUSTOM_PASSWORDS"
 
-    prompt_with_default "Wazuh API admin username" "wazuh" "API_USER"
-    prompt_with_default "Wazuh API admin password" "$DEFAULT_API_PASS" "API_PASSWORD" "true"
+    if [ "$CUSTOM_PASSWORDS" = "true" ]; then
+        prompt_with_default "Wazuh API admin username" "wazuh" "API_USER"
+        prompt_with_default "Wazuh API admin password" "" "API_PASSWORD" "true"
+        prompt_with_default "Indexer admin password" "" "INDEXER_ADMIN_PASSWORD" "true"
+    else
+        API_USER="wazuh"
+        API_PASSWORD=""
+        INDEXER_ADMIN_PASSWORD=""
+        print_info "All passwords will be auto-generated during deployment"
+    fi
 
-    prompt_with_default "Indexer admin username" "admin" "INDEXER_ADMIN_USER"
-    prompt_with_default "Indexer admin password" "$DEFAULT_INDEXER_PASS" "INDEXER_ADMIN_PASSWORD" "true"
-
-    prompt_with_default "Dashboard admin username" "admin" "DASHBOARD_ADMIN_USER"
-    prompt_with_default "Dashboard admin password" "$DEFAULT_ADMIN_PASS" "DASHBOARD_ADMIN_PASSWORD" "true"
+    # Indexer admin username is always 'admin' (OpenSearch default)
+    INDEXER_ADMIN_USER="admin"
 
     # ═══════════════════════════════════════════════════════════════
     # SSL/TLS CONFIGURATION
     # ═══════════════════════════════════════════════════════════════
     print_section "SSL/TLS Configuration"
 
+    print_info "Certificates are stored locally in ./files/certs/ and deployed to targets"
+    echo
+
     prompt_yes_no "Generate self-signed certificates?" "yes" "GENERATE_CERTS"
 
     if [ "$GENERATE_CERTS" = "false" ]; then
-        print_info "You will need to provide your own certificates."
-        prompt_with_default "Path to CA certificate" "/etc/wazuh/certs/ca.pem" "CA_CERT_PATH"
-        prompt_with_default "Path to CA private key" "/etc/wazuh/certs/ca-key.pem" "CA_KEY_PATH"
+        print_info "You will need to provide your own certificates in ./files/certs/"
+        print_info "Required files: root-ca.pem, root-ca-key.pem, admin.pem, admin-key.pem"
+        print_info "Plus certificates for each node (indexer.pem, manager.pem, dashboard.pem, etc.)"
     fi
 
     # ═══════════════════════════════════════════════════════════════
@@ -411,9 +422,24 @@ organization_name: "${ORG_NAME}"
 # ═══════════════════════════════════════════════════════════════
 wazuh_indexer_cluster_name: "${INDEXER_CLUSTER_NAME}"
 wazuh_indexer_http_port: ${INDEXER_HTTP_PORT}
+wazuh_indexer_transport_port: ${DEFAULT_INDEXER_TRANSPORT_PORT}
 wazuh_indexer_heap_size: "${INDEXER_HEAP_SIZE}"
-wazuh_indexer_admin_user: "${INDEXER_ADMIN_USER}"
+EOF
+
+    # Only add custom password if provided
+    if [ -n "$INDEXER_ADMIN_PASSWORD" ]; then
+        cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
+# Custom admin password (otherwise auto-generated)
 wazuh_indexer_admin_password: "${INDEXER_ADMIN_PASSWORD}"
+EOF
+    else
+        cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
+# Admin password is auto-generated during deployment
+# Credentials saved to: ./credentials/indexer_admin_password.txt
+EOF
+    fi
+
+    cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
 
 # Indexer node list for cluster configuration
 wazuh_indexer_nodes:
@@ -433,8 +459,19 @@ EOF
 wazuh_manager_api_port: ${MANAGER_API_PORT}
 wazuh_manager_agent_port: ${AGENT_PORT}
 wazuh_api_user: "${API_USER}"
+EOF
+
+    # Only add custom API password if provided
+    if [ -n "$API_PASSWORD" ]; then
+        cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
 wazuh_api_password: "${API_PASSWORD}"
 EOF
+    else
+        cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
+# API password is auto-generated during deployment
+# Credentials saved to: ./credentials/api_password.txt
+EOF
+    fi
 
     if [ $MANAGER_COUNT -gt 1 ]; then
         cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
@@ -466,8 +503,7 @@ EOF
 # Wazuh Dashboard Settings
 # ═══════════════════════════════════════════════════════════════
 wazuh_dashboard_port: ${DASHBOARD_PORT}
-wazuh_dashboard_admin_user: "${DASHBOARD_ADMIN_USER}"
-wazuh_dashboard_admin_password: "${DASHBOARD_ADMIN_PASSWORD}"
+# Dashboard uses the indexer admin credentials (admin user)
 
 # Dashboard node list
 wazuh_dashboard_nodes:
@@ -482,20 +518,14 @@ EOF
 # ═══════════════════════════════════════════════════════════════
 # SSL/TLS Configuration
 # ═══════════════════════════════════════════════════════════════
-wazuh_generate_certs: ${GENERATE_CERTS}
-EOF
 
-    if [ "$GENERATE_CERTS" = "false" ]; then
-        cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
-wazuh_ca_cert_path: "${CA_CERT_PATH}"
-wazuh_ca_key_path: "${CA_KEY_PATH}"
-EOF
-    fi
+# Local path where certificates are stored (source for Ansible copy)
+wazuh_certs_path: "files/certs"
 
-    cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
-
-# Certificate paths (on target hosts)
-wazuh_certs_path: /etc/wazuh-indexer/certs
+# Certificate paths on target hosts (destination)
+wazuh_indexer_certs_path: /etc/wazuh-indexer/certs
+wazuh_manager_certs_path: /var/ossec/etc/certs
+wazuh_dashboard_certs_path: /etc/wazuh-dashboard/certs
 
 # ═══════════════════════════════════════════════════════════════
 # Feature Toggles
@@ -507,10 +537,18 @@ wazuh_log_collection_enabled: ${ENABLE_LOG_COLLECTION}
 wazuh_active_response_enabled: ${ENABLE_ACTIVE_RESPONSE}
 
 # ═══════════════════════════════════════════════════════════════
-# System Settings
+# Network/Firewall Settings
 # ═══════════════════════════════════════════════════════════════
-# Firewall configuration
+# Firewall configuration (installs and enables UFW/firewalld if needed)
 wazuh_configure_firewall: true
+
+# Network subnets are auto-detected from the host's default interface.
+# Uncomment below to override with specific subnets:
+# wazuh_allowed_agent_networks:
+#   - "10.0.0.0/24"
+#   - "192.168.1.0/24"
+# wazuh_allowed_cluster_networks:
+#   - "10.0.0.0/24"
 
 # SELinux configuration
 wazuh_configure_selinux: true
@@ -718,6 +756,15 @@ SELFEXTRACT_EOF
     fi
 
     echo
+    echo -e "${CYAN}Security:${NC}"
+    if [ "$CUSTOM_PASSWORDS" = "true" ]; then
+        echo "  - Using custom passwords"
+    else
+        echo "  - Passwords auto-generated during deployment"
+        echo "  - Credentials saved to: ./credentials/"
+    fi
+
+    echo
     echo -e "${CYAN}Features Enabled:${NC}"
     [ "$ENABLE_VULN_DETECTION" = "true" ] && echo "  - Vulnerability Detection"
     [ "$ENABLE_FIM" = "true" ] && echo "  - File Integrity Monitoring"
@@ -776,6 +823,17 @@ SELFEXTRACT_EOF
     echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-dashboard.yml${NC}"
     echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-agents.yml${NC}"
     echo
+
+    if [ "$CUSTOM_PASSWORDS" != "true" ]; then
+        if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
+            echo -e "6. After deployment, find your credentials:"
+        else
+            echo -e "5. After deployment, find your credentials:"
+        fi
+        echo -e "   ${CYAN}./credentials/indexer_admin_password.txt${NC} - Indexer/Dashboard admin"
+        echo -e "   ${CYAN}./credentials/api_password.txt${NC}          - Wazuh API password"
+        echo
+    fi
 
     if [ "$GENERATE_SSH_KEY" = "true" ]; then
         print_header "SSH Key Information"

@@ -1,12 +1,13 @@
 ---
 # Wazuh Ansible Deployment - Group Variables Example
 # Copy this file to all.yml and customize for your environment
-# DO NOT commit all.yml - it contains passwords and sensitive data!
+# Run ./setup.sh to interactively generate this file
+# DO NOT commit all.yml - it may contain sensitive data!
 
 # ═══════════════════════════════════════════════════════════════
 # General Settings
 # ═══════════════════════════════════════════════════════════════
-wazuh_version: "4.9.0"
+wazuh_version: "4.14.1"
 environment_name: "production"
 organization_name: "MyOrganization"
 
@@ -15,16 +16,19 @@ organization_name: "MyOrganization"
 # ═══════════════════════════════════════════════════════════════
 wazuh_indexer_cluster_name: "wazuh-cluster"
 wazuh_indexer_http_port: 9200
-wazuh_indexer_heap_size: "1g"
+wazuh_indexer_transport_port: 9300
+wazuh_indexer_heap_size: "4g"
 
-# CHANGE THESE! Use strong, unique passwords
-wazuh_indexer_admin_user: "admin"
-wazuh_indexer_admin_password: "CHANGE_ME_STRONG_PASSWORD_HERE"
+# Admin password is auto-generated during deployment by default
+# Credentials saved to: ./credentials/indexer_admin_password.txt
+# To use a custom password, uncomment and set:
+# wazuh_indexer_admin_password: "YourSecurePassword"
 
 # Indexer node list for cluster configuration
 wazuh_indexer_nodes:
   - name: indexer-1
     ip: 192.168.1.10
+  # Add more nodes for cluster:
   # - name: indexer-2
   #   ip: 192.168.1.11
   # - name: indexer-3
@@ -35,20 +39,23 @@ wazuh_indexer_nodes:
 # ═══════════════════════════════════════════════════════════════
 wazuh_manager_api_port: 55000
 wazuh_manager_agent_port: 1514
-
-# CHANGE THESE! Use strong, unique passwords
 wazuh_api_user: "wazuh"
-wazuh_api_password: "CHANGE_ME_STRONG_PASSWORD_HERE"
 
-# Manager cluster settings (for multi-node)
+# API password is auto-generated during deployment by default
+# Credentials saved to: ./credentials/api_password.txt
+# To use a custom password, uncomment and set:
+# wazuh_api_password: "YourSecurePassword"
+
+# Manager cluster settings (for multi-node deployments)
 wazuh_manager_cluster_enabled: false
 # wazuh_manager_cluster_name: "wazuh-manager-cluster"
-# wazuh_manager_cluster_key: "CHANGE_ME_32_CHARACTER_KEY_HERE!"
+# wazuh_manager_cluster_key: "your-32-char-cluster-key-here!!"
 
 # Manager node list
 wazuh_manager_nodes:
   - name: manager-1
     ip: 192.168.1.20
+  # Add more nodes for cluster:
   # - name: manager-2
   #   ip: 192.168.1.21
 
@@ -56,10 +63,8 @@ wazuh_manager_nodes:
 # Wazuh Dashboard Settings
 # ═══════════════════════════════════════════════════════════════
 wazuh_dashboard_port: 443
-
-# CHANGE THESE! Use strong, unique passwords
-wazuh_dashboard_admin_user: "admin"
-wazuh_dashboard_admin_password: "CHANGE_ME_STRONG_PASSWORD_HERE"
+# Dashboard uses the indexer admin credentials (admin user)
+# No separate password configuration needed
 
 # Dashboard node list
 wazuh_dashboard_nodes:
@@ -95,10 +100,18 @@ wazuh_log_collection_enabled: true
 wazuh_active_response_enabled: true
 
 # ═══════════════════════════════════════════════════════════════
-# System Settings
+# Network/Firewall Settings
 # ═══════════════════════════════════════════════════════════════
-# Firewall configuration
+# Firewall configuration (installs and enables UFW/firewalld if needed)
 wazuh_configure_firewall: true
+
+# Network subnets are auto-detected from the host's default interface.
+# Uncomment below to override with specific subnets:
+# wazuh_allowed_agent_networks:
+#   - "10.0.0.0/24"
+#   - "192.168.1.0/24"
+# wazuh_allowed_cluster_networks:
+#   - "10.0.0.0/24"
 
 # SELinux configuration
 wazuh_configure_selinux: true

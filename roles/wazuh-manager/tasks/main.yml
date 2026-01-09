@@ -49,7 +49,7 @@
     url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}/security/user/authenticate"
     method: POST
     user: "{{ wazuh_api_user }}"
-    password: "{{ wazuh_api_password }}"
+    password: "wazuh"
     force_basic_auth: true
     validate_certs: false
     status_code: [200, 401]
@@ -58,3 +58,19 @@
   retries: 30
   delay: 10
   when: manager_node_type | default('master') == 'master'
+
+# Configure secure API password (run only on master)
+- name: Configure secure API password
+  ansible.builtin.include_tasks: security_users.yml
+  when: manager_node_type | default('master') == 'master'
+
+- name: Display Manager deployment result
+  ansible.builtin.debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════════
+      Wazuh Manager is ready!
+      API URL: https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}
+      Credentials saved to: {{ playbook_dir }}/credentials/api_password.txt
+      ═══════════════════════════════════════════════════════════════
+  when: manager_node_type | default('master') == 'master'
+  run_once: true

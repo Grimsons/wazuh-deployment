@@ -1,0 +1,119 @@
+---
+# Wazuh Manager - Security Users Configuration
+# This configures the API user with a secure random password
+
+- name: Generate random API password
+  ansible.builtin.set_fact:
+    wazuh_api_password_generated: "{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits') }}"
+  run_once: true
+  when: wazuh_api_password_generated is not defined
+
+- name: Set API password (use provided or generated)
+  ansible.builtin.set_fact:
+    wazuh_api_password: "{{ wazuh_api_password | default(wazuh_api_password_generated) }}"
+  run_once: true
+
+- name: Display generated password location notice
+  ansible.builtin.debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════════
+      IMPORTANT: API password has been generated/configured.
+      The password will be saved to: {{ playbook_dir }}/credentials/api_password.txt
+      ═══════════════════════════════════════════════════════════════
+  run_once: true
+
+- name: Create credentials directory on controller
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/credentials"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Authenticate with default credentials
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}/security/user/authenticate"
+    method: POST
+    user: "{{ wazuh_api_user }}"
+    password: "wazuh"
+    force_basic_auth: true
+    validate_certs: false
+    return_content: true
+  register: auth_response
+  run_once: true
+  no_log: true
+  failed_when: false
+
+- name: Extract JWT token
+  ansible.builtin.set_fact:
+    wazuh_jwt_token: "{{ (auth_response.content | from_json).data.token }}"
+  when: auth_response.status == 200
+  run_once: true
+  no_log: true
+
+- name: Get current user ID
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}/security/users"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ wazuh_jwt_token }}"
+    validate_certs: false
+    return_content: true
+  register: users_response
+  when: wazuh_jwt_token is defined
+  run_once: true
+
+- name: Find wazuh user ID
+  ansible.builtin.set_fact:
+    wazuh_user_id: "{{ (users_response.content | from_json).data.affected_items | selectattr('username', 'equalto', wazuh_api_user) | map(attribute='id') | first }}"
+  when: users_response is defined and users_response.status == 200
+  run_once: true
+
+- name: Update API user password
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}/security/users/{{ wazuh_user_id }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ wazuh_jwt_token }}"
+    body_format: json
+    body:
+      password: "{{ wazuh_api_password }}"
+    validate_certs: false
+    status_code: [200]
+  register: password_update
+  when: wazuh_user_id is defined
+  run_once: true
+  no_log: true
+
+- name: Save API password to file on controller
+  ansible.builtin.copy:
+    content: |
+      # Wazuh Manager API Credentials
+      # Generated: {{ ansible_date_time.iso8601 }}
+      # Host: {{ inventory_hostname }}
+
+      Username: {{ wazuh_api_user }}
+      Password: {{ wazuh_api_password }}
+
+      API URL: https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}
+
+      # IMPORTANT: Keep this file secure and delete after noting the password!
+    dest: "{{ playbook_dir }}/credentials/api_password.txt"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Display API password update result
+  ansible.builtin.debug:
+    msg: "API user password updated successfully"
+  when: password_update is defined and password_update.status == 200
+  run_once: true
+
+- name: Password was already changed (using current password)
+  ansible.builtin.debug:
+    msg: "API credentials already configured (default password was changed previously)"
+  when: auth_response.status != 200
+  run_once: true
