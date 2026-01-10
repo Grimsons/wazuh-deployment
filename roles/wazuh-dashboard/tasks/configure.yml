@@ -1,6 +1,77 @@
 ---
 # Wazuh Dashboard - Configuration
 
+# Read indexer admin password from credentials file if not already set
+- name: Check if indexer credentials file exists
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/credentials/indexer_admin_password.txt"
+  delegate_to: localhost
+  become: false
+  register: indexer_creds_file
+  vars:
+    ansible_become: false
+
+- name: Read indexer password from credentials file
+  ansible.builtin.slurp:
+    src: "{{ playbook_dir }}/credentials/indexer_admin_password.txt"
+  delegate_to: localhost
+  become: false
+  register: indexer_creds_content
+  when:
+    - indexer_creds_file.stat.exists
+    - wazuh_indexer_admin_password is not defined
+  vars:
+    ansible_become: false
+
+- name: Extract indexer password from credentials file
+  ansible.builtin.set_fact:
+    wazuh_indexer_admin_password: "{{ indexer_creds_content.content | b64decode | regex_search('Password: (.+)', '\\1') | first | trim }}"
+  when:
+    - indexer_creds_content is defined
+    - indexer_creds_content is not skipped
+    - indexer_creds_content.content is defined
+  no_log: true
+
+# Read Wazuh API password from credentials file if not already set
+- name: Check if API credentials file exists
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/credentials/api_password.txt"
+  delegate_to: localhost
+  become: false
+  register: api_creds_file
+  vars:
+    ansible_become: false
+
+- name: Read API password from credentials file
+  ansible.builtin.slurp:
+    src: "{{ playbook_dir }}/credentials/api_password.txt"
+  delegate_to: localhost
+  become: false
+  register: api_creds_content
+  when:
+    - api_creds_file.stat.exists
+    - wazuh_api_password is not defined
+  vars:
+    ansible_become: false
+
+- name: Extract API password from credentials file
+  ansible.builtin.set_fact:
+    wazuh_api_password: "{{ api_creds_content.content | b64decode | regex_search('Password: (.+)', '\\1') | first | trim }}"
+  when:
+    - api_creds_content is defined
+    - api_creds_content is not skipped
+    - api_creds_content.content is defined
+  no_log: true
+
+- name: Ensure log directory exists
+  ansible.builtin.file:
+    path: "{{ wazuh_dashboard_log_path }}"
+    state: directory
+    owner: wazuh-dashboard
+    group: wazuh-dashboard
+    mode: '0750'
+  become: true
+
 - name: Configure opensearch_dashboards.yml from template
   ansible.builtin.template:
     src: opensearch_dashboards.yml.j2
@@ -12,6 +83,33 @@
   become: true
   notify: restart wazuh-dashboard
 
+- name: Ensure dashboard data directory exists
+  ansible.builtin.file:
+    path: /usr/share/wazuh-dashboard/data
+    state: directory
+    owner: wazuh-dashboard
+    group: wazuh-dashboard
+    mode: '0750'
+  become: true
+
+- name: Ensure wazuh plugin data directory exists
+  ansible.builtin.file:
+    path: /usr/share/wazuh-dashboard/data/wazuh
+    state: directory
+    owner: wazuh-dashboard
+    group: wazuh-dashboard
+    mode: '0750'
+  become: true
+
+- name: Ensure wazuh plugin config directory exists
+  ansible.builtin.file:
+    path: /usr/share/wazuh-dashboard/data/wazuh/config
+    state: directory
+    owner: wazuh-dashboard
+    group: wazuh-dashboard
+    mode: '0750'
+  become: true
+
 - name: Configure wazuh.yml from template
   ansible.builtin.template:
     src: wazuh.yml.j2
@@ -21,6 +119,15 @@
     mode: '0640'
   become: true
   notify: restart wazuh-dashboard
+
+- name: Set correct ownership on wazuh plugin data directory
+  ansible.builtin.file:
+    path: /usr/share/wazuh-dashboard/data/wazuh
+    state: directory
+    owner: wazuh-dashboard
+    group: wazuh-dashboard
+    recurse: true
+  become: true
 
 - name: Set correct ownership on config directory
   ansible.builtin.file:

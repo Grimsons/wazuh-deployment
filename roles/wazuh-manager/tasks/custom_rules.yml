@@ -1,0 +1,199 @@
+---
+# Wazuh Manager - Custom Rules and Decoders Deployment
+# Deploys custom rules, decoders, and CDB lists from local files
+
+# Create directories for custom content
+- name: Ensure custom rules directory exists
+  ansible.builtin.file:
+    path: /var/ossec/etc/rules
+    state: directory
+    owner: wazuh
+    group: wazuh
+    mode: '0750'
+  become: true
+
+- name: Ensure custom decoders directory exists
+  ansible.builtin.file:
+    path: /var/ossec/etc/decoders
+    state: directory
+    owner: wazuh
+    group: wazuh
+    mode: '0750'
+  become: true
+
+- name: Ensure lists directory exists
+  ansible.builtin.file:
+    path: /var/ossec/etc/lists
+    state: directory
+    owner: wazuh
+    group: wazuh
+    mode: '0750'
+  become: true
+
+# Deploy custom rules
+- name: Check for custom rules files
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/files/custom_rules"
+  delegate_to: localhost
+  become: false
+  register: custom_rules_dir
+  vars:
+    ansible_become: false
+
+- name: Find custom rules files
+  ansible.builtin.find:
+    paths: "{{ playbook_dir }}/files/custom_rules"
+    patterns: "*.xml"
+  delegate_to: localhost
+  become: false
+  register: custom_rules_files
+  when: custom_rules_dir.stat.exists
+  vars:
+    ansible_become: false
+
+- name: Deploy custom rules
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "/var/ossec/etc/rules/{{ item.path | basename }}"
+    owner: wazuh
+    group: wazuh
+    mode: '0640'
+  loop: "{{ custom_rules_files.files | default([]) }}"
+  become: true
+  notify: restart wazuh-manager
+  when:
+    - custom_rules_dir.stat.exists
+    - custom_rules_files.files | length > 0
+
+# Deploy custom decoders
+- name: Check for custom decoders files
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/files/custom_decoders"
+  delegate_to: localhost
+  become: false
+  register: custom_decoders_dir
+  vars:
+    ansible_become: false
+
+- name: Find custom decoder files
+  ansible.builtin.find:
+    paths: "{{ playbook_dir }}/files/custom_decoders"
+    patterns: "*.xml"
+  delegate_to: localhost
+  become: false
+  register: custom_decoder_files
+  when: custom_decoders_dir.stat.exists
+  vars:
+    ansible_become: false
+
+- name: Deploy custom decoders
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "/var/ossec/etc/decoders/{{ item.path | basename }}"
+    owner: wazuh
+    group: wazuh
+    mode: '0640'
+  loop: "{{ custom_decoder_files.files | default([]) }}"
+  become: true
+  notify: restart wazuh-manager
+  when:
+    - custom_decoders_dir.stat.exists
+    - custom_decoder_files.files | length > 0
+
+# Deploy CDB lists (threat intelligence)
+- name: Check for CDB lists files
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/files/cdb_lists"
+  delegate_to: localhost
+  become: false
+  register: cdb_lists_dir
+  vars:
+    ansible_become: false
+
+- name: Find CDB list files
+  ansible.builtin.find:
+    paths: "{{ playbook_dir }}/files/cdb_lists"
+    patterns: "*"
+    file_type: file
+  delegate_to: localhost
+  become: false
+  register: cdb_list_files
+  when: cdb_lists_dir.stat.exists
+  vars:
+    ansible_become: false
+
+- name: Deploy CDB lists
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "/var/ossec/etc/lists/{{ item.path | basename }}"
+    owner: wazuh
+    group: wazuh
+    mode: '0640'
+  loop: "{{ cdb_list_files.files | default([]) }}"
+  become: true
+  notify: restart wazuh-manager
+  when:
+    - cdb_lists_dir.stat.exists
+    - cdb_list_files.files | length > 0
+
+# Deploy inline custom rules from variables
+- name: Deploy inline custom rules
+  ansible.builtin.copy:
+    content: |
+      <!-- Custom Rules -->
+      <!-- Deployed by Ansible -->
+      <group name="custom,">
+      {% for rule in wazuh_custom_rules | default([]) %}
+        <rule id="{{ rule.id }}" level="{{ rule.level }}">
+          {% if rule.if_sid is defined %}<if_sid>{{ rule.if_sid }}</if_sid>{% endif %}
+          {% if rule.if_group is defined %}<if_group>{{ rule.if_group }}</if_group>{% endif %}
+          {% if rule.match is defined %}<match>{{ rule.match }}</match>{% endif %}
+          {% if rule.regex is defined %}<regex>{{ rule.regex }}</regex>{% endif %}
+          {% if rule.srcip is defined %}<srcip>{{ rule.srcip }}</srcip>{% endif %}
+          {% if rule.dstip is defined %}<dstip>{{ rule.dstip }}</dstip>{% endif %}
+          {% if rule.user is defined %}<user>{{ rule.user }}</user>{% endif %}
+          {% if rule.program_name is defined %}<program_name>{{ rule.program_name }}</program_name>{% endif %}
+          {% if rule.hostname is defined %}<hostname>{{ rule.hostname }}</hostname>{% endif %}
+          {% if rule.time is defined %}<time>{{ rule.time }}</time>{% endif %}
+          {% if rule.weekday is defined %}<weekday>{{ rule.weekday }}</weekday>{% endif %}
+          {% if rule.frequency is defined %}<frequency>{{ rule.frequency }}</frequency>{% endif %}
+          {% if rule.timeframe is defined %}<timeframe>{{ rule.timeframe }}</timeframe>{% endif %}
+          {% if rule.same_source_ip is defined %}<same_source_ip />{% endif %}
+          {% if rule.same_user is defined %}<same_user />{% endif %}
+          {% if rule.options is defined %}
+          {% for opt in rule.options %}<options>{{ opt }}</options>{% endfor %}
+          {% endif %}
+          {% if rule.mitre is defined %}
+          <mitre>
+            {% for technique in rule.mitre.techniques | default([]) %}<id>{{ technique }}</id>{% endfor %}
+          </mitre>
+          {% endif %}
+          <description>{{ rule.description }}</description>
+          {% if rule.group is defined %}<group>{{ rule.group }}</group>{% endif %}
+        </rule>
+      {% endfor %}
+      </group>
+    dest: /var/ossec/etc/rules/local_rules.xml
+    owner: wazuh
+    group: wazuh
+    mode: '0640'
+  become: true
+  notify: restart wazuh-manager
+  when: wazuh_custom_rules is defined and wazuh_custom_rules | length > 0
+
+# Validate configuration after deploying custom content
+- name: Validate Wazuh configuration
+  ansible.builtin.command: /var/ossec/bin/wazuh-logtest-legacy -t
+  become: true
+  register: config_test
+  changed_when: false
+  failed_when: "'Configuration error' in config_test.stderr"
+
+- name: Display custom content deployment summary
+  ansible.builtin.debug:
+    msg: |
+      Custom content deployed:
+        - Rules files:    {{ custom_rules_files.files | default([]) | length }}
+        - Decoder files:  {{ custom_decoder_files.files | default([]) | length }}
+        - CDB lists:      {{ cdb_list_files.files | default([]) | length }}
+        - Inline rules:   {{ wazuh_custom_rules | default([]) | length }}

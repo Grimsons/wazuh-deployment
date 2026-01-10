@@ -168,14 +168,8 @@
   </localfile>
 {% endif %}
 
-  <!-- Active Response -->
+  <!-- Active Response Commands -->
 {% if wazuh_active_response_enabled | default(true) %}
-  <active-response>
-    <disabled>no</disabled>
-    <ca_store>etc/certs/root-ca.pem</ca_store>
-    <ca_verification>{{ 'yes' if wazuh_active_response_ca_verification | default(true) else 'no' }}</ca_verification>
-  </active-response>
-
   <command>
     <name>disable-account</name>
     <executable>disable-account</executable>

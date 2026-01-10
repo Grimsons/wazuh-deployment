@@ -18,3 +18,9 @@
     name: firewalld
     state: reloaded
   become: true
+
+- name: restart filebeat
+  ansible.builtin.service:
+    name: filebeat
+    state: restarted
+  become: true

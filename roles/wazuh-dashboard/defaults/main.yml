@@ -16,13 +16,23 @@ wazuh_dashboard_host: "0.0.0.0"
 
 # SSL/TLS settings
 wazuh_dashboard_ssl_enabled: true
+wazuh_dashboard_ssl_verification_mode: "certificate"
 
-# Session settings
+# Session settings (in minutes)
 wazuh_dashboard_session_timeout: 60
 
+# Cookie security settings
+wazuh_dashboard_cookie_secure: true
+wazuh_dashboard_cookie_same_site: "Strict"
+
 # Security settings
+# Dashboard uses indexer admin credentials - auto-generated if not set
 wazuh_dashboard_admin_user: "admin"
-wazuh_dashboard_admin_password: "admin"
+# wazuh_dashboard_admin_password: auto-read from credentials/indexer_admin_password.txt
+
+# HTTP security headers
+wazuh_dashboard_csp_strict: true
+wazuh_dashboard_xframe_options: "SAMEORIGIN"
 
 # Paths
 wazuh_dashboard_certs_path: /etc/wazuh-dashboard/certs

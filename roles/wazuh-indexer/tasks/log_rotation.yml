@@ -1,0 +1,12 @@
+---
+# Wazuh Indexer - Log Rotation Configuration
+
+- name: Configure Wazuh Indexer log rotation
+  ansible.builtin.template:
+    src: logrotate_wazuh_indexer.j2
+    dest: /etc/logrotate.d/wazuh-indexer
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  when: wazuh_log_rotation_enabled | default(true)

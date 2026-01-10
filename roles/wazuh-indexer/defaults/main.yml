@@ -25,7 +25,8 @@ wazuh_indexer_max_map_count: 262144
 
 # Security settings
 wazuh_indexer_admin_user: "admin"
-wazuh_indexer_admin_password: "admin"
+# Admin password is auto-generated if not specified
+# wazuh_indexer_admin_password: "your-secure-password"  # Uncomment to set manually
 
 # SSL/TLS settings
 wazuh_indexer_ssl_http_enabled: true
@@ -41,3 +42,13 @@ wazuh_indexer_number_of_replicas: 0
 
 # Paths
 wazuh_indexer_certs_path: /etc/wazuh-indexer/certs
+
+# Index retention settings (ISM policy)
+wazuh_retention_enabled: true
+wazuh_retention_days: 1095           # 3 years total retention
+wazuh_retention_warm_after_days: 30  # Move to warm after 30 days
+wazuh_retention_cold_after_days: 90  # Move to cold after 90 days
+
+# Alerts index settings
+wazuh_indexer_alerts_shards: 1
+wazuh_indexer_alerts_replicas: 0

@@ -89,6 +89,50 @@
     state: started
     enabled: true
   become: true
+  register: agent_service_start
+  ignore_errors: true
+
+- name: Get agent service status if start failed
+  ansible.builtin.command: systemctl status wazuh-agent --no-pager -l
+  become: true
+  register: agent_status
+  changed_when: false
+  failed_when: false
+  when: agent_service_start.failed | default(false)
+
+- name: Get agent journal logs if start failed
+  ansible.builtin.command: journalctl -u wazuh-agent --no-pager -n 50
+  become: true
+  register: agent_journal
+  changed_when: false
+  failed_when: false
+  when: agent_service_start.failed | default(false)
+
+- name: Get agent ossec.log if start failed
+  ansible.builtin.command: tail -100 /var/ossec/logs/ossec.log
+  become: true
+  register: agent_ossec_log
+  changed_when: false
+  failed_when: false
+  when: agent_service_start.failed | default(false)
+
+- name: Display agent diagnostic info
+  ansible.builtin.debug:
+    msg: |
+      === Service Status ===
+      {{ agent_status.stdout | default('No status available') }}
+
+      === Journal Logs ===
+      {{ agent_journal.stdout | default('No logs available') }}
+
+      === OSSEC Log ===
+      {{ agent_ossec_log.stdout | default('No ossec.log available') }}
+  when: agent_service_start.failed | default(false)
+
+- name: Fail if agent service did not start
+  ansible.builtin.fail:
+    msg: "Wazuh Agent failed to start. See diagnostic info above."
+  when: agent_service_start.failed | default(false)
 
 - name: Wait for agent to connect to manager
   ansible.builtin.wait_for:

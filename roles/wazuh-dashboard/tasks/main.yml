@@ -29,12 +29,16 @@
   ansible.builtin.include_tasks: firewall.yml
   when: wazuh_configure_firewall | default(true)
 
+- name: Flush handlers to apply configuration changes
+  ansible.builtin.meta: flush_handlers
+
 - name: Start and enable Wazuh Dashboard service
   ansible.builtin.service:
     name: "{{ wazuh_dashboard_service_name }}"
     state: started
     enabled: true
   become: true
+  register: dashboard_service_start
 
 - name: Wait for Wazuh Dashboard to be ready
   ansible.builtin.uri:
@@ -45,3 +49,48 @@
   until: dashboard_health.status in [200, 302]
   retries: 30
   delay: 10
+  ignore_errors: true
+
+- name: Get dashboard service status if health check failed
+  ansible.builtin.command: systemctl status wazuh-dashboard --no-pager -l
+  become: true
+  register: dashboard_status
+  changed_when: false
+  failed_when: false
+  when: dashboard_health.status is not defined or dashboard_health.status not in [200, 302]
+
+- name: Get dashboard journal logs if health check failed
+  ansible.builtin.command: journalctl -u wazuh-dashboard --no-pager -n 50
+  become: true
+  register: dashboard_journal
+  changed_when: false
+  failed_when: false
+  when: dashboard_health.status is not defined or dashboard_health.status not in [200, 302]
+
+- name: Display dashboard diagnostic info
+  ansible.builtin.debug:
+    msg: |
+      === Service Status ===
+      {{ dashboard_status.stdout | default('No status available') }}
+
+      === Journal Logs ===
+      {{ dashboard_journal.stdout | default('No logs available') }}
+  when: dashboard_health.status is not defined or dashboard_health.status not in [200, 302]
+
+- name: Fail if dashboard is not healthy
+  ansible.builtin.fail:
+    msg: "Wazuh Dashboard failed to start. See diagnostic info above."
+  when: dashboard_health.status is not defined or dashboard_health.status not in [200, 302]
+
+- name: Configure log rotation
+  ansible.builtin.include_tasks: log_rotation.yml
+  when: wazuh_log_rotation_enabled | default(true)
+
+- name: Display dashboard deployment result
+  ansible.builtin.debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════════
+      Wazuh Dashboard is ready!
+      URL: https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}
+      ═══════════════════════════════════════════════════════════════
+  run_once: true

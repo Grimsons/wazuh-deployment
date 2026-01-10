@@ -1,0 +1,24 @@
+---
+# Wazuh Manager - Log Rotation Configuration
+
+- name: Configure Wazuh Manager log rotation
+  ansible.builtin.template:
+    src: logrotate_wazuh_manager.j2
+    dest: /etc/logrotate.d/wazuh-manager
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  when: wazuh_log_rotation_enabled | default(true)
+
+- name: Configure Filebeat log rotation
+  ansible.builtin.template:
+    src: logrotate_filebeat.j2
+    dest: /etc/logrotate.d/filebeat
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  when:
+    - wazuh_log_rotation_enabled | default(true)
+    - wazuh_filebeat_enabled | default(true)

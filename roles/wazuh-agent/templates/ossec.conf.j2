@@ -4,18 +4,27 @@
 -->
 <ossec_config>
   <client>
-    <server>
 {% for node in wazuh_manager_nodes %}
+    <server>
       <address>{{ node.ip }}</address>
-{% endfor %}
       <port>{{ wazuh_manager_agent_port | default(1514) }}</port>
       <protocol>{{ wazuh_agent_protocol | default('tcp') }}</protocol>
     </server>
+{% endfor %}
     <config-profile>{{ ansible_distribution }}, {{ ansible_distribution | lower }}{{ ansible_distribution_major_version }}</config-profile>
     <notify_time>{{ wazuh_agent_notify_time | default(10) }}</notify_time>
     <time-reconnect>{{ wazuh_agent_time_reconnect | default(60) }}</time-reconnect>
     <auto_restart>{{ 'yes' if wazuh_agent_auto_restart | default(true) else 'no' }}</auto_restart>
     <crypto_method>aes</crypto_method>
+{% if wazuh_agent_enrollment_enabled | default(true) %}
+    <enrollment>
+      <enabled>yes</enabled>
+      <manager_address>{{ wazuh_manager_address }}</manager_address>
+      <port>1515</port>
+      <agent_name>{{ ansible_hostname }}</agent_name>
+      <delay_after_enrollment>{{ wazuh_agent_enrollment_delay | default(30) }}</delay_after_enrollment>
+    </enrollment>
+{% endif %}
   </client>
 
   <client_buffer>
@@ -23,17 +32,6 @@
     <queue_size>5000</queue_size>
     <events_per_second>500</events_per_second>
   </client_buffer>
-
-{% if wazuh_agent_enrollment_enabled | default(true) %}
-  <!-- Agent Enrollment -->
-  <enrollment>
-    <enabled>yes</enabled>
-    <manager_address>{{ wazuh_manager_address }}</manager_address>
-    <port>1515</port>
-    <agent_name>{{ ansible_hostname }}</agent_name>
-    <delay_after_enrollment>{{ wazuh_agent_enrollment_delay | default(30) }}</delay_after_enrollment>
-  </enrollment>
-{% endif %}
 
 {% if wazuh_agent_fim_enabled | default(true) %}
   <!-- File integrity monitoring -->

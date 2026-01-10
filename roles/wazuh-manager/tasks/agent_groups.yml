@@ -1,0 +1,122 @@
+---
+# Wazuh Manager - Agent Groups Configuration
+# Creates and configures agent groups with custom configuration
+
+# Read API password for group management
+- name: Check if API credentials file exists
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/credentials/api_password.txt"
+  delegate_to: localhost
+  become: false
+  register: api_creds_file_ag
+  vars:
+    ansible_become: false
+
+- name: Read API password from credentials file
+  ansible.builtin.slurp:
+    src: "{{ playbook_dir }}/credentials/api_password.txt"
+  delegate_to: localhost
+  become: false
+  register: api_creds_content_ag
+  when: api_creds_file_ag.stat.exists
+  vars:
+    ansible_become: false
+
+- name: Set API password fact
+  ansible.builtin.set_fact:
+    wazuh_api_password_groups: "{{ api_creds_content_ag.content | b64decode | regex_search('Password: (.+)', '\\1') | first | trim }}"
+  when:
+    - api_creds_content_ag is defined
+    - api_creds_content_ag is not skipped
+  no_log: true
+
+# Get API token for authentication
+- name: Authenticate to Wazuh API
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:{{ wazuh_manager_api_port | default(55000) }}/security/user/authenticate"
+    method: POST
+    user: "{{ wazuh_api_user | default('wazuh') }}"
+    password: "{{ wazuh_api_password_groups | default(wazuh_api_password) | default('wazuh') }}"
+    force_basic_auth: true
+    validate_certs: false
+    return_content: true
+  register: api_auth
+  no_log: true
+  run_once: true
+
+- name: Set API token
+  ansible.builtin.set_fact:
+    wazuh_api_token: "{{ api_auth.json.data.token }}"
+  no_log: true
+  run_once: true
+
+# Create agent groups
+- name: Create agent groups
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:{{ wazuh_manager_api_port | default(55000) }}/groups"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ wazuh_api_token }}"
+    body_format: json
+    body:
+      group_id: "{{ item.name }}"
+    validate_certs: false
+    status_code:
+      - 200
+      - 400  # Group already exists
+  loop: "{{ wazuh_agent_groups }}"
+  loop_control:
+    label: "{{ item.name }}"
+  run_once: true
+
+# Deploy group-specific agent.conf
+- name: Create agent.conf for groups
+  ansible.builtin.template:
+    src: agent_group_conf.j2
+    dest: "/var/ossec/etc/shared/{{ item.name }}/agent.conf"
+    owner: wazuh
+    group: wazuh
+    mode: '0640'
+  loop: "{{ wazuh_agent_groups }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become: true
+  when: item.config is defined
+  notify: restart wazuh-manager
+
+# Deploy merged.mg for groups (optional - for merged configurations)
+- name: Ensure group directories exist
+  ansible.builtin.file:
+    path: "/var/ossec/etc/shared/{{ item.name }}"
+    state: directory
+    owner: wazuh
+    group: wazuh
+    mode: '0770'
+  loop: "{{ wazuh_agent_groups }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become: true
+
+# Deploy custom files to group directories
+- name: Deploy custom files to agent groups
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/files/agent_groups/{{ item.0.name }}/{{ item.1 }}"
+    dest: "/var/ossec/etc/shared/{{ item.0.name }}/{{ item.1 }}"
+    owner: wazuh
+    group: wazuh
+    mode: '0640'
+  loop: "{{ wazuh_agent_groups | subelements('files', skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.0.name }}/{{ item.1 }}"
+  become: true
+  when: item.0.files is defined
+  ignore_errors: true
+
+- name: Display agent groups summary
+  ansible.builtin.debug:
+    msg: |
+      Agent groups configured:
+      {% for group in wazuh_agent_groups %}
+        - {{ group.name }}: {{ group.description | default('No description') }}
+      {% endfor %}
+  run_once: true

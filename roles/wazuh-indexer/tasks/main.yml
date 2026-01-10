@@ -99,6 +99,15 @@
   run_once: true
   when: wazuh_admin_password is defined
 
+# Configure index templates and ISM retention policies
+- name: Configure index templates and retention policies
+  ansible.builtin.include_tasks: index_management.yml
+  when: indexer_cluster_initial_master | default(false)
+
+- name: Configure log rotation
+  ansible.builtin.include_tasks: log_rotation.yml
+  when: wazuh_log_rotation_enabled | default(true)
+
 - name: Display cluster health
   ansible.builtin.debug:
     msg: |

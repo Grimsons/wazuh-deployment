@@ -10,7 +10,7 @@
 
 - name: Set admin password (use provided or generated)
   ansible.builtin.set_fact:
-    wazuh_admin_password: "{{ wazuh_indexer_admin_password | default(wazuh_indexer_admin_password_generated) }}"
+    wazuh_admin_password: "{{ wazuh_indexer_admin_password if (wazuh_indexer_admin_password is defined and wazuh_indexer_admin_password != 'admin') else wazuh_indexer_admin_password_generated }}"
   run_once: true
 
 - name: Display generated password location notice

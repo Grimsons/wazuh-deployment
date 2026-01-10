@@ -1,0 +1,258 @@
+---
+# Wazuh Backup Playbook
+# Creates backups of all Wazuh components
+#
+# Usage: ansible-playbook playbooks/backup.yml -i inventory/hosts.yml
+#
+# Optional variables:
+#   -e "backup_dest=/path/to/backups"  - Custom backup destination
+#   -e "backup_indexer=false"          - Skip indexer backup
+#   -e "backup_manager=false"          - Skip manager backup
+#   -e "backup_dashboard=false"        - Skip dashboard backup
+
+- name: Create backup timestamp
+  hosts: localhost
+  gather_facts: true
+  tasks:
+    - name: Set backup timestamp
+      ansible.builtin.set_fact:
+        backup_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+      run_once: true
+
+    - name: Set backup destination
+      ansible.builtin.set_fact:
+        backup_base_path: "{{ backup_dest | default(playbook_dir + '/../backups') }}"
+      run_once: true
+
+    - name: Create backup directory on controller
+      ansible.builtin.file:
+        path: "{{ backup_base_path }}/{{ backup_timestamp }}"
+        state: directory
+        mode: '0700'
+
+- name: Backup Wazuh Indexer
+  hosts: wazuh_indexer
+  become: true
+  vars:
+    backup_timestamp: "{{ hostvars['localhost']['backup_timestamp'] }}"
+    backup_base_path: "{{ hostvars['localhost']['backup_base_path'] }}"
+  tasks:
+    - name: Backup indexer configuration
+      when: backup_indexer | default(true) | bool
+      block:
+        - name: Create local backup directory for indexer
+          ansible.builtin.file:
+            path: "{{ backup_base_path }}/{{ backup_timestamp }}/indexer/{{ inventory_hostname }}"
+            state: directory
+            mode: '0700'
+          delegate_to: localhost
+          become: false
+
+        - name: Create temporary backup directory on indexer
+          ansible.builtin.file:
+            path: /tmp/wazuh-backup-{{ backup_timestamp }}
+            state: directory
+            mode: '0700'
+
+        - name: Backup indexer configuration files
+          ansible.builtin.archive:
+            path:
+              - /etc/wazuh-indexer/opensearch.yml
+              - /etc/wazuh-indexer/opensearch-security/
+              - /etc/wazuh-indexer/jvm.options
+            dest: /tmp/wazuh-backup-{{ backup_timestamp }}/indexer-config.tar.gz
+            format: gz
+
+        - name: Backup indexer certificates
+          ansible.builtin.archive:
+            path: /etc/wazuh-indexer/certs/
+            dest: /tmp/wazuh-backup-{{ backup_timestamp }}/indexer-certs.tar.gz
+            format: gz
+
+        - name: Fetch indexer backups to controller
+          ansible.builtin.fetch:
+            src: "/tmp/wazuh-backup-{{ backup_timestamp }}/{{ item }}"
+            dest: "{{ backup_base_path }}/{{ backup_timestamp }}/indexer/{{ inventory_hostname }}/"
+            flat: true
+          loop:
+            - indexer-config.tar.gz
+            - indexer-certs.tar.gz
+
+        - name: Cleanup temporary backup directory
+          ansible.builtin.file:
+            path: /tmp/wazuh-backup-{{ backup_timestamp }}
+            state: absent
+
+        - name: Create indexer snapshot (optional - for data backup)
+          ansible.builtin.uri:
+            url: "https://127.0.0.1:9200/_snapshot/wazuh_backup"
+            method: PUT
+            user: "{{ wazuh_indexer_admin_user }}"
+            password: "{{ wazuh_indexer_admin_password }}"
+            body_format: json
+            body:
+              type: fs
+              settings:
+                location: "/var/lib/wazuh-indexer/snapshots"
+            validate_certs: false
+            status_code:
+              - 200
+              - 400  # Repository already exists
+          when: backup_indexer_data | default(false) | bool
+          run_once: true
+          no_log: true
+
+- name: Backup Wazuh Manager
+  hosts: wazuh_manager
+  become: true
+  vars:
+    backup_timestamp: "{{ hostvars['localhost']['backup_timestamp'] }}"
+    backup_base_path: "{{ hostvars['localhost']['backup_base_path'] }}"
+  tasks:
+    - name: Backup manager configuration
+      when: backup_manager | default(true) | bool
+      block:
+        - name: Create local backup directory for manager
+          ansible.builtin.file:
+            path: "{{ backup_base_path }}/{{ backup_timestamp }}/manager/{{ inventory_hostname }}"
+            state: directory
+            mode: '0700'
+          delegate_to: localhost
+          become: false
+
+        - name: Create temporary backup directory on manager
+          ansible.builtin.file:
+            path: /tmp/wazuh-backup-{{ backup_timestamp }}
+            state: directory
+            mode: '0700'
+
+        - name: Backup manager configuration
+          ansible.builtin.archive:
+            path:
+              - /var/ossec/etc/ossec.conf
+              - /var/ossec/etc/rules/
+              - /var/ossec/etc/decoders/
+              - /var/ossec/etc/lists/
+              - /var/ossec/etc/shared/
+            dest: /tmp/wazuh-backup-{{ backup_timestamp }}/manager-config.tar.gz
+            format: gz
+
+        - name: Backup manager API configuration
+          ansible.builtin.archive:
+            path:
+              - /var/ossec/api/configuration/
+            dest: /tmp/wazuh-backup-{{ backup_timestamp }}/manager-api.tar.gz
+            format: gz
+
+        - name: Backup manager certificates
+          ansible.builtin.archive:
+            path: /var/ossec/etc/certs/
+            dest: /tmp/wazuh-backup-{{ backup_timestamp }}/manager-certs.tar.gz
+            format: gz
+          ignore_errors: true
+
+        - name: Backup agent keys
+          ansible.builtin.copy:
+            src: /var/ossec/etc/client.keys
+            dest: /tmp/wazuh-backup-{{ backup_timestamp }}/client.keys
+            remote_src: true
+            mode: '0600'
+          ignore_errors: true
+
+        - name: Backup RBAC database
+          ansible.builtin.copy:
+            src: /var/ossec/api/configuration/security/rbac.db
+            dest: /tmp/wazuh-backup-{{ backup_timestamp }}/rbac.db
+            remote_src: true
+            mode: '0600'
+          ignore_errors: true
+
+        - name: Fetch manager backups to controller
+          ansible.builtin.fetch:
+            src: "/tmp/wazuh-backup-{{ backup_timestamp }}/{{ item }}"
+            dest: "{{ backup_base_path }}/{{ backup_timestamp }}/manager/{{ inventory_hostname }}/"
+            flat: true
+          loop:
+            - manager-config.tar.gz
+            - manager-api.tar.gz
+            - manager-certs.tar.gz
+            - client.keys
+            - rbac.db
+          ignore_errors: true
+
+        - name: Cleanup temporary backup directory
+          ansible.builtin.file:
+            path: /tmp/wazuh-backup-{{ backup_timestamp }}
+            state: absent
+
+- name: Backup Wazuh Dashboard
+  hosts: wazuh_dashboard
+  become: true
+  vars:
+    backup_timestamp: "{{ hostvars['localhost']['backup_timestamp'] }}"
+    backup_base_path: "{{ hostvars['localhost']['backup_base_path'] }}"
+  tasks:
+    - name: Backup dashboard configuration
+      when: backup_dashboard | default(true) | bool
+      block:
+        - name: Create local backup directory for dashboard
+          ansible.builtin.file:
+            path: "{{ backup_base_path }}/{{ backup_timestamp }}/dashboard/{{ inventory_hostname }}"
+            state: directory
+            mode: '0700'
+          delegate_to: localhost
+          become: false
+
+        - name: Create temporary backup directory on dashboard
+          ansible.builtin.file:
+            path: /tmp/wazuh-backup-{{ backup_timestamp }}
+            state: directory
+            mode: '0700'
+
+        - name: Backup dashboard configuration
+          ansible.builtin.archive:
+            path:
+              - /etc/wazuh-dashboard/opensearch_dashboards.yml
+              - /usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml
+            dest: /tmp/wazuh-backup-{{ backup_timestamp }}/dashboard-config.tar.gz
+            format: gz
+
+        - name: Backup dashboard certificates
+          ansible.builtin.archive:
+            path: /etc/wazuh-dashboard/certs/
+            dest: /tmp/wazuh-backup-{{ backup_timestamp }}/dashboard-certs.tar.gz
+            format: gz
+
+        - name: Fetch dashboard backups to controller
+          ansible.builtin.fetch:
+            src: "/tmp/wazuh-backup-{{ backup_timestamp }}/{{ item }}"
+            dest: "{{ backup_base_path }}/{{ backup_timestamp }}/dashboard/{{ inventory_hostname }}/"
+            flat: true
+          loop:
+            - dashboard-config.tar.gz
+            - dashboard-certs.tar.gz
+
+        - name: Cleanup temporary backup directory
+          ansible.builtin.file:
+            path: /tmp/wazuh-backup-{{ backup_timestamp }}
+            state: absent
+
+- name: Backup summary
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Display backup location
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════════════════════
+          BACKUP COMPLETE
+          ═══════════════════════════════════════════════════════════════
+          Backup Location: {{ backup_base_path }}/{{ backup_timestamp }}
+
+          Contents:
+            - indexer/   - Indexer configuration and certificates
+            - manager/   - Manager configuration, rules, decoders, and agent keys
+            - dashboard/ - Dashboard configuration and certificates
+
+          To restore, use: ansible-playbook playbooks/restore.yml -e "restore_from={{ backup_timestamp }}"
+          ═══════════════════════════════════════════════════════════════

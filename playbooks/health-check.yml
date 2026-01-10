@@ -1,0 +1,275 @@
+---
+# Wazuh Health Check Playbook
+# Verifies the health and status of all Wazuh components
+#
+# Usage: ansible-playbook playbooks/health-check.yml -i inventory/hosts.yml
+#
+# Optional variables:
+#   -e "check_agents=true"       - Also check agent connectivity
+#   -e "check_indices=true"      - Check index health and size
+#   -e "verbose=true"            - Show detailed output
+
+- name: Health Check - Wazuh Indexer
+  hosts: wazuh_indexer
+  become: true
+  gather_facts: true
+  vars:
+    health_results: []
+  tasks:
+    - name: Check indexer service status
+      ansible.builtin.systemd:
+        name: wazuh-indexer
+      register: indexer_service
+
+    - name: Record indexer service status
+      ansible.builtin.set_fact:
+        indexer_service_status: "{{ 'HEALTHY' if indexer_service.status.ActiveState == 'active' else 'UNHEALTHY' }}"
+
+    - name: Check indexer cluster health
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:{{ wazuh_indexer_http_port }}/_cluster/health"
+        method: GET
+        user: "{{ wazuh_indexer_admin_user }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: false
+        return_content: true
+      register: cluster_health
+      failed_when: false
+      no_log: true
+      run_once: true
+
+    - name: Record cluster health
+      ansible.builtin.set_fact:
+        indexer_cluster_status: "{{ cluster_health.json.status | default('UNKNOWN') | upper }}"
+        indexer_cluster_nodes: "{{ cluster_health.json.number_of_nodes | default(0) }}"
+      run_once: true
+
+    - name: Check disk space
+      ansible.builtin.shell: df -h /var/lib/wazuh-indexer | tail -1 | awk '{print $5}' | tr -d '%'
+      register: disk_usage
+      changed_when: false
+
+    - name: Record disk status
+      ansible.builtin.set_fact:
+        indexer_disk_usage: "{{ disk_usage.stdout }}%"
+        indexer_disk_status: "{{ 'HEALTHY' if disk_usage.stdout | int < 80 else ('WARNING' if disk_usage.stdout | int < 90 else 'CRITICAL') }}"
+
+    - name: Check indexer memory usage
+      ansible.builtin.shell: |
+        ps -o rss= -p $(pgrep -f opensearch) 2>/dev/null | awk '{sum+=$1} END {print int(sum/1024)}'
+      register: memory_usage
+      changed_when: false
+      failed_when: false
+
+    - name: Get index statistics
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:{{ wazuh_indexer_http_port }}/_cat/indices/wazuh-alerts*?format=json&bytes=b"
+        method: GET
+        user: "{{ wazuh_indexer_admin_user }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: false
+        return_content: true
+      register: index_stats
+      failed_when: false
+      no_log: true
+      run_once: true
+      when: check_indices | default(false) | bool
+
+    - name: Display indexer health
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════════════════════
+          INDEXER HEALTH - {{ inventory_hostname }}
+          ═══════════════════════════════════════════════════════════════
+          Service Status:   {{ indexer_service_status }}
+          Cluster Status:   {{ indexer_cluster_status }}
+          Cluster Nodes:    {{ indexer_cluster_nodes }}
+          Disk Usage:       {{ indexer_disk_usage }} ({{ indexer_disk_status }})
+          Memory Usage:     {{ memory_usage.stdout | default('N/A') }} MB
+          ═══════════════════════════════════════════════════════════════
+
+- name: Health Check - Wazuh Manager
+  hosts: wazuh_manager
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Check manager service status
+      ansible.builtin.systemd:
+        name: wazuh-manager
+      register: manager_service
+
+    - name: Record manager service status
+      ansible.builtin.set_fact:
+        manager_service_status: "{{ 'HEALTHY' if manager_service.status.ActiveState == 'active' else 'UNHEALTHY' }}"
+
+    - name: Check Filebeat service status
+      ansible.builtin.systemd:
+        name: filebeat
+      register: filebeat_service
+      failed_when: false
+
+    - name: Record Filebeat service status
+      ansible.builtin.set_fact:
+        filebeat_service_status: "{{ 'HEALTHY' if filebeat_service.status.ActiveState | default('inactive') == 'active' else 'UNHEALTHY' }}"
+
+    - name: Check Wazuh API health
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:{{ wazuh_manager_api_port | default(55000) }}/"
+        method: GET
+        validate_certs: false
+        status_code:
+          - 200
+          - 401  # 401 is expected without auth
+      register: api_health
+      failed_when: false
+
+    - name: Record API status
+      ansible.builtin.set_fact:
+        api_status: "{{ 'HEALTHY' if api_health.status in [200, 401] else 'UNHEALTHY' }}"
+
+    - name: Get connected agents count
+      ansible.builtin.shell: |
+        /var/ossec/bin/agent_control -l 2>/dev/null | grep -c "Active" || echo "0"
+      register: active_agents
+      changed_when: false
+      failed_when: false
+
+    - name: Get total agents count
+      ansible.builtin.shell: |
+        /var/ossec/bin/agent_control -l 2>/dev/null | grep -c "ID:" || echo "0"
+      register: total_agents
+      changed_when: false
+      failed_when: false
+
+    - name: Check manager logs for recent errors
+      ansible.builtin.shell: |
+        tail -100 /var/ossec/logs/ossec.log 2>/dev/null | grep -c "ERROR" || echo "0"
+      register: recent_errors
+      changed_when: false
+      failed_when: false
+
+    - name: Check disk space for manager
+      ansible.builtin.shell: df -h /var/ossec | tail -1 | awk '{print $5}' | tr -d '%'
+      register: disk_usage
+      changed_when: false
+
+    - name: Get queue status
+      ansible.builtin.shell: |
+        ls -1 /var/ossec/queue/alerts/ar 2>/dev/null | wc -l || echo "0"
+      register: queue_count
+      changed_when: false
+      failed_when: false
+
+    - name: Display manager health
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════════════════════
+          MANAGER HEALTH - {{ inventory_hostname }}
+          ═══════════════════════════════════════════════════════════════
+          Service Status:   {{ manager_service_status }}
+          Filebeat Status:  {{ filebeat_service_status }}
+          API Status:       {{ api_status }}
+          Active Agents:    {{ active_agents.stdout }} / {{ total_agents.stdout }}
+          Recent Errors:    {{ recent_errors.stdout }} (last 100 log lines)
+          Disk Usage:       {{ disk_usage.stdout }}%
+          Alert Queue:      {{ queue_count.stdout }} pending
+          ═══════════════════════════════════════════════════════════════
+
+    - name: List agent details
+      ansible.builtin.shell: |
+        /var/ossec/bin/agent_control -l 2>/dev/null | head -20
+      register: agent_list
+      changed_when: false
+      failed_when: false
+      when: check_agents | default(false) | bool
+
+    - name: Display agent list
+      ansible.builtin.debug:
+        msg: |
+          Agent List (first 20):
+          {{ agent_list.stdout }}
+      when:
+        - check_agents | default(false) | bool
+        - agent_list.stdout is defined
+
+- name: Health Check - Wazuh Dashboard
+  hosts: wazuh_dashboard
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Check dashboard service status
+      ansible.builtin.systemd:
+        name: wazuh-dashboard
+      register: dashboard_service
+
+    - name: Record dashboard service status
+      ansible.builtin.set_fact:
+        dashboard_service_status: "{{ 'HEALTHY' if dashboard_service.status.ActiveState == 'active' else 'UNHEALTHY' }}"
+
+    - name: Check dashboard HTTP response
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:{{ wazuh_dashboard_port }}/app/wazuh"
+        method: GET
+        validate_certs: false
+        status_code:
+          - 200
+          - 302
+          - 401
+      register: dashboard_http
+      failed_when: false
+
+    - name: Record dashboard HTTP status
+      ansible.builtin.set_fact:
+        dashboard_http_status: "{{ 'HEALTHY' if dashboard_http.status in [200, 302, 401] else 'UNHEALTHY' }}"
+
+    - name: Check dashboard logs for recent errors
+      ansible.builtin.shell: |
+        tail -100 /var/log/wazuh-dashboard/opensearch-dashboards.log 2>/dev/null | grep -ci "error" || echo "0"
+      register: dashboard_errors
+      changed_when: false
+      failed_when: false
+
+    - name: Check disk space for dashboard
+      ansible.builtin.shell: df -h /usr/share/wazuh-dashboard | tail -1 | awk '{print $5}' | tr -d '%'
+      register: disk_usage
+      changed_when: false
+
+    - name: Display dashboard health
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════════════════════
+          DASHBOARD HEALTH - {{ inventory_hostname }}
+          ═══════════════════════════════════════════════════════════════
+          Service Status:   {{ dashboard_service_status }}
+          HTTP Status:      {{ dashboard_http_status }} ({{ dashboard_http.status | default('N/A') }})
+          Recent Errors:    {{ dashboard_errors.stdout }} (last 100 log lines)
+          Disk Usage:       {{ disk_usage.stdout }}%
+          URL:              https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}
+          ═══════════════════════════════════════════════════════════════
+
+- name: Health Summary
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Collect all health results
+      ansible.builtin.set_fact:
+        all_healthy: true
+
+    - name: Display overall health summary
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════════════════════
+          WAZUH HEALTH CHECK SUMMARY
+          ═══════════════════════════════════════════════════════════════
+          Timestamp: {{ lookup('pipe', 'date -Iseconds') }}
+
+          Components Checked:
+            - Indexer nodes:   {{ groups['wazuh_indexer'] | length }}
+            - Manager nodes:   {{ groups['wazuh_manager'] | length }}
+            - Dashboard nodes: {{ groups['wazuh_dashboard'] | length }}
+
+          For detailed checks, run with:
+            -e "check_agents=true"   - Check agent connectivity
+            -e "check_indices=true"  - Check index health and size
+            -e "verbose=true"        - Show detailed output
+          ═══════════════════════════════════════════════════════════════

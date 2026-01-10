@@ -4,7 +4,7 @@
 
 - name: Generate random API password
   ansible.builtin.set_fact:
-    wazuh_api_password_generated: "{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits') }}"
+    wazuh_api_password_generated: "{{ lookup('password', '/dev/null length=20 chars=ascii_letters,digits') }}@#"
   run_once: true
   when: wazuh_api_password_generated is not defined
 
@@ -47,10 +47,16 @@
   no_log: true
   failed_when: false
 
+- name: Debug auth response status
+  ansible.builtin.debug:
+    msg: "Auth response status: {{ auth_response.status | default('undefined') }}"
+  when: auth_response is defined and auth_response is not skipped
+  run_once: true
+
 - name: Extract JWT token
   ansible.builtin.set_fact:
     wazuh_jwt_token: "{{ (auth_response.content | from_json).data.token }}"
-  when: auth_response.status == 200
+  when: auth_response is defined and auth_response is not skipped and auth_response.status == 200
   run_once: true
   no_log: true
 
@@ -69,7 +75,7 @@
 - name: Find wazuh user ID
   ansible.builtin.set_fact:
     wazuh_user_id: "{{ (users_response.content | from_json).data.affected_items | selectattr('username', 'equalto', wazuh_api_user) | map(attribute='id') | first }}"
-  when: users_response is defined and users_response.status == 200
+  when: users_response is defined and users_response is not skipped and users_response.status == 200
   run_once: true
 
 - name: Update API user password
@@ -107,17 +113,18 @@
   become: false
   run_once: true
   no_log: true
+  when: password_update is defined and password_update is not skipped and password_update.status == 200
   vars:
     ansible_become: false
 
 - name: Display API password update result
   ansible.builtin.debug:
     msg: "API user password updated successfully"
-  when: password_update is defined and password_update.status == 200
+  when: password_update is defined and password_update is not skipped and password_update.status == 200
   run_once: true
 
 - name: Password was already changed (using current password)
   ansible.builtin.debug:
     msg: "API credentials already configured (default password was changed previously)"
-  when: auth_response.status != 200
+  when: auth_response is defined and auth_response is not skipped and auth_response.status != 200
   run_once: true

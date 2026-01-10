@@ -10,6 +10,9 @@ server.name: "wazuh-dashboard"
 server.ssl.enabled: {{ wazuh_dashboard_ssl_enabled | lower }}
 server.ssl.certificate: {{ wazuh_dashboard_certs_path }}/dashboard.pem
 server.ssl.key: {{ wazuh_dashboard_certs_path }}/dashboard-key.pem
+server.ssl.supportedProtocols:
+  - TLSv1.2
+  - TLSv1.3
 
 # Opensearch connection
 opensearch.hosts:
@@ -17,9 +20,9 @@ opensearch.hosts:
   - https://{{ node.ip }}:{{ wazuh_indexer_http_port }}
 {% endfor %}
 
-opensearch.ssl.verificationMode: certificate
-opensearch.username: {{ wazuh_indexer_admin_user }}
-opensearch.password: {{ wazuh_indexer_admin_password }}
+opensearch.ssl.verificationMode: {{ wazuh_dashboard_ssl_verification_mode | default('certificate') }}
+opensearch.username: "{{ wazuh_indexer_admin_user }}"
+opensearch.password: "{{ wazuh_indexer_admin_password }}"
 opensearch.ssl.certificateAuthorities:
   - {{ wazuh_dashboard_certs_path }}/root-ca.pem
 opensearch.requestHeadersWhitelist:
@@ -30,6 +33,19 @@ opensearch.requestHeadersWhitelist:
 opensearch_security.multitenancy.enabled: false
 opensearch_security.readonly_mode.roles:
   - kibana_read_only
+
+# Cookie security settings
+opensearch_security.cookie.secure: {{ wazuh_dashboard_cookie_secure | default(true) | lower }}
+opensearch_security.cookie.isSameSite: "{{ wazuh_dashboard_cookie_same_site | default('Strict') }}"
+
+# HTTP security headers
+server.customResponseHeaders:
+  X-Frame-Options: "{{ wazuh_dashboard_xframe_options | default('SAMEORIGIN') }}"
+  X-Content-Type-Options: "nosniff"
+  X-XSS-Protection: "1; mode=block"
+{% if wazuh_dashboard_csp_strict | default(true) %}
+  Content-Security-Policy: "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https:; frame-ancestors 'self'"
+{% endif %}
 
 # UI settings
 uiSettings.overrides.defaultRoute: /app/wazuh

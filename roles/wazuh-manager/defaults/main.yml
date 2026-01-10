@@ -12,6 +12,21 @@ wazuh_manager_log_path: /var/ossec/logs
 # API settings
 wazuh_manager_api_bind_addr: "0.0.0.0"
 wazuh_manager_api_https: true
+wazuh_manager_api_ssl_protocol: "TLSv1.2"
+wazuh_manager_api_log_format: "json"
+
+# API Rate Limiting & Security Hardening
+# Max failed login attempts before blocking (default: 5)
+wazuh_manager_api_max_login_attempts: 5
+# Block time in seconds after max failed attempts (default: 900 = 15 min)
+wazuh_manager_api_block_time: 900
+# Max API requests per minute per client (default: 100)
+wazuh_manager_api_max_requests_per_minute: 100
+
+# Remote command execution - DISABLED by default for security
+# Only enable if you need to push commands via API
+wazuh_manager_api_allow_remote_localfile: false
+wazuh_manager_api_allow_remote_wodle: false
 
 # Agent enrollment
 wazuh_authd_enabled: true
@@ -77,3 +92,7 @@ wazuh_integrations: []
 
 # Indexer connection
 wazuh_indexer_connection_enabled: true
+
+# Filebeat settings (for alert forwarding to indexer)
+wazuh_filebeat_enabled: true
+wazuh_filebeat_archives_enabled: false

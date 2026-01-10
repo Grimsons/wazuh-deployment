@@ -1,0 +1,137 @@
+---
+# Wazuh Manager - Filebeat Installation and Configuration
+# Filebeat forwards alerts from the manager to the Wazuh Indexer
+
+# Read indexer admin password from credentials file if not already set
+- name: Check if indexer credentials file exists
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/credentials/indexer_admin_password.txt"
+  delegate_to: localhost
+  become: false
+  register: indexer_creds_file_fb
+  vars:
+    ansible_become: false
+
+- name: Read indexer password from credentials file
+  ansible.builtin.slurp:
+    src: "{{ playbook_dir }}/credentials/indexer_admin_password.txt"
+  delegate_to: localhost
+  become: false
+  register: indexer_creds_content_fb
+  when:
+    - indexer_creds_file_fb.stat.exists
+    - wazuh_indexer_admin_password is not defined
+  vars:
+    ansible_become: false
+
+- name: Extract indexer password from credentials file
+  ansible.builtin.set_fact:
+    wazuh_indexer_admin_password: "{{ indexer_creds_content_fb.content | b64decode | regex_search('Password: (.+)', '\\1') | first | trim }}"
+  when:
+    - indexer_creds_content_fb is defined
+    - indexer_creds_content_fb is not skipped
+    - indexer_creds_content_fb.content is defined
+  no_log: true
+
+- name: Check if Filebeat is already installed
+  ansible.builtin.command: dpkg -l filebeat
+  register: filebeat_installed
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Download Filebeat OSS package
+  ansible.builtin.get_url:
+    url: "https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-oss-7.10.2-amd64.deb"
+    dest: /tmp/filebeat-oss-7.10.2-amd64.deb
+    mode: '0644'
+  when: filebeat_installed.rc != 0
+  become: true
+
+- name: Install Filebeat OSS
+  ansible.builtin.apt:
+    deb: /tmp/filebeat-oss-7.10.2-amd64.deb
+    state: present
+  when: filebeat_installed.rc != 0
+  become: true
+
+- name: Download Wazuh Filebeat module
+  ansible.builtin.unarchive:
+    src: "https://packages.wazuh.com/4.x/filebeat/wazuh-filebeat-0.4.tar.gz"
+    dest: /usr/share/filebeat/module
+    remote_src: true
+    creates: /usr/share/filebeat/module/wazuh
+  become: true
+
+- name: Download Wazuh alerts template
+  ansible.builtin.get_url:
+    url: "https://raw.githubusercontent.com/wazuh/wazuh/v{{ wazuh_version }}/extensions/elasticsearch/7.x/wazuh-template.json"
+    dest: /etc/filebeat/wazuh-template.json
+    mode: '0644'
+  become: true
+
+- name: Create Filebeat certificates directory
+  ansible.builtin.file:
+    path: /etc/filebeat/certs
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  become: true
+
+- name: Copy root CA certificate for Filebeat
+  ansible.builtin.copy:
+    src: /var/ossec/etc/certs/root-ca.pem
+    dest: /etc/filebeat/certs/root-ca.pem
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0600'
+  become: true
+
+- name: Copy server certificate for Filebeat
+  ansible.builtin.copy:
+    src: /var/ossec/etc/certs/server.pem
+    dest: /etc/filebeat/certs/filebeat.pem
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0600'
+  become: true
+
+- name: Copy server key for Filebeat
+  ansible.builtin.copy:
+    src: /var/ossec/etc/certs/server-key.pem
+    dest: /etc/filebeat/certs/filebeat-key.pem
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0600'
+  become: true
+
+- name: Configure Filebeat
+  ansible.builtin.template:
+    src: filebeat.yml.j2
+    dest: /etc/filebeat/filebeat.yml
+    owner: root
+    group: root
+    mode: '0600'
+  become: true
+  notify: restart filebeat
+
+- name: Enable Filebeat service
+  ansible.builtin.systemd:
+    name: filebeat
+    enabled: true
+    daemon_reload: true
+  become: true
+
+- name: Start Filebeat service
+  ansible.builtin.service:
+    name: filebeat
+    state: started
+  become: true
+
+- name: Wait for Filebeat to start sending data
+  ansible.builtin.pause:
+    seconds: 5

@@ -26,6 +26,14 @@
 - name: Configure Wazuh Manager
   ansible.builtin.include_tasks: configure.yml
 
+- name: Deploy custom rules and decoders
+  ansible.builtin.include_tasks: custom_rules.yml
+  when: wazuh_custom_content_enabled | default(true)
+
+- name: Configure agent groups
+  ansible.builtin.include_tasks: agent_groups.yml
+  when: wazuh_agent_groups | default([]) | length > 0
+
 - name: Configure Wazuh API
   ansible.builtin.include_tasks: api.yml
 
@@ -63,6 +71,16 @@
 - name: Configure secure API password
   ansible.builtin.include_tasks: security_users.yml
   when: manager_node_type | default('master') == 'master'
+
+- name: Install and configure Filebeat for alert forwarding
+  ansible.builtin.include_tasks: filebeat.yml
+  when:
+    - wazuh_filebeat_enabled | default(true)
+    - manager_node_type | default('master') == 'master'
+
+- name: Configure log rotation
+  ansible.builtin.include_tasks: log_rotation.yml
+  when: wazuh_log_rotation_enabled | default(true)
 
 - name: Display Manager deployment result
   ansible.builtin.debug:

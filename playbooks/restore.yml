@@ -1,0 +1,346 @@
+---
+# Wazuh Restore Playbook
+# Restores Wazuh components from backup
+#
+# Usage: ansible-playbook playbooks/restore.yml -i inventory/hosts.yml -e "restore_from=20260110T120000"
+#
+# Required variables:
+#   -e "restore_from=TIMESTAMP"        - Backup timestamp to restore from
+#
+# Optional variables:
+#   -e "backup_dest=/path/to/backups"  - Custom backup source location
+#   -e "restore_indexer=false"         - Skip indexer restore
+#   -e "restore_manager=false"         - Skip manager restore
+#   -e "restore_dashboard=false"       - Skip dashboard restore
+#   -e "restart_services=true"         - Restart services after restore
+
+- name: Validate restore parameters
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Ensure restore_from is specified
+      ansible.builtin.fail:
+        msg: "You must specify the backup timestamp with -e 'restore_from=TIMESTAMP'"
+      when: restore_from is not defined
+
+    - name: Set backup source path
+      ansible.builtin.set_fact:
+        backup_source_path: "{{ backup_dest | default(playbook_dir + '/../backups') }}/{{ restore_from }}"
+
+    - name: Verify backup exists
+      ansible.builtin.stat:
+        path: "{{ backup_source_path }}"
+      register: backup_check
+
+    - name: Fail if backup not found
+      ansible.builtin.fail:
+        msg: "Backup not found at {{ backup_source_path }}"
+      when: not backup_check.stat.exists
+
+    - name: Display restore warning
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════════════════════
+          WARNING: RESTORE OPERATION
+          ═══════════════════════════════════════════════════════════════
+          This will restore configuration from: {{ backup_source_path }}
+
+          Services will be restarted after restore.
+          ═══════════════════════════════════════════════════════════════
+
+- name: Restore Wazuh Indexer
+  hosts: wazuh_indexer
+  become: true
+  vars:
+    backup_source_path: "{{ hostvars['localhost']['backup_source_path'] }}"
+  tasks:
+    - name: Restore indexer configuration
+      when: restore_indexer | default(true) | bool
+      block:
+        - name: Check if indexer backup exists for this host
+          ansible.builtin.stat:
+            path: "{{ backup_source_path }}/indexer/{{ inventory_hostname }}/indexer-config.tar.gz"
+          delegate_to: localhost
+          become: false
+          register: indexer_backup_check
+
+        - name: Stop indexer service before restore
+          ansible.builtin.service:
+            name: wazuh-indexer
+            state: stopped
+          when: indexer_backup_check.stat.exists
+
+        - name: Copy indexer config backup to host
+          ansible.builtin.copy:
+            src: "{{ backup_source_path }}/indexer/{{ inventory_hostname }}/indexer-config.tar.gz"
+            dest: /tmp/indexer-config-restore.tar.gz
+            mode: '0600'
+          when: indexer_backup_check.stat.exists
+
+        - name: Restore indexer configuration
+          ansible.builtin.unarchive:
+            src: /tmp/indexer-config-restore.tar.gz
+            dest: /
+            remote_src: true
+          when: indexer_backup_check.stat.exists
+
+        - name: Copy indexer certs backup to host
+          ansible.builtin.copy:
+            src: "{{ backup_source_path }}/indexer/{{ inventory_hostname }}/indexer-certs.tar.gz"
+            dest: /tmp/indexer-certs-restore.tar.gz
+            mode: '0600'
+          when: indexer_backup_check.stat.exists
+
+        - name: Restore indexer certificates
+          ansible.builtin.unarchive:
+            src: /tmp/indexer-certs-restore.tar.gz
+            dest: /
+            remote_src: true
+          when: indexer_backup_check.stat.exists
+
+        - name: Fix indexer permissions
+          ansible.builtin.file:
+            path: "{{ item }}"
+            owner: wazuh-indexer
+            group: wazuh-indexer
+            recurse: true
+          loop:
+            - /etc/wazuh-indexer
+          when: indexer_backup_check.stat.exists
+
+        - name: Cleanup restore files
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /tmp/indexer-config-restore.tar.gz
+            - /tmp/indexer-certs-restore.tar.gz
+          when: indexer_backup_check.stat.exists
+
+        - name: Start indexer service after restore
+          ansible.builtin.service:
+            name: wazuh-indexer
+            state: started
+          when:
+            - indexer_backup_check.stat.exists
+            - restart_services | default(true) | bool
+
+- name: Restore Wazuh Manager
+  hosts: wazuh_manager
+  become: true
+  vars:
+    backup_source_path: "{{ hostvars['localhost']['backup_source_path'] }}"
+  tasks:
+    - name: Restore manager configuration
+      when: restore_manager | default(true) | bool
+      block:
+        - name: Check if manager backup exists for this host
+          ansible.builtin.stat:
+            path: "{{ backup_source_path }}/manager/{{ inventory_hostname }}/manager-config.tar.gz"
+          delegate_to: localhost
+          become: false
+          register: manager_backup_check
+
+        - name: Stop manager service before restore
+          ansible.builtin.service:
+            name: wazuh-manager
+            state: stopped
+          when: manager_backup_check.stat.exists
+
+        - name: Copy manager config backup to host
+          ansible.builtin.copy:
+            src: "{{ backup_source_path }}/manager/{{ inventory_hostname }}/{{ item }}"
+            dest: /tmp/{{ item | basename }}
+            mode: '0600'
+          loop:
+            - manager-config.tar.gz
+            - manager-api.tar.gz
+          when: manager_backup_check.stat.exists
+
+        - name: Restore manager configuration
+          ansible.builtin.unarchive:
+            src: /tmp/manager-config.tar.gz
+            dest: /
+            remote_src: true
+          when: manager_backup_check.stat.exists
+
+        - name: Restore manager API configuration
+          ansible.builtin.unarchive:
+            src: /tmp/manager-api.tar.gz
+            dest: /
+            remote_src: true
+          when: manager_backup_check.stat.exists
+
+        - name: Check for manager certs backup
+          ansible.builtin.stat:
+            path: "{{ backup_source_path }}/manager/{{ inventory_hostname }}/manager-certs.tar.gz"
+          delegate_to: localhost
+          become: false
+          register: manager_certs_check
+
+        - name: Copy manager certs backup to host
+          ansible.builtin.copy:
+            src: "{{ backup_source_path }}/manager/{{ inventory_hostname }}/manager-certs.tar.gz"
+            dest: /tmp/manager-certs-restore.tar.gz
+            mode: '0600'
+          when: manager_certs_check.stat.exists
+
+        - name: Restore manager certificates
+          ansible.builtin.unarchive:
+            src: /tmp/manager-certs-restore.tar.gz
+            dest: /
+            remote_src: true
+          when: manager_certs_check.stat.exists
+
+        - name: Check for client.keys backup
+          ansible.builtin.stat:
+            path: "{{ backup_source_path }}/manager/{{ inventory_hostname }}/client.keys"
+          delegate_to: localhost
+          become: false
+          register: client_keys_check
+
+        - name: Restore agent keys
+          ansible.builtin.copy:
+            src: "{{ backup_source_path }}/manager/{{ inventory_hostname }}/client.keys"
+            dest: /var/ossec/etc/client.keys
+            owner: wazuh
+            group: wazuh
+            mode: '0640'
+          when: client_keys_check.stat.exists
+
+        - name: Check for RBAC database backup
+          ansible.builtin.stat:
+            path: "{{ backup_source_path }}/manager/{{ inventory_hostname }}/rbac.db"
+          delegate_to: localhost
+          become: false
+          register: rbac_check
+
+        - name: Restore RBAC database
+          ansible.builtin.copy:
+            src: "{{ backup_source_path }}/manager/{{ inventory_hostname }}/rbac.db"
+            dest: /var/ossec/api/configuration/security/rbac.db
+            owner: wazuh
+            group: wazuh
+            mode: '0640'
+          when: rbac_check.stat.exists
+
+        - name: Fix manager permissions
+          ansible.builtin.file:
+            path: /var/ossec
+            owner: wazuh
+            group: wazuh
+            recurse: true
+          when: manager_backup_check.stat.exists
+
+        - name: Cleanup restore files
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /tmp/manager-config.tar.gz
+            - /tmp/manager-api.tar.gz
+            - /tmp/manager-certs-restore.tar.gz
+          when: manager_backup_check.stat.exists
+
+        - name: Start manager service after restore
+          ansible.builtin.service:
+            name: wazuh-manager
+            state: started
+          when:
+            - manager_backup_check.stat.exists
+            - restart_services | default(true) | bool
+
+- name: Restore Wazuh Dashboard
+  hosts: wazuh_dashboard
+  become: true
+  vars:
+    backup_source_path: "{{ hostvars['localhost']['backup_source_path'] }}"
+  tasks:
+    - name: Restore dashboard configuration
+      when: restore_dashboard | default(true) | bool
+      block:
+        - name: Check if dashboard backup exists for this host
+          ansible.builtin.stat:
+            path: "{{ backup_source_path }}/dashboard/{{ inventory_hostname }}/dashboard-config.tar.gz"
+          delegate_to: localhost
+          become: false
+          register: dashboard_backup_check
+
+        - name: Stop dashboard service before restore
+          ansible.builtin.service:
+            name: wazuh-dashboard
+            state: stopped
+          when: dashboard_backup_check.stat.exists
+
+        - name: Copy dashboard config backup to host
+          ansible.builtin.copy:
+            src: "{{ backup_source_path }}/dashboard/{{ inventory_hostname }}/{{ item }}"
+            dest: /tmp/{{ item | basename }}
+            mode: '0600'
+          loop:
+            - dashboard-config.tar.gz
+            - dashboard-certs.tar.gz
+          when: dashboard_backup_check.stat.exists
+
+        - name: Restore dashboard configuration
+          ansible.builtin.unarchive:
+            src: /tmp/dashboard-config.tar.gz
+            dest: /
+            remote_src: true
+          when: dashboard_backup_check.stat.exists
+
+        - name: Restore dashboard certificates
+          ansible.builtin.unarchive:
+            src: /tmp/dashboard-certs.tar.gz
+            dest: /
+            remote_src: true
+          when: dashboard_backup_check.stat.exists
+
+        - name: Fix dashboard permissions
+          ansible.builtin.file:
+            path: "{{ item }}"
+            owner: wazuh-dashboard
+            group: wazuh-dashboard
+            recurse: true
+          loop:
+            - /etc/wazuh-dashboard
+            - /usr/share/wazuh-dashboard/data/wazuh
+          when: dashboard_backup_check.stat.exists
+
+        - name: Cleanup restore files
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /tmp/dashboard-config.tar.gz
+            - /tmp/dashboard-certs.tar.gz
+          when: dashboard_backup_check.stat.exists
+
+        - name: Start dashboard service after restore
+          ansible.builtin.service:
+            name: wazuh-dashboard
+            state: started
+          when:
+            - dashboard_backup_check.stat.exists
+            - restart_services | default(true) | bool
+
+- name: Restore summary
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Display restore completion
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════════════════════
+          RESTORE COMPLETE
+          ═══════════════════════════════════════════════════════════════
+          Restored from: {{ backup_source_path }}
+
+          Please verify all services are running correctly:
+            - Indexer:   systemctl status wazuh-indexer
+            - Manager:   systemctl status wazuh-manager
+            - Dashboard: systemctl status wazuh-dashboard
+
+          You may need to re-apply security configuration on the indexer
+          if user credentials were changed.
+          ═══════════════════════════════════════════════════════════════
