@@ -96,6 +96,8 @@
   become: false
   register: credentials_file
   run_once: true
+  vars:
+    ansible_become: false
 
 # Try stored password first (for re-runs where password was already changed)
 - name: Check Wazuh Indexer with stored credentials
