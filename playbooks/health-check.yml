@@ -10,7 +10,7 @@
 #   -e "verbose=true"            - Show detailed output
 
 - name: Health Check - Wazuh Indexer
-  hosts: wazuh_indexer
+  hosts: wazuh_indexers
   become: true
   gather_facts: true
   vars:
@@ -89,7 +89,7 @@
           ═══════════════════════════════════════════════════════════════
 
 - name: Health Check - Wazuh Manager
-  hosts: wazuh_manager
+  hosts: wazuh_managers
   become: true
   gather_facts: true
   tasks:
@@ -193,7 +193,7 @@
         - agent_list.stdout is defined
 
 - name: Health Check - Wazuh Dashboard
-  hosts: wazuh_dashboard
+  hosts: wazuh_dashboards
   become: true
   gather_facts: true
   tasks:
@@ -264,9 +264,9 @@
           Timestamp: {{ lookup('pipe', 'date -Iseconds') }}
 
           Components Checked:
-            - Indexer nodes:   {{ groups['wazuh_indexer'] | length }}
-            - Manager nodes:   {{ groups['wazuh_manager'] | length }}
-            - Dashboard nodes: {{ groups['wazuh_dashboard'] | length }}
+            - Indexer nodes:   {{ groups['wazuh_indexers'] | length }}
+            - Manager nodes:   {{ groups['wazuh_managers'] | length }}
+            - Dashboard nodes: {{ groups['wazuh_dashboards'] | length }}
 
           For detailed checks, run with:
             -e "check_agents=true"   - Check agent connectivity

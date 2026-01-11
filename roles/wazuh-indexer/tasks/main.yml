@@ -32,29 +32,56 @@
   ansible.builtin.include_tasks: firewall.yml
   when: wazuh_configure_firewall | default(true)
 
-- name: Start and enable Wazuh Indexer service
-  ansible.builtin.service:
+- name: Enable Wazuh Indexer service
+  ansible.builtin.systemd:
+    name: "{{ wazuh_indexer_service_name }}"
+    enabled: true
+    daemon_reload: true
+  become: true
+
+- name: Start Wazuh Indexer service (non-blocking)
+  ansible.builtin.systemd:
     name: "{{ wazuh_indexer_service_name }}"
     state: started
-    enabled: true
+    no_block: true
   become: true
+  register: indexer_start_result
+
+- name: Wait for Wazuh Indexer to be listening
+  ansible.builtin.wait_for:
+    port: "{{ wazuh_indexer_http_port }}"
+    host: "{{ ansible_default_ipv4.address }}"
+    delay: 10
+    timeout: 300
+  become: true
+
+- name: Verify Wazuh Indexer service is running
+  ansible.builtin.systemd:
+    name: "{{ wazuh_indexer_service_name }}"
+  become: true
+  register: indexer_service_status
+  until: indexer_service_status.status.ActiveState == "active"
+  retries: 30
+  delay: 10
 
 # Flush handlers to ensure indexer restarts with new config before security init
 - name: Flush handlers before security initialization
   ansible.builtin.meta: flush_handlers
 
 - name: Ensure Wazuh Indexer is running with latest config
-  ansible.builtin.service:
+  ansible.builtin.systemd:
     name: "{{ wazuh_indexer_service_name }}"
     state: restarted
+    no_block: true
   become: true
   changed_when: false
 
 - name: Wait for Indexer to be ready after restart
   ansible.builtin.wait_for:
     port: "{{ wazuh_indexer_http_port }}"
-    delay: 5
-    timeout: 120
+    host: "{{ ansible_default_ipv4.address }}"
+    delay: 10
+    timeout: 300
   become: true
 
 - name: Initialize security (run only on first master)
@@ -68,7 +95,7 @@
     user: "admin"
     password: "admin"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     status_code: [200]
     return_content: true
   register: indexer_health_initial
@@ -89,7 +116,7 @@
     user: "admin"
     password: "{{ wazuh_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     status_code: [200]
     return_content: true
   register: indexer_health

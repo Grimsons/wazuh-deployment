@@ -2,9 +2,10 @@
 # Wazuh Agent - Handlers
 
 - name: restart wazuh-agent
-  ansible.builtin.service:
+  ansible.builtin.systemd:
     name: "{{ wazuh_agent_service_name }}"
     state: restarted
+    no_block: true
   become: true
 
 - name: restart wazuh-agent-windows

@@ -86,8 +86,6 @@ plugins.security.audit.config.enable_transport: true
 plugins.security.enable_snapshot_restore_privilege: true
 plugins.security.check_snapshot_restore_write_privileges: true
 
-# Anonymous authentication - DISABLED for security
-plugins.security.authcz.anonymous_auth_enabled: {{ wazuh_indexer_anonymous_auth_enabled | default(false) | lower }}
 plugins.security.restapi.roles_enabled:
   - all_access
   - security_rest_api_access

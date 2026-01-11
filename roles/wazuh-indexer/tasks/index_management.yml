@@ -102,7 +102,9 @@
               - "wazuh-monitoring-*"
               - "wazuh-statistics-*"
             priority: 100
-    status_code: [200, 201]
+    status_code: [200, 201, 409]
+    headers:
+      Content-Type: "application/json"
   register: ism_policy_result
   changed_when: ism_policy_result.status in [200, 201]
   when: wazuh_retention_enabled | default(true)

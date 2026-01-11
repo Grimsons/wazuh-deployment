@@ -32,13 +32,36 @@
 - name: Flush handlers to apply configuration changes
   ansible.builtin.meta: flush_handlers
 
-- name: Start and enable Wazuh Dashboard service
-  ansible.builtin.service:
+- name: Enable Wazuh Dashboard service
+  ansible.builtin.systemd:
+    name: "{{ wazuh_dashboard_service_name }}"
+    enabled: true
+    daemon_reload: true
+  become: true
+
+- name: Start Wazuh Dashboard service (non-blocking)
+  ansible.builtin.systemd:
     name: "{{ wazuh_dashboard_service_name }}"
     state: started
-    enabled: true
+    no_block: true
   become: true
-  register: dashboard_service_start
+
+- name: Wait for Wazuh Dashboard to be listening
+  ansible.builtin.wait_for:
+    port: "{{ wazuh_dashboard_port }}"
+    host: "{{ ansible_default_ipv4.address }}"
+    delay: 10
+    timeout: 300
+  become: true
+
+- name: Verify Wazuh Dashboard service is running
+  ansible.builtin.systemd:
+    name: "{{ wazuh_dashboard_service_name }}"
+  become: true
+  register: dashboard_service_status
+  until: dashboard_service_status.status.ActiveState == "active"
+  retries: 30
+  delay: 10
 
 - name: Wait for Wazuh Dashboard to be ready
   ansible.builtin.uri:

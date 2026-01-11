@@ -31,7 +31,7 @@
         mode: '0700'
 
 - name: Backup Wazuh Indexer
-  hosts: wazuh_indexer
+  hosts: wazuh_indexers
   become: true
   vars:
     backup_timestamp: "{{ hostvars['localhost']['backup_timestamp'] }}"
@@ -103,7 +103,7 @@
           no_log: true
 
 - name: Backup Wazuh Manager
-  hosts: wazuh_manager
+  hosts: wazuh_managers
   become: true
   vars:
     backup_timestamp: "{{ hostvars['localhost']['backup_timestamp'] }}"
@@ -186,7 +186,7 @@
             state: absent
 
 - name: Backup Wazuh Dashboard
-  hosts: wazuh_dashboard
+  hosts: wazuh_dashboards
   become: true
   vars:
     backup_timestamp: "{{ hostvars['localhost']['backup_timestamp'] }}"

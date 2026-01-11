@@ -83,13 +83,28 @@
   become: true
   notify: restart wazuh-agent
 
-- name: Start and enable Wazuh Agent service
-  ansible.builtin.service:
+- name: Enable Wazuh Agent service
+  ansible.builtin.systemd:
+    name: "{{ wazuh_agent_service_name }}"
+    enabled: true
+    daemon_reload: true
+  become: true
+
+- name: Start Wazuh Agent service (non-blocking)
+  ansible.builtin.systemd:
     name: "{{ wazuh_agent_service_name }}"
     state: started
-    enabled: true
+    no_block: true
+  become: true
+
+- name: Verify Wazuh Agent service is running
+  ansible.builtin.systemd:
+    name: "{{ wazuh_agent_service_name }}"
   become: true
   register: agent_service_start
+  until: agent_service_start.status.ActiveState == "active"
+  retries: 30
+  delay: 5
   ignore_errors: true
 
 - name: Get agent service status if start failed

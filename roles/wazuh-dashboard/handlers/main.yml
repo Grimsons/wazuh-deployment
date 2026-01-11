@@ -2,13 +2,14 @@
 # Wazuh Dashboard - Handlers
 
 - name: restart wazuh-dashboard
-  ansible.builtin.service:
+  ansible.builtin.systemd:
     name: "{{ wazuh_dashboard_service_name }}"
     state: restarted
+    no_block: true
   become: true
 
 - name: reload wazuh-dashboard
-  ansible.builtin.service:
+  ansible.builtin.systemd:
     name: "{{ wazuh_dashboard_service_name }}"
     state: reloaded
   become: true
