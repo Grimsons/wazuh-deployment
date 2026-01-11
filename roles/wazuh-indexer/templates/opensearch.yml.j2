@@ -30,16 +30,35 @@ cluster.initial_master_nodes:
 {% endfor %}
 {% endif %}
 
-# Security settings
+# Security settings - Transport layer (inter-node communication)
 plugins.security.ssl.transport.pemcert_filepath: certs/indexer.pem
 plugins.security.ssl.transport.pemkey_filepath: certs/indexer-key.pem
 plugins.security.ssl.transport.pemtrustedcas_filepath: certs/root-ca.pem
-plugins.security.ssl.transport.enforce_hostname_verification: false
+plugins.security.ssl.transport.enforce_hostname_verification: {{ wazuh_ssl_verify_hostname | default(true) | lower }}
+{% if wazuh_tls_ciphers is defined and wazuh_tls_ciphers %}
+plugins.security.ssl.transport.enabled_ciphers:
+{% for cipher in wazuh_tls_ciphers.split(':') %}
+  - {{ cipher }}
+{% endfor %}
+{% endif %}
+plugins.security.ssl.transport.enabled_protocols:
+  - TLSv1.3
+  - TLSv1.2
 
-plugins.security.ssl.http.enabled: {{ wazuh_indexer_ssl_http_enabled | lower }}
+# Security settings - HTTP layer (client connections)
+plugins.security.ssl.http.enabled: {{ wazuh_indexer_ssl_http_enabled | default(true) | lower }}
 plugins.security.ssl.http.pemcert_filepath: certs/indexer.pem
 plugins.security.ssl.http.pemkey_filepath: certs/indexer-key.pem
 plugins.security.ssl.http.pemtrustedcas_filepath: certs/root-ca.pem
+{% if wazuh_tls_ciphers is defined and wazuh_tls_ciphers %}
+plugins.security.ssl.http.enabled_ciphers:
+{% for cipher in wazuh_tls_ciphers.split(':') %}
+  - {{ cipher }}
+{% endfor %}
+{% endif %}
+plugins.security.ssl.http.enabled_protocols:
+  - TLSv1.3
+  - TLSv1.2
 
 plugins.security.nodes_dn:
 {% for node in wazuh_indexer_nodes %}
@@ -51,9 +70,24 @@ plugins.security.authcz.admin_dn:
 
 plugins.security.allow_unsafe_democertificates: false
 plugins.security.allow_default_init_securityindex: true
-plugins.security.audit.type: internal_opensearch
+
+# Audit logging - CRITICAL for compliance (PCI-DSS, HIPAA, SOC2)
+plugins.security.audit.type: {{ wazuh_audit_log_type | default('internal_opensearch') }}
+{% if wazuh_audit_logging_enabled | default(true) %}
+plugins.security.audit.config.disabled_rest_categories: NONE
+plugins.security.audit.config.disabled_transport_categories: NONE
+plugins.security.audit.config.log_request_body: true
+plugins.security.audit.config.resolve_indices: true
+plugins.security.audit.config.resolve_bulk_requests: true
+plugins.security.audit.config.enable_rest: true
+plugins.security.audit.config.enable_transport: true
+{% endif %}
+
 plugins.security.enable_snapshot_restore_privilege: true
 plugins.security.check_snapshot_restore_write_privileges: true
+
+# Anonymous authentication - DISABLED for security
+plugins.security.authcz.anonymous_auth_enabled: {{ wazuh_indexer_anonymous_auth_enabled | default(false) | lower }}
 plugins.security.restapi.roles_enabled:
   - all_access
   - security_rest_api_access

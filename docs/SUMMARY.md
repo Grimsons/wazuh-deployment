@@ -2,10 +2,9 @@
 
 - [Introduction](README.md)
 
-# Development Guide
+# Getting Started
 
-- [Set up the development environment](dev/setup.md)
-- [How to run the tests](dev/run-tests.md)
+- [Deployment Guide](getting-started/deployment.md)
 
 # Reference Manual
 
@@ -18,3 +17,20 @@
   - [Configuration files](ref/configuration/configuration-files.md)
 - [Deployment](ref/deployment.md)
 - [Glossary](ref/glossary.md)
+
+# Operations
+
+- [Security Guidelines](operations/security.md)
+- [Pre-Flight Checks](operations/pre-flight-checks.md)
+- [Backup and Restore](operations/backup-restore.md)
+- [Upgrade Guide](operations/upgrade.md)
+- [Disaster Recovery](operations/disaster-recovery.md)
+
+# Development
+
+- [Set up the development environment](dev/setup.md)
+- [How to run the tests](dev/run-tests.md)
+
+---
+
+- [Changelog](changelog.md)

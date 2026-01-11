@@ -68,7 +68,7 @@
     user: "admin"
     password: "admin"
     force_basic_auth: true
-    validate_certs: false
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200]
     return_content: true
   register: indexer_health_initial
@@ -89,7 +89,7 @@
     user: "admin"
     password: "{{ wazuh_admin_password }}"
     force_basic_auth: true
-    validate_certs: false
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200]
     return_content: true
   register: indexer_health

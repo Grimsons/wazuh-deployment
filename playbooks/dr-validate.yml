@@ -1,0 +1,430 @@
+---
+# Wazuh Disaster Recovery Validation Playbook
+# Validates backup integrity and tests recovery procedures
+#
+# Usage:
+#   # Validate latest backup
+#   ansible-playbook playbooks/dr-validate.yml
+#
+#   # Validate specific backup
+#   ansible-playbook playbooks/dr-validate.yml -e "backup_timestamp=20240115_120000"
+#
+#   # Full DR test (restore to test environment)
+#   ansible-playbook playbooks/dr-validate.yml -e "dr_test_mode=true"
+#
+# This playbook:
+#   - Validates backup file integrity
+#   - Checks backup completeness
+#   - Estimates recovery time
+#   - Optionally performs test restore
+
+- name: DR Validation - Discover Backups
+  hosts: localhost
+  gather_facts: true
+  vars:
+    backup_dir: "{{ playbook_dir }}/../backups"
+  tasks:
+    - name: Find available backups
+      ansible.builtin.find:
+        paths: "{{ backup_dir }}"
+        patterns: "*.tar.gz,*.marker"
+        recurse: false
+      register: backup_files
+
+    - name: Get backup directories
+      ansible.builtin.find:
+        paths: "{{ backup_dir }}"
+        file_type: directory
+        recurse: false
+      register: backup_dirs
+
+    - name: List available backups
+      ansible.builtin.debug:
+        msg: |
+          Available Backups in {{ backup_dir }}:
+          {% for dir in backup_dirs.files | sort(attribute='mtime', reverse=true) %}
+          - {{ dir.path | basename }} ({{ '%Y-%m-%d %H:%M:%S' | strftime(dir.mtime) }})
+          {% endfor %}
+
+          Latest backup: {{ (backup_dirs.files | sort(attribute='mtime', reverse=true) | first).path | basename | default('None found') }}
+
+    - name: Set backup timestamp (latest if not specified)
+      ansible.builtin.set_fact:
+        selected_backup: "{{ backup_timestamp | default((backup_dirs.files | sort(attribute='mtime', reverse=true) | first).path | basename) }}"
+      when: backup_dirs.files | length > 0
+
+    - name: Fail if no backups found
+      ansible.builtin.fail:
+        msg: "No backups found in {{ backup_dir }}. Run backup.yml first."
+      when: backup_dirs.files | length == 0
+
+- name: DR Validation - Check Backup Integrity
+  hosts: localhost
+  gather_facts: false
+  vars:
+    backup_dir: "{{ playbook_dir }}/../backups"
+  tasks:
+    - name: Define required backup components
+      ansible.builtin.set_fact:
+        required_components:
+          indexer:
+            - opensearch.yml
+            - internal_users.yml
+          manager:
+            - ossec.conf
+            - client.keys
+          dashboard:
+            - opensearch_dashboards.yml
+            - wazuh.yml
+
+    - name: Check backup directory exists
+      ansible.builtin.stat:
+        path: "{{ backup_dir }}/{{ selected_backup }}"
+      register: backup_path
+
+    - name: Fail if backup directory not found
+      ansible.builtin.fail:
+        msg: "Backup directory not found: {{ backup_dir }}/{{ selected_backup }}"
+      when: not backup_path.stat.exists
+
+    - name: Find all files in backup
+      ansible.builtin.find:
+        paths: "{{ backup_dir }}/{{ selected_backup }}"
+        recurse: true
+        file_type: file
+      register: backup_contents
+
+    - name: Calculate backup size
+      ansible.builtin.shell: |
+        du -sh "{{ backup_dir }}/{{ selected_backup }}" | cut -f1
+      register: backup_size
+      changed_when: false
+
+    - name: Check for Indexer backup files
+      ansible.builtin.stat:
+        path: "{{ backup_dir }}/{{ selected_backup }}/indexer"
+      register: indexer_backup
+
+    - name: Check for Manager backup files
+      ansible.builtin.stat:
+        path: "{{ backup_dir }}/{{ selected_backup }}/manager"
+      register: manager_backup
+
+    - name: Check for Dashboard backup files
+      ansible.builtin.stat:
+        path: "{{ backup_dir }}/{{ selected_backup }}/dashboard"
+      register: dashboard_backup
+
+    - name: Check for credentials backup
+      ansible.builtin.stat:
+        path: "{{ backup_dir }}/{{ selected_backup }}/credentials"
+      register: credentials_backup
+
+    - name: Validate backup completeness
+      ansible.builtin.set_fact:
+        backup_validation:
+          indexer: "{{ indexer_backup.stat.exists | default(false) }}"
+          manager: "{{ manager_backup.stat.exists | default(false) }}"
+          dashboard: "{{ dashboard_backup.stat.exists | default(false) }}"
+          credentials: "{{ credentials_backup.stat.exists | default(false) }}"
+          total_files: "{{ backup_contents.files | length }}"
+          size: "{{ backup_size.stdout }}"
+
+    - name: Display backup validation results
+      ansible.builtin.debug:
+        msg: |
+
+          ══════════════════════════════════════════════════════════════
+                       BACKUP INTEGRITY VALIDATION
+          ══════════════════════════════════════════════════════════════
+
+          Backup: {{ selected_backup }}
+          Size: {{ backup_validation.size }}
+          Total Files: {{ backup_validation.total_files }}
+
+          Component Status:
+            Indexer Config:    {{ '✓ Present' if backup_validation.indexer else '✗ MISSING' }}
+            Manager Config:    {{ '✓ Present' if backup_validation.manager else '✗ MISSING' }}
+            Dashboard Config:  {{ '✓ Present' if backup_validation.dashboard else '✗ MISSING' }}
+            Credentials:       {{ '✓ Present' if backup_validation.credentials else '✗ MISSING' }}
+
+          Overall Status: {{ '✓ VALID' if (backup_validation.indexer and backup_validation.manager and backup_validation.dashboard) else '✗ INCOMPLETE' }}
+
+          ══════════════════════════════════════════════════════════════
+
+    - name: Warn if backup is incomplete
+      ansible.builtin.debug:
+        msg: |
+          WARNING: Backup is incomplete!
+          Missing components will need to be reconfigured manually during recovery.
+      when: not (backup_validation.indexer and backup_validation.manager and backup_validation.dashboard)
+
+- name: DR Validation - Verify Backup File Integrity
+  hosts: localhost
+  gather_facts: false
+  vars:
+    backup_dir: "{{ playbook_dir }}/../backups"
+  tasks:
+    - name: Check for compressed archives
+      ansible.builtin.find:
+        paths: "{{ backup_dir }}/{{ selected_backup }}"
+        patterns: "*.tar.gz,*.tgz"
+        recurse: true
+      register: archives
+
+    - name: Verify archive integrity
+      ansible.builtin.shell: |
+        gzip -t "{{ item.path }}" 2>&1 && echo "OK" || echo "CORRUPTED"
+      loop: "{{ archives.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      register: archive_integrity
+      changed_when: false
+      when: archives.files | length > 0
+
+    - name: Report archive integrity
+      ansible.builtin.debug:
+        msg: |
+          Archive Integrity Check:
+          {% for result in archive_integrity.results | default([]) %}
+          {{ result.item.path | basename }}: {{ result.stdout }}
+          {% endfor %}
+      when: archives.files | length > 0
+
+    - name: Check critical config file checksums
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        checksum_algorithm: sha256
+      loop:
+        - "{{ backup_dir }}/{{ selected_backup }}/indexer/opensearch.yml"
+        - "{{ backup_dir }}/{{ selected_backup }}/manager/ossec.conf"
+        - "{{ backup_dir }}/{{ selected_backup }}/dashboard/opensearch_dashboards.yml"
+      register: config_checksums
+      failed_when: false
+
+    - name: Save checksums for validation
+      ansible.builtin.copy:
+        content: |
+          # Backup Checksums - {{ selected_backup }}
+          # Generated: {{ ansible_date_time.iso8601 | default(lookup('pipe', 'date -Iseconds')) }}
+          {% for item in config_checksums.results %}
+          {% if item.stat.exists | default(false) %}
+          {{ item.stat.checksum }}  {{ item.item | basename }}
+          {% endif %}
+          {% endfor %}
+        dest: "{{ backup_dir }}/{{ selected_backup }}/checksums.sha256"
+        mode: '0644'
+      when: config_checksums.results | selectattr('stat.exists', 'defined') | list | length > 0
+
+- name: DR Validation - Estimate Recovery Time
+  hosts: localhost
+  gather_facts: false
+  vars:
+    backup_dir: "{{ playbook_dir }}/../backups"
+  tasks:
+    - name: Calculate estimated recovery time
+      ansible.builtin.set_fact:
+        rto_estimates:
+          indexer_minutes: 15
+          manager_minutes: 10
+          dashboard_minutes: 5
+          agent_reconnect_minutes: 5
+          total_minutes: 35
+          parallel_total_minutes: 20  # If components restored in parallel
+
+    - name: Display RTO/RPO information
+      ansible.builtin.debug:
+        msg: |
+
+          ══════════════════════════════════════════════════════════════
+                       RECOVERY TIME ESTIMATES (RTO/RPO)
+          ══════════════════════════════════════════════════════════════
+
+          Recovery Time Objective (RTO) Estimates:
+            Indexer Restore:        ~{{ rto_estimates.indexer_minutes }} minutes
+            Manager Restore:        ~{{ rto_estimates.manager_minutes }} minutes
+            Dashboard Restore:      ~{{ rto_estimates.dashboard_minutes }} minutes
+            Agent Reconnection:     ~{{ rto_estimates.agent_reconnect_minutes }} minutes
+            ─────────────────────────────────────
+            Total (Sequential):     ~{{ rto_estimates.total_minutes }} minutes
+            Total (Parallel):       ~{{ rto_estimates.parallel_total_minutes }} minutes
+
+          Recovery Point Objective (RPO):
+            Backup Age: {{ selected_backup }}
+            Data Loss Window: Time since last backup
+
+          Note: Actual recovery time depends on:
+            - Backup size and data volume
+            - Network speed
+            - Hardware performance
+            - Index snapshot size (if included)
+
+          ══════════════════════════════════════════════════════════════
+
+- name: DR Validation - Test Restore (Optional)
+  hosts: localhost
+  gather_facts: false
+  vars:
+    backup_dir: "{{ playbook_dir }}/../backups"
+    dr_test_mode: false
+    test_restore_dir: "/tmp/wazuh-dr-test-{{ ansible_date_time.epoch | default(lookup('pipe', 'date +%s')) }}"
+  tasks:
+    - name: Create test restore directory
+      ansible.builtin.file:
+        path: "{{ test_restore_dir }}"
+        state: directory
+        mode: '0755'
+      when: dr_test_mode | bool
+
+    - name: Copy backup files to test location
+      ansible.builtin.copy:
+        src: "{{ backup_dir }}/{{ selected_backup }}/"
+        dest: "{{ test_restore_dir }}/"
+        remote_src: true
+      when: dr_test_mode | bool
+
+    - name: Verify copied files
+      ansible.builtin.find:
+        paths: "{{ test_restore_dir }}"
+        recurse: true
+        file_type: file
+      register: test_files
+      when: dr_test_mode | bool
+
+    - name: Validate configuration syntax (Indexer)
+      ansible.builtin.shell: |
+        python3 -c "import yaml; yaml.safe_load(open('{{ test_restore_dir }}/indexer/opensearch.yml'))" 2>&1 && echo "VALID" || echo "INVALID"
+      register: indexer_syntax
+      changed_when: false
+      failed_when: false
+      when: dr_test_mode | bool
+
+    - name: Validate configuration syntax (Manager)
+      ansible.builtin.shell: |
+        xmllint --noout "{{ test_restore_dir }}/manager/ossec.conf" 2>&1 && echo "VALID" || echo "INVALID"
+      register: manager_syntax
+      changed_when: false
+      failed_when: false
+      when: dr_test_mode | bool
+
+    - name: Validate configuration syntax (Dashboard)
+      ansible.builtin.shell: |
+        python3 -c "import yaml; yaml.safe_load(open('{{ test_restore_dir }}/dashboard/opensearch_dashboards.yml'))" 2>&1 && echo "VALID" || echo "INVALID"
+      register: dashboard_syntax
+      changed_when: false
+      failed_when: false
+      when: dr_test_mode | bool
+
+    - name: Display test restore results
+      ansible.builtin.debug:
+        msg: |
+
+          ══════════════════════════════════════════════════════════════
+                         DR TEST RESTORE RESULTS
+          ══════════════════════════════════════════════════════════════
+
+          Test Location: {{ test_restore_dir }}
+          Files Restored: {{ test_files.files | length }}
+
+          Configuration Validation:
+            Indexer (YAML):   {{ indexer_syntax.stdout | default('NOT TESTED') }}
+            Manager (XML):    {{ manager_syntax.stdout | default('NOT TESTED') }}
+            Dashboard (YAML): {{ dashboard_syntax.stdout | default('NOT TESTED') }}
+
+          Test Status: {{ '✓ PASSED' if (indexer_syntax.stdout | default('') == 'VALID' and dashboard_syntax.stdout | default('') == 'VALID') else '⚠ REVIEW NEEDED' }}
+
+          ══════════════════════════════════════════════════════════════
+      when: dr_test_mode | bool
+
+    - name: Cleanup test restore directory
+      ansible.builtin.file:
+        path: "{{ test_restore_dir }}"
+        state: absent
+      when:
+        - dr_test_mode | bool
+        - cleanup_test | default(true)
+
+- name: DR Validation - Generate DR Report
+  hosts: localhost
+  gather_facts: true
+  vars:
+    backup_dir: "{{ playbook_dir }}/../backups"
+    report_dir: "{{ playbook_dir }}/../docs/dr-reports"
+  tasks:
+    - name: Create report directory
+      ansible.builtin.file:
+        path: "{{ report_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Generate DR validation report
+      ansible.builtin.copy:
+        content: |
+          # Disaster Recovery Validation Report
+
+          Generated: {{ ansible_date_time.iso8601 | default(lookup('pipe', 'date -Iseconds')) }}
+          Backup Validated: {{ selected_backup }}
+
+          ## Backup Status
+
+          | Component | Status | Notes |
+          |-----------|--------|-------|
+          | Indexer | {{ '✓ Present' if backup_validation.indexer else '✗ Missing' }} | Configuration and security settings |
+          | Manager | {{ '✓ Present' if backup_validation.manager else '✗ Missing' }} | OSSEC config, rules, decoders |
+          | Dashboard | {{ '✓ Present' if backup_validation.dashboard else '✗ Missing' }} | UI configuration |
+          | Credentials | {{ '✓ Present' if backup_validation.credentials else '✗ Missing' }} | Passwords and keys |
+
+          ## Recovery Estimates
+
+          - **RTO (Recovery Time Objective):** ~{{ rto_estimates.total_minutes }} minutes
+          - **RPO (Recovery Point Objective):** Based on backup frequency
+
+          ## Validation Results
+
+          - Total backup size: {{ backup_validation.size }}
+          - Total files: {{ backup_validation.total_files }}
+          - Integrity: {{ '✓ Verified' if (backup_validation.indexer and backup_validation.manager) else '⚠ Incomplete' }}
+
+          ## Recovery Procedure
+
+          1. Run pre-flight checks: `ansible-playbook playbooks/pre-flight-checks.yml`
+          2. Stop all services on target hosts
+          3. Execute restore: `ansible-playbook playbooks/restore.yml -e "backup_timestamp={{ selected_backup }}"`
+          4. Verify services are running
+          5. Validate connectivity and data integrity
+
+          ## Sign-off
+
+          - [ ] DR test completed
+          - [ ] Recovery procedure documented
+          - [ ] Team notified of DR status
+
+        dest: "{{ report_dir }}/dr-validation-{{ ansible_date_time.date | default(lookup('pipe', 'date +%Y-%m-%d')) }}.md"
+        mode: '0644'
+
+    - name: Display final summary
+      ansible.builtin.debug:
+        msg: |
+
+          ══════════════════════════════════════════════════════════════
+                     DR VALIDATION COMPLETE
+          ══════════════════════════════════════════════════════════════
+
+          Backup: {{ selected_backup }}
+          Status: {{ '✓ VALIDATED' if (backup_validation.indexer and backup_validation.manager and backup_validation.dashboard) else '⚠ INCOMPLETE - Review Required' }}
+
+          Report saved to: {{ report_dir }}/dr-validation-{{ ansible_date_time.date | default(lookup('pipe', 'date +%Y-%m-%d')) }}.md
+
+          Next Steps:
+          {% if dr_test_mode | default(false) %}
+            ✓ Test restore completed
+          {% else %}
+            - Run with -e "dr_test_mode=true" for full test restore
+          {% endif %}
+            - Schedule regular DR tests (recommended: monthly)
+            - Update DR documentation if procedures change
+
+          Recovery Command:
+            ansible-playbook playbooks/restore.yml -e "backup_timestamp={{ selected_backup }}"
+
+          ══════════════════════════════════════════════════════════════

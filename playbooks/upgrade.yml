@@ -1,0 +1,567 @@
+---
+# Wazuh Upgrade Playbook
+# Performs rolling upgrades of Wazuh components with minimal downtime
+#
+# Usage:
+#   # Full upgrade (all components)
+#   ansible-playbook playbooks/upgrade.yml -e "target_version=4.15.0"
+#
+#   # Upgrade specific components
+#   ansible-playbook playbooks/upgrade.yml -e "target_version=4.15.0" --tags indexer
+#   ansible-playbook playbooks/upgrade.yml -e "target_version=4.15.0" --tags manager
+#   ansible-playbook playbooks/upgrade.yml -e "target_version=4.15.0" --tags dashboard
+#
+#   # Dry run (check what would be upgraded)
+#   ansible-playbook playbooks/upgrade.yml -e "target_version=4.15.0" --check
+#
+# IMPORTANT:
+#   - Always run pre-flight-checks.yml before upgrading
+#   - Always backup before upgrading (automatic if backup_before_upgrade=true)
+#   - Upgrade order: Indexer → Manager → Dashboard → Agents
+#   - For clusters: Rolling upgrade one node at a time
+#
+# Rollback:
+#   ansible-playbook playbooks/restore.yml -e "backup_timestamp=YYYYMMDD_HHMMSS"
+
+- name: Upgrade - Pre-flight Validation
+  hosts: localhost
+  gather_facts: false
+  tags: [always]
+  vars:
+    target_version: ""
+  tasks:
+    - name: Verify target version is specified
+      ansible.builtin.assert:
+        that:
+          - target_version | length > 0
+        fail_msg: |
+          ERROR: Target version not specified!
+
+          Usage: ansible-playbook playbooks/upgrade.yml -e "target_version=4.15.0"
+        success_msg: "Target version: {{ target_version }}"
+
+    - name: Display upgrade plan
+      ansible.builtin.debug:
+        msg: |
+
+          ══════════════════════════════════════════════════════════════
+                           WAZUH UPGRADE PLAN
+          ══════════════════════════════════════════════════════════════
+
+          Target Version: {{ target_version }}
+
+          Upgrade Order:
+            1. Wazuh Indexer(s): {{ groups.get('wazuh_indexers', []) | join(', ') }}
+            2. Wazuh Manager(s): {{ groups.get('wazuh_managers', []) | join(', ') }}
+            3. Wazuh Dashboard(s): {{ groups.get('wazuh_dashboards', []) | join(', ') }}
+            4. Wazuh Agents: {{ groups.get('wazuh_agents', []) | length }} hosts
+
+          Settings:
+            Backup before upgrade: {{ backup_before_upgrade | default(true) }}
+            Rolling update (clusters): {{ rolling_update | default(true) }}
+            Validate after upgrade: {{ validate_after_upgrade | default(true) }}
+
+          ══════════════════════════════════════════════════════════════
+
+          Press Ctrl+C within 10 seconds to abort...
+
+    - name: Pause for confirmation
+      ansible.builtin.pause:
+        seconds: 10
+      when: not (skip_confirmation | default(false))
+
+- name: Upgrade - Create Pre-Upgrade Backup
+  hosts: wazuh_indexers:wazuh_managers:wazuh_dashboards
+  gather_facts: true
+  tags: [backup, always]
+  vars:
+    backup_before_upgrade: true
+  tasks:
+    - name: Include backup tasks
+      ansible.builtin.include_tasks: ../playbooks/backup.yml
+      when: backup_before_upgrade | default(true)
+
+- name: Upgrade - Create Pre-Upgrade Snapshot
+  hosts: localhost
+  gather_facts: false
+  tags: [backup]
+  vars:
+    backup_timestamp: "{{ ansible_date_time.iso8601_basic_short | default(lookup('pipe', 'date +%Y%m%d_%H%M%S')) }}"
+  tasks:
+    - name: Create upgrade marker file
+      ansible.builtin.copy:
+        content: |
+          Upgrade started: {{ lookup('pipe', 'date') }}
+          Target version: {{ target_version }}
+          Backup timestamp: {{ backup_timestamp }}
+          Hosts:
+            Indexers: {{ groups.get('wazuh_indexers', []) | join(', ') }}
+            Managers: {{ groups.get('wazuh_managers', []) | join(', ') }}
+            Dashboards: {{ groups.get('wazuh_dashboards', []) | join(', ') }}
+        dest: "{{ playbook_dir }}/../backups/upgrade_{{ backup_timestamp }}.marker"
+        mode: '0644'
+      delegate_to: localhost
+
+#
+# PHASE 1: UPGRADE WAZUH INDEXER (Rolling)
+#
+- name: Upgrade - Wazuh Indexer (Rolling Update)
+  hosts: wazuh_indexers
+  gather_facts: true
+  serial: 1  # One node at a time for rolling update
+  tags: [indexer, upgrade]
+  vars:
+    target_version: ""
+    validate_after_upgrade: true
+  tasks:
+    - name: Get current Indexer version
+      ansible.builtin.shell: |
+        /usr/share/wazuh-indexer/bin/opensearch --version 2>/dev/null | head -1 || echo "Unknown"
+      register: current_indexer_version
+      changed_when: false
+
+    - name: Display current version
+      ansible.builtin.debug:
+        msg: "Current Indexer version on {{ inventory_hostname }}: {{ current_indexer_version.stdout }}"
+
+    - name: Disable shard allocation before upgrade
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/settings"
+        method: PUT
+        body_format: json
+        body:
+          persistent:
+            cluster.routing.allocation.enable: "primaries"
+        user: "admin"
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        status_code: [200]
+      register: shard_allocation
+      delegate_to: localhost
+      run_once: true
+      when: groups['wazuh_indexers'] | length > 1
+
+    - name: Perform sync flush
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:{{ wazuh_indexer_http_port | default(9200) }}/_flush/synced"
+        method: POST
+        user: "admin"
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        status_code: [200, 409]  # 409 is OK if some shards couldn't sync
+      delegate_to: localhost
+      when: groups['wazuh_indexers'] | length > 1
+
+    - name: Stop Wazuh Indexer service
+      ansible.builtin.systemd:
+        name: wazuh-indexer
+        state: stopped
+      become: true
+
+    - name: Update Wazuh repository
+      ansible.builtin.include_role:
+        name: package-urls
+      vars:
+        wazuh_version: "{{ target_version }}"
+
+    - name: Upgrade Wazuh Indexer package (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name: "wazuh-indexer={{ target_version }}-*"
+        state: present
+        update_cache: true
+      become: true
+      when: ansible_os_family == 'Debian'
+
+    - name: Upgrade Wazuh Indexer package (RHEL/CentOS)
+      ansible.builtin.yum:
+        name: "wazuh-indexer-{{ target_version }}"
+        state: present
+        update_cache: true
+      become: true
+      when: ansible_os_family == 'RedHat'
+
+    - name: Start Wazuh Indexer service
+      ansible.builtin.systemd:
+        name: wazuh-indexer
+        state: started
+        enabled: true
+      become: true
+
+    - name: Wait for Indexer to be ready
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health"
+        method: GET
+        user: "admin"
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        status_code: [200]
+      register: cluster_health
+      until: cluster_health.status == 200
+      retries: 30
+      delay: 10
+      delegate_to: localhost
+
+    - name: Re-enable shard allocation
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/settings"
+        method: PUT
+        body_format: json
+        body:
+          persistent:
+            cluster.routing.allocation.enable: null
+        user: "admin"
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        status_code: [200]
+      delegate_to: localhost
+      when: groups['wazuh_indexers'] | length > 1
+
+    - name: Wait for cluster to stabilize (green status)
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health?wait_for_status=green&timeout=5m"
+        method: GET
+        user: "admin"
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        status_code: [200]
+      register: cluster_stable
+      delegate_to: localhost
+      when:
+        - groups['wazuh_indexers'] | length > 1
+        - validate_after_upgrade | default(true)
+
+    - name: Verify upgraded version
+      ansible.builtin.shell: |
+        /usr/share/wazuh-indexer/bin/opensearch --version 2>/dev/null | head -1
+      register: new_indexer_version
+      changed_when: false
+
+    - name: Report upgrade status
+      ansible.builtin.debug:
+        msg: |
+          Indexer {{ inventory_hostname }} upgraded successfully!
+          Previous version: {{ current_indexer_version.stdout }}
+          New version: {{ new_indexer_version.stdout }}
+
+#
+# PHASE 2: UPGRADE WAZUH MANAGER (Rolling for clusters)
+#
+- name: Upgrade - Wazuh Manager (Rolling Update)
+  hosts: wazuh_managers
+  gather_facts: true
+  serial: 1  # One node at a time for rolling update
+  tags: [manager, upgrade]
+  vars:
+    target_version: ""
+  tasks:
+    - name: Get current Manager version
+      ansible.builtin.shell: |
+        /var/ossec/bin/wazuh-control info 2>/dev/null | grep "WAZUH_VERSION" | cut -d'"' -f2 || echo "Unknown"
+      register: current_manager_version
+      changed_when: false
+
+    - name: Display current version
+      ansible.builtin.debug:
+        msg: "Current Manager version on {{ inventory_hostname }}: {{ current_manager_version.stdout }}"
+
+    - name: Check cluster status (if clustered)
+      ansible.builtin.shell: /var/ossec/bin/cluster_control -l
+      register: cluster_status
+      changed_when: false
+      failed_when: false
+      when: wazuh_manager_cluster_enabled | default(false)
+
+    - name: Stop Wazuh Manager service
+      ansible.builtin.systemd:
+        name: wazuh-manager
+        state: stopped
+      become: true
+
+    - name: Stop Filebeat service
+      ansible.builtin.systemd:
+        name: filebeat
+        state: stopped
+      become: true
+      failed_when: false
+
+    - name: Upgrade Wazuh Manager package (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name: "wazuh-manager={{ target_version }}-*"
+        state: present
+        update_cache: true
+      become: true
+      when: ansible_os_family == 'Debian'
+
+    - name: Upgrade Wazuh Manager package (RHEL/CentOS)
+      ansible.builtin.yum:
+        name: "wazuh-manager-{{ target_version }}"
+        state: present
+        update_cache: true
+      become: true
+      when: ansible_os_family == 'RedHat'
+
+    - name: Start Wazuh Manager service
+      ansible.builtin.systemd:
+        name: wazuh-manager
+        state: started
+        enabled: true
+      become: true
+
+    - name: Start Filebeat service
+      ansible.builtin.systemd:
+        name: filebeat
+        state: started
+        enabled: true
+      become: true
+      failed_when: false
+
+    - name: Wait for Manager API to be ready
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:{{ wazuh_manager_api_port | default(55000) }}/"
+        method: GET
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        status_code: [200, 401]  # 401 is OK - means API is responding
+      register: api_health
+      until: api_health.status in [200, 401]
+      retries: 30
+      delay: 10
+      delegate_to: localhost
+
+    - name: Wait for cluster to synchronize (if clustered)
+      ansible.builtin.shell: |
+        sleep 30
+        /var/ossec/bin/cluster_control -l | grep -c "connected"
+      register: cluster_connected
+      until: (cluster_connected.stdout | int) == (groups['wazuh_managers'] | length)
+      retries: 12
+      delay: 10
+      changed_when: false
+      failed_when: false
+      when: wazuh_manager_cluster_enabled | default(false)
+
+    - name: Verify upgraded version
+      ansible.builtin.shell: |
+        /var/ossec/bin/wazuh-control info 2>/dev/null | grep "WAZUH_VERSION" | cut -d'"' -f2
+      register: new_manager_version
+      changed_when: false
+
+    - name: Report upgrade status
+      ansible.builtin.debug:
+        msg: |
+          Manager {{ inventory_hostname }} upgraded successfully!
+          Previous version: {{ current_manager_version.stdout }}
+          New version: {{ new_manager_version.stdout }}
+
+#
+# PHASE 3: UPGRADE WAZUH DASHBOARD
+#
+- name: Upgrade - Wazuh Dashboard
+  hosts: wazuh_dashboards
+  gather_facts: true
+  serial: 1
+  tags: [dashboard, upgrade]
+  vars:
+    target_version: ""
+  tasks:
+    - name: Get current Dashboard version
+      ansible.builtin.shell: |
+        rpm -q wazuh-dashboard 2>/dev/null || dpkg -l wazuh-dashboard 2>/dev/null | grep wazuh-dashboard | awk '{print $3}' || echo "Unknown"
+      register: current_dashboard_version
+      changed_when: false
+
+    - name: Display current version
+      ansible.builtin.debug:
+        msg: "Current Dashboard version on {{ inventory_hostname }}: {{ current_dashboard_version.stdout }}"
+
+    - name: Stop Wazuh Dashboard service
+      ansible.builtin.systemd:
+        name: wazuh-dashboard
+        state: stopped
+      become: true
+
+    - name: Upgrade Wazuh Dashboard package (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name: "wazuh-dashboard={{ target_version }}-*"
+        state: present
+        update_cache: true
+      become: true
+      when: ansible_os_family == 'Debian'
+
+    - name: Upgrade Wazuh Dashboard package (RHEL/CentOS)
+      ansible.builtin.yum:
+        name: "wazuh-dashboard-{{ target_version }}"
+        state: present
+        update_cache: true
+      become: true
+      when: ansible_os_family == 'RedHat'
+
+    - name: Start Wazuh Dashboard service
+      ansible.builtin.systemd:
+        name: wazuh-dashboard
+        state: started
+        enabled: true
+      become: true
+
+    - name: Wait for Dashboard to be ready
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:{{ wazuh_dashboard_port | default(443) }}/app/wazuh"
+        method: GET
+        user: "admin"
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        status_code: [200, 302]
+      register: dashboard_health
+      until: dashboard_health.status in [200, 302]
+      retries: 30
+      delay: 10
+      delegate_to: localhost
+
+    - name: Report upgrade status
+      ansible.builtin.debug:
+        msg: |
+          Dashboard {{ inventory_hostname }} upgraded successfully!
+          Previous version: {{ current_dashboard_version.stdout }}
+          Dashboard URL: https://{{ inventory_hostname }}:{{ wazuh_dashboard_port | default(443) }}
+
+#
+# PHASE 4: UPGRADE WAZUH AGENTS (Batch)
+#
+- name: Upgrade - Wazuh Agents
+  hosts: wazuh_agents
+  gather_facts: true
+  serial: "{{ agent_batch_size | default(10) }}"  # Upgrade N agents at a time
+  tags: [agent, upgrade]
+  vars:
+    target_version: ""
+  tasks:
+    - name: Get current Agent version
+      ansible.builtin.shell: |
+        /var/ossec/bin/wazuh-control info 2>/dev/null | grep "WAZUH_VERSION" | cut -d'"' -f2 || echo "Unknown"
+      register: current_agent_version
+      changed_when: false
+
+    - name: Display current version
+      ansible.builtin.debug:
+        msg: "Current Agent version on {{ inventory_hostname }}: {{ current_agent_version.stdout }}"
+      when: upgrade_agents | default(true)
+
+    - name: Stop Wazuh Agent service
+      ansible.builtin.systemd:
+        name: wazuh-agent
+        state: stopped
+      become: true
+      when: upgrade_agents | default(true)
+
+    - name: Upgrade Wazuh Agent package (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name: "wazuh-agent={{ target_version }}-*"
+        state: present
+        update_cache: true
+      become: true
+      when:
+        - ansible_os_family == 'Debian'
+        - upgrade_agents | default(true)
+
+    - name: Upgrade Wazuh Agent package (RHEL/CentOS)
+      ansible.builtin.yum:
+        name: "wazuh-agent-{{ target_version }}"
+        state: present
+        update_cache: true
+      become: true
+      when:
+        - ansible_os_family == 'RedHat'
+        - upgrade_agents | default(true)
+
+    - name: Start Wazuh Agent service
+      ansible.builtin.systemd:
+        name: wazuh-agent
+        state: started
+        enabled: true
+      become: true
+      when: upgrade_agents | default(true)
+
+    - name: Wait for Agent to reconnect to Manager
+      ansible.builtin.shell: |
+        sleep 10
+        /var/ossec/bin/wazuh-control status | grep -q "wazuh-agentd is running"
+      register: agent_status
+      until: agent_status.rc == 0
+      retries: 6
+      delay: 10
+      changed_when: false
+      when: upgrade_agents | default(true)
+
+#
+# POST-UPGRADE VALIDATION
+#
+- name: Upgrade - Post-Upgrade Validation
+  hosts: localhost
+  gather_facts: false
+  tags: [validate, always]
+  vars:
+    validate_after_upgrade: true
+  tasks:
+    - name: Validate Indexer cluster health
+      ansible.builtin.uri:
+        url: "https://{{ groups['wazuh_indexers'][0] }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health"
+        method: GET
+        user: "admin"
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        return_content: true
+      register: indexer_health
+      when: validate_after_upgrade | default(true)
+
+    - name: Validate Manager API
+      ansible.builtin.uri:
+        url: "https://{{ groups['wazuh_managers'][0] }}:{{ wazuh_manager_api_port | default(55000) }}/"
+        method: GET
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        status_code: [200, 401]
+      register: manager_api
+      when: validate_after_upgrade | default(true)
+
+    - name: Get connected agents count
+      ansible.builtin.uri:
+        url: "https://{{ groups['wazuh_managers'][0] }}:{{ wazuh_manager_api_port | default(55000) }}/agents/summary/status"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ api_token | default('') }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        status_code: [200, 401]
+      register: agents_status
+      failed_when: false
+      when: validate_after_upgrade | default(true)
+
+    - name: Display upgrade summary
+      ansible.builtin.debug:
+        msg: |
+
+          ══════════════════════════════════════════════════════════════
+                         WAZUH UPGRADE COMPLETE
+          ══════════════════════════════════════════════════════════════
+
+          Target Version: {{ target_version }}
+
+          Cluster Status:
+            Indexer Health: {{ indexer_health.json.status | default('Unknown') }}
+            Manager API: {{ 'OK' if manager_api.status in [200, 401] else 'FAILED' }}
+
+          Components Upgraded:
+            Indexers: {{ groups.get('wazuh_indexers', []) | length }}
+            Managers: {{ groups.get('wazuh_managers', []) | length }}
+            Dashboards: {{ groups.get('wazuh_dashboards', []) | length }}
+            Agents: {{ groups.get('wazuh_agents', []) | length }}
+
+          ══════════════════════════════════════════════════════════════
+
+          Post-Upgrade Checklist:
+            [ ] Verify Dashboard login works
+            [ ] Check agent connectivity
+            [ ] Validate alert flow
+            [ ] Review cluster status
+
+          If issues occur, rollback with:
+            ansible-playbook playbooks/restore.yml -e "backup_timestamp=YYYYMMDD_HHMMSS"
+
+          ══════════════════════════════════════════════════════════════

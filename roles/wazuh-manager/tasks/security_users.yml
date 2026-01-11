@@ -40,7 +40,7 @@
     user: "{{ wazuh_api_user }}"
     password: "wazuh"
     force_basic_auth: true
-    validate_certs: false
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     return_content: true
   register: auth_response
   run_once: true
@@ -66,7 +66,7 @@
     method: GET
     headers:
       Authorization: "Bearer {{ wazuh_jwt_token }}"
-    validate_certs: false
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     return_content: true
   register: users_response
   when: wazuh_jwt_token is defined
@@ -87,7 +87,7 @@
     body_format: json
     body:
       password: "{{ wazuh_api_password }}"
-    validate_certs: false
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200]
   register: password_update
   when: wazuh_user_id is defined

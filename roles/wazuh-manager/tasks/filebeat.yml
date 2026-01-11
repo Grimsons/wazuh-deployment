@@ -42,15 +42,15 @@
 
 - name: Download Filebeat OSS package
   ansible.builtin.get_url:
-    url: "https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-oss-7.10.2-amd64.deb"
-    dest: /tmp/filebeat-oss-7.10.2-amd64.deb
+    url: "https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-oss-{{ wazuh_filebeat_version | default('7.10.2') }}-amd64.deb"
+    dest: "/tmp/filebeat-oss-{{ wazuh_filebeat_version | default('7.10.2') }}-amd64.deb"
     mode: '0644'
   when: filebeat_installed.rc != 0
   become: true
 
 - name: Install Filebeat OSS
   ansible.builtin.apt:
-    deb: /tmp/filebeat-oss-7.10.2-amd64.deb
+    deb: "/tmp/filebeat-oss-{{ wazuh_filebeat_version | default('7.10.2') }}-amd64.deb"
     state: present
   when: filebeat_installed.rc != 0
   become: true

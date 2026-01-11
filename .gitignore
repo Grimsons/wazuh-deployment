@@ -4,6 +4,9 @@ keys/
 *_key
 *_key.pub
 
+# Project-local SSH known hosts (contains target fingerprints)
+.known_hosts
+
 # Generated credentials (SENSITIVE - never commit!)
 credentials/
 
@@ -53,6 +56,9 @@ temp/
 *.tmp
 *.bak
 *.backup
+
+# Backups created during deployment
+backups/
 
 # Python
 __pycache__/

@@ -1,0 +1,444 @@
+---
+# Wazuh Pre-Flight Checks Playbook
+# Run this BEFORE deployment to validate environment readiness
+#
+# Usage:
+#   ansible-playbook playbooks/pre-flight-checks.yml
+#   ansible-playbook playbooks/pre-flight-checks.yml --tags network
+#   ansible-playbook playbooks/pre-flight-checks.yml -e "skip_package_check=true"
+#
+# This playbook validates:
+#   - System resources (CPU, RAM, disk)
+#   - Network connectivity between nodes
+#   - Required ports availability
+#   - DNS resolution
+#   - Package manager access
+#   - Certificate validity (for upgrades)
+
+- name: Pre-Flight Checks - Gather Facts
+  hosts: all
+  gather_facts: true
+  tags: [always]
+
+- name: Pre-Flight Checks - System Resources
+  hosts: all
+  gather_facts: false
+  tags: [resources, system]
+  vars:
+    # Minimum requirements per component
+    min_requirements:
+      wazuh_indexers:
+        ram_gb: 4
+        disk_gb: 50
+        cpu_cores: 2
+      wazuh_managers:
+        ram_gb: 2
+        disk_gb: 20
+        cpu_cores: 2
+      wazuh_dashboards:
+        ram_gb: 2
+        disk_gb: 10
+        cpu_cores: 1
+      wazuh_agents:
+        ram_gb: 1
+        disk_gb: 5
+        cpu_cores: 1
+
+  tasks:
+    - name: Determine component type for this host
+      ansible.builtin.set_fact:
+        component_type: >-
+          {% if inventory_hostname in groups.get('wazuh_indexers', []) %}wazuh_indexers
+          {% elif inventory_hostname in groups.get('wazuh_managers', []) %}wazuh_managers
+          {% elif inventory_hostname in groups.get('wazuh_dashboards', []) %}wazuh_dashboards
+          {% elif inventory_hostname in groups.get('wazuh_agents', []) %}wazuh_agents
+          {% else %}unknown{% endif %}
+
+    - name: Get system memory (MB)
+      ansible.builtin.set_fact:
+        system_ram_mb: "{{ ansible_memtotal_mb }}"
+        system_ram_gb: "{{ (ansible_memtotal_mb / 1024) | round(1) }}"
+
+    - name: Get CPU count
+      ansible.builtin.set_fact:
+        system_cpu_cores: "{{ ansible_processor_vcpus | default(ansible_processor_cores * ansible_processor_count) }}"
+
+    - name: Get root filesystem free space
+      ansible.builtin.shell: df -BG / | tail -1 | awk '{print $4}' | tr -d 'G'
+      register: disk_free
+      changed_when: false
+
+    - name: Set disk space fact
+      ansible.builtin.set_fact:
+        system_disk_free_gb: "{{ disk_free.stdout | int }}"
+
+    - name: Display system resources
+      ansible.builtin.debug:
+        msg: |
+          Host: {{ inventory_hostname }}
+          Component: {{ component_type | trim }}
+          RAM: {{ system_ram_gb }} GB (minimum: {{ min_requirements[component_type | trim].ram_gb }} GB)
+          CPU Cores: {{ system_cpu_cores }} (minimum: {{ min_requirements[component_type | trim].cpu_cores }})
+          Free Disk: {{ system_disk_free_gb }} GB (minimum: {{ min_requirements[component_type | trim].disk_gb }} GB)
+
+    - name: Check RAM requirements
+      ansible.builtin.assert:
+        that:
+          - (system_ram_gb | float) >= (min_requirements[component_type | trim].ram_gb | float)
+        fail_msg: |
+          INSUFFICIENT RAM on {{ inventory_hostname }}
+          Required: {{ min_requirements[component_type | trim].ram_gb }} GB
+          Available: {{ system_ram_gb }} GB
+        success_msg: "RAM check passed: {{ system_ram_gb }} GB available"
+
+    - name: Check CPU requirements
+      ansible.builtin.assert:
+        that:
+          - (system_cpu_cores | int) >= (min_requirements[component_type | trim].cpu_cores | int)
+        fail_msg: |
+          INSUFFICIENT CPU on {{ inventory_hostname }}
+          Required: {{ min_requirements[component_type | trim].cpu_cores }} cores
+          Available: {{ system_cpu_cores }} cores
+        success_msg: "CPU check passed: {{ system_cpu_cores }} cores available"
+
+    - name: Check disk space requirements
+      ansible.builtin.assert:
+        that:
+          - (system_disk_free_gb | int) >= (min_requirements[component_type | trim].disk_gb | int)
+        fail_msg: |
+          INSUFFICIENT DISK SPACE on {{ inventory_hostname }}
+          Required: {{ min_requirements[component_type | trim].disk_gb }} GB
+          Available: {{ system_disk_free_gb }} GB
+        success_msg: "Disk check passed: {{ system_disk_free_gb }} GB available"
+
+- name: Pre-Flight Checks - Network Connectivity
+  hosts: all
+  gather_facts: false
+  tags: [network, connectivity]
+  tasks:
+    - name: Check connectivity to Indexer nodes
+      ansible.builtin.wait_for:
+        host: "{{ item.ip }}"
+        port: "{{ wazuh_indexer_http_port | default(9200) }}"
+        timeout: 5
+        state: started
+      loop: "{{ wazuh_indexer_nodes | default([]) }}"
+      loop_control:
+        label: "{{ item.ip }}:{{ wazuh_indexer_http_port | default(9200) }}"
+      ignore_errors: true
+      register: indexer_connectivity
+      when: wazuh_indexer_nodes is defined
+
+    - name: Check connectivity to Manager nodes
+      ansible.builtin.wait_for:
+        host: "{{ item.ip }}"
+        port: "{{ wazuh_manager_api_port | default(55000) }}"
+        timeout: 5
+        state: started
+      loop: "{{ wazuh_manager_nodes | default([]) }}"
+      loop_control:
+        label: "{{ item.ip }}:{{ wazuh_manager_api_port | default(55000) }}"
+      ignore_errors: true
+      register: manager_connectivity
+      when: wazuh_manager_nodes is defined
+
+    - name: Report connectivity status
+      ansible.builtin.debug:
+        msg: |
+          Network connectivity from {{ inventory_hostname }}:
+          Indexer nodes: {{ 'OK' if indexer_connectivity is not failed else 'ISSUES DETECTED' }}
+          Manager nodes: {{ 'OK' if manager_connectivity is not failed else 'ISSUES DETECTED' }}
+      when: wazuh_indexer_nodes is defined or wazuh_manager_nodes is defined
+
+- name: Pre-Flight Checks - Port Availability
+  hosts: all
+  gather_facts: false
+  tags: [network, ports]
+  tasks:
+    - name: Define required ports per component
+      ansible.builtin.set_fact:
+        required_ports:
+          wazuh_indexers:
+            - { port: "{{ wazuh_indexer_http_port | default(9200) }}", desc: "Indexer HTTP API" }
+            - { port: "{{ wazuh_indexer_transport_port | default(9300) }}", desc: "Indexer Transport" }
+          wazuh_managers:
+            - { port: "{{ wazuh_manager_api_port | default(55000) }}", desc: "Manager API" }
+            - { port: "{{ wazuh_manager_agent_port | default(1514) }}", desc: "Agent Communication" }
+            - { port: 1515, desc: "Agent Enrollment" }
+            - { port: 1516, desc: "Cluster Communication" }
+          wazuh_dashboards:
+            - { port: "{{ wazuh_dashboard_port | default(443) }}", desc: "Dashboard HTTPS" }
+
+    - name: Check if Indexer ports are available
+      ansible.builtin.shell: ss -tlnp | grep -q ':{{ item.port }} ' && echo "IN_USE" || echo "AVAILABLE"
+      loop: "{{ required_ports.wazuh_indexers }}"
+      loop_control:
+        label: "{{ item.port }} ({{ item.desc }})"
+      register: indexer_ports
+      changed_when: false
+      when: inventory_hostname in groups.get('wazuh_indexers', [])
+
+    - name: Check if Manager ports are available
+      ansible.builtin.shell: ss -tlnp | grep -q ':{{ item.port }} ' && echo "IN_USE" || echo "AVAILABLE"
+      loop: "{{ required_ports.wazuh_managers }}"
+      loop_control:
+        label: "{{ item.port }} ({{ item.desc }})"
+      register: manager_ports
+      changed_when: false
+      when: inventory_hostname in groups.get('wazuh_managers', [])
+
+    - name: Check if Dashboard ports are available
+      ansible.builtin.shell: ss -tlnp | grep -q ':{{ item.port }} ' && echo "IN_USE" || echo "AVAILABLE"
+      loop: "{{ required_ports.wazuh_dashboards }}"
+      loop_control:
+        label: "{{ item.port }} ({{ item.desc }})"
+      register: dashboard_ports
+      changed_when: false
+      when: inventory_hostname in groups.get('wazuh_dashboards', [])
+
+    - name: Display port status for Indexers
+      ansible.builtin.debug:
+        msg: "Port {{ item.item.port }} ({{ item.item.desc }}): {{ item.stdout }}"
+      loop: "{{ indexer_ports.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.port | default('N/A') }}"
+      when: indexer_ports.results is defined
+
+    - name: Display port status for Managers
+      ansible.builtin.debug:
+        msg: "Port {{ item.item.port }} ({{ item.item.desc }}): {{ item.stdout }}"
+      loop: "{{ manager_ports.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.port | default('N/A') }}"
+      when: manager_ports.results is defined
+
+    - name: Display port status for Dashboards
+      ansible.builtin.debug:
+        msg: "Port {{ item.item.port }} ({{ item.item.desc }}): {{ item.stdout }}"
+      loop: "{{ dashboard_ports.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.port | default('N/A') }}"
+      when: dashboard_ports.results is defined
+
+- name: Pre-Flight Checks - DNS Resolution
+  hosts: all
+  gather_facts: false
+  tags: [network, dns]
+  tasks:
+    - name: Test DNS resolution for Wazuh package repository
+      ansible.builtin.command: getent hosts packages.wazuh.com
+      register: dns_wazuh
+      changed_when: false
+      failed_when: false
+
+    - name: Test DNS resolution for Elastic repository
+      ansible.builtin.command: getent hosts artifacts.elastic.co
+      register: dns_elastic
+      changed_when: false
+      failed_when: false
+
+    - name: Report DNS resolution status
+      ansible.builtin.debug:
+        msg: |
+          DNS Resolution from {{ inventory_hostname }}:
+          packages.wazuh.com: {{ 'OK' if dns_wazuh.rc == 0 else 'FAILED' }}
+          artifacts.elastic.co: {{ 'OK' if dns_elastic.rc == 0 else 'FAILED' }}
+
+    - name: Assert DNS resolution works
+      ansible.builtin.assert:
+        that:
+          - dns_wazuh.rc == 0
+        fail_msg: "Cannot resolve packages.wazuh.com - check DNS configuration"
+        success_msg: "DNS resolution working correctly"
+
+- name: Pre-Flight Checks - Package Manager
+  hosts: all
+  gather_facts: false
+  tags: [packages]
+  tasks:
+    - name: Test package manager (Debian/Ubuntu)
+      ansible.builtin.command: apt-get update
+      become: true
+      register: apt_update
+      changed_when: false
+      failed_when: false
+      when:
+        - ansible_os_family == 'Debian'
+        - skip_package_check is not defined or not skip_package_check
+
+    - name: Test package manager (RHEL/CentOS)
+      ansible.builtin.command: yum check-update
+      become: true
+      register: yum_update
+      changed_when: false
+      failed_when: yum_update.rc not in [0, 100]  # 100 = updates available
+      when:
+        - ansible_os_family == 'RedHat'
+        - skip_package_check is not defined or not skip_package_check
+
+    - name: Report package manager status
+      ansible.builtin.debug:
+        msg: |
+          Package Manager Status on {{ inventory_hostname }}:
+          {{ 'apt: OK' if apt_update.rc is defined and apt_update.rc == 0 else '' }}
+          {{ 'yum: OK' if yum_update.rc is defined and yum_update.rc in [0, 100] else '' }}
+      when: skip_package_check is not defined or not skip_package_check
+
+- name: Pre-Flight Checks - SSH Connectivity (from control node)
+  hosts: localhost
+  gather_facts: false
+  tags: [network, ssh]
+  tasks:
+    - name: Test SSH connectivity to all hosts
+      ansible.builtin.command: >
+        ssh -o BatchMode=yes -o ConnectTimeout=5
+        -o StrictHostKeyChecking=no
+        {{ hostvars[item].ansible_user | default('root') }}@{{ item }} echo "SSH OK"
+      loop: "{{ groups['all'] | difference(['localhost']) }}"
+      register: ssh_results
+      changed_when: false
+      failed_when: false
+      delegate_to: localhost
+
+    - name: Report SSH connectivity
+      ansible.builtin.debug:
+        msg: |
+          SSH Connectivity Results:
+          {% for result in ssh_results.results %}
+          {{ result.item }}: {{ 'OK' if result.rc == 0 else 'FAILED - ' + result.stderr | default('Unknown error') }}
+          {% endfor %}
+
+- name: Pre-Flight Checks - Certificate Validation (for upgrades)
+  hosts: wazuh_indexers:wazuh_managers:wazuh_dashboards
+  gather_facts: false
+  tags: [certificates, upgrade]
+  tasks:
+    - name: Check if certificates exist on Indexers
+      ansible.builtin.stat:
+        path: "{{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') }}/indexer.pem"
+      register: indexer_cert
+      when: inventory_hostname in groups.get('wazuh_indexers', [])
+
+    - name: Check certificate expiry on Indexers
+      ansible.builtin.shell: |
+        openssl x509 -enddate -noout -in {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') }}/indexer.pem 2>/dev/null | cut -d= -f2
+      register: indexer_cert_expiry
+      changed_when: false
+      failed_when: false
+      when:
+        - inventory_hostname in groups.get('wazuh_indexers', [])
+        - indexer_cert.stat.exists | default(false)
+
+    - name: Check days until certificate expiry
+      ansible.builtin.shell: |
+        expiry_date=$(openssl x509 -enddate -noout -in {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') }}/indexer.pem 2>/dev/null | cut -d= -f2)
+        expiry_epoch=$(date -d "$expiry_date" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$expiry_date" +%s 2>/dev/null)
+        current_epoch=$(date +%s)
+        days_left=$(( (expiry_epoch - current_epoch) / 86400 ))
+        echo $days_left
+      register: cert_days_left
+      changed_when: false
+      failed_when: false
+      when:
+        - inventory_hostname in groups.get('wazuh_indexers', [])
+        - indexer_cert.stat.exists | default(false)
+
+    - name: Warn if certificate expires soon
+      ansible.builtin.debug:
+        msg: |
+          WARNING: Certificate on {{ inventory_hostname }} expires in {{ cert_days_left.stdout }} days!
+          Expiry date: {{ indexer_cert_expiry.stdout | default('Unknown') }}
+      when:
+        - cert_days_left.stdout is defined
+        - (cert_days_left.stdout | int) < 30
+        - (cert_days_left.stdout | int) > 0
+
+    - name: Fail if certificate expired
+      ansible.builtin.fail:
+        msg: "Certificate on {{ inventory_hostname }} has EXPIRED! Please renew before proceeding."
+      when:
+        - cert_days_left.stdout is defined
+        - (cert_days_left.stdout | int) <= 0
+
+- name: Pre-Flight Checks - Existing Services (for upgrades)
+  hosts: wazuh_indexers:wazuh_managers:wazuh_dashboards
+  gather_facts: false
+  tags: [services, upgrade]
+  tasks:
+    - name: Check Wazuh Indexer service status
+      ansible.builtin.systemd:
+        name: wazuh-indexer
+      register: indexer_service
+      failed_when: false
+      when: inventory_hostname in groups.get('wazuh_indexers', [])
+
+    - name: Check Wazuh Manager service status
+      ansible.builtin.systemd:
+        name: wazuh-manager
+      register: manager_service
+      failed_when: false
+      when: inventory_hostname in groups.get('wazuh_managers', [])
+
+    - name: Check Wazuh Dashboard service status
+      ansible.builtin.systemd:
+        name: wazuh-dashboard
+      register: dashboard_service
+      failed_when: false
+      when: inventory_hostname in groups.get('wazuh_dashboards', [])
+
+    - name: Get installed Wazuh version (Indexer)
+      ansible.builtin.shell: |
+        rpm -q wazuh-indexer 2>/dev/null || dpkg -l wazuh-indexer 2>/dev/null | grep wazuh-indexer | awk '{print $3}'
+      register: installed_indexer_version
+      changed_when: false
+      failed_when: false
+      when: inventory_hostname in groups.get('wazuh_indexers', [])
+
+    - name: Get installed Wazuh version (Manager)
+      ansible.builtin.shell: |
+        /var/ossec/bin/wazuh-control info 2>/dev/null | grep "WAZUH_VERSION" | cut -d'"' -f2 || echo "Not installed"
+      register: installed_manager_version
+      changed_when: false
+      failed_when: false
+      when: inventory_hostname in groups.get('wazuh_managers', [])
+
+    - name: Report service and version status
+      ansible.builtin.debug:
+        msg: |
+          {{ inventory_hostname }} Status:
+          {% if inventory_hostname in groups.get('wazuh_indexers', []) %}
+          Indexer Service: {{ indexer_service.status.ActiveState | default('not installed') }}
+          Indexer Version: {{ installed_indexer_version.stdout | default('Not installed') }}
+          {% endif %}
+          {% if inventory_hostname in groups.get('wazuh_managers', []) %}
+          Manager Service: {{ manager_service.status.ActiveState | default('not installed') }}
+          Manager Version: {{ installed_manager_version.stdout | default('Not installed') }}
+          {% endif %}
+          {% if inventory_hostname in groups.get('wazuh_dashboards', []) %}
+          Dashboard Service: {{ dashboard_service.status.ActiveState | default('not installed') }}
+          {% endif %}
+
+- name: Pre-Flight Checks - Summary
+  hosts: localhost
+  gather_facts: false
+  tags: [always]
+  tasks:
+    - name: Display pre-flight check summary
+      ansible.builtin.debug:
+        msg: |
+
+          ══════════════════════════════════════════════════════════════
+                         PRE-FLIGHT CHECKS COMPLETE
+          ══════════════════════════════════════════════════════════════
+
+          All pre-flight checks have been executed.
+
+          Review the output above for any warnings or failures.
+
+          If all checks passed, you can proceed with deployment:
+            ansible-playbook site.yml
+
+          Or for upgrades:
+            ansible-playbook playbooks/upgrade.yml
+
+          ══════════════════════════════════════════════════════════════

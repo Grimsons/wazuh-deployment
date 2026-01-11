@@ -2,8 +2,26 @@
 
 # Wazuh Ansible Deployment - Interactive Setup Script
 # This script configures Ansible variables for Wazuh deployment
+#
+# Security features:
+# - No use of eval for variable assignment
+# - Input validation for all user inputs
+# - Secure password generation
+# - Credentials stored in separate protected files
+# - Cleanup on exit
 
-set -e
+set -euo pipefail
+
+# Cleanup trap for security
+cleanup() {
+    local exit_code=$?
+    # Restore terminal echo in case of interrupt during password input
+    stty echo 2>/dev/null || true
+    # Clear sensitive variables
+    unset API_PASSWORD INDEXER_ADMIN_PASSWORD MANAGER_CLUSTER_KEY 2>/dev/null || true
+    exit $exit_code
+}
+trap cleanup EXIT INT TERM
 
 # Colors for output
 RED='\033[0;31m'
@@ -47,6 +65,54 @@ print_error() {
     echo -e "${RED}✗ $1${NC}"
 }
 
+# Secure variable assignment without eval
+set_var() {
+    local var_name="$1"
+    local value="$2"
+    printf -v "$var_name" '%s' "$value"
+}
+
+# Input sanitization functions
+sanitize_alphanum() {
+    # Allow alphanumeric, dots, hyphens, underscores
+    echo "$1" | tr -cd 'a-zA-Z0-9._-'
+}
+
+sanitize_path() {
+    # Allow path characters but prevent traversal
+    local path="$1"
+    # Remove any ../ sequences
+    path="${path//\.\.\//}"
+    echo "$path" | tr -cd 'a-zA-Z0-9._/-'
+}
+
+validate_ip() {
+    local ip="$1"
+    local IFS='.'
+    read -ra octets <<< "$ip"
+    [[ ${#octets[@]} -eq 4 ]] || return 1
+    for octet in "${octets[@]}"; do
+        [[ "$octet" =~ ^[0-9]+$ ]] || return 1
+        (( octet >= 0 && octet <= 255 )) || return 1
+    done
+    return 0
+}
+
+validate_hostname() {
+    local host="$1"
+    # Valid hostname or IP
+    if validate_ip "$host"; then
+        return 0
+    fi
+    # RFC 1123 hostname validation
+    [[ "$host" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]{0,253}[a-zA-Z0-9])?$ ]]
+}
+
+validate_port() {
+    local port="$1"
+    [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 ))
+}
+
 # Function to prompt for input with default value
 prompt_with_default() {
     local prompt="$1"
@@ -64,9 +130,9 @@ prompt_with_default() {
     fi
 
     if [ -z "$value" ]; then
-        eval "$var_name='$default'"
+        set_var "$var_name" "$default"
     else
-        eval "$var_name='$value'"
+        set_var "$var_name" "$value"
     fi
 }
 
@@ -85,8 +151,8 @@ prompt_yes_no() {
         fi
 
         case "${value,,}" in
-            y|yes) eval "$var_name='true'"; return ;;
-            n|no) eval "$var_name='false'"; return ;;
+            y|yes) set_var "$var_name" "true"; return ;;
+            n|no) set_var "$var_name" "false"; return ;;
             *) echo -e "${RED}Please enter yes or no${NC}" ;;
         esac
     done
@@ -108,25 +174,41 @@ prompt_hosts() {
         if [ -z "$host" ]; then
             break
         fi
+        # Validate hostname/IP
+        if ! validate_hostname "$host"; then
+            print_error "Invalid hostname/IP: $host"
+            continue
+        fi
         hosts+=("$host")
         ((count++))
     done
 
-    eval "$var_name='${hosts[*]}'"
+    # Use printf to safely assign array
+    printf -v "$var_name" '%s' "${hosts[*]}"
 }
 
-# Function to generate random password
+# Function to generate cryptographically secure random password
 generate_password() {
-    openssl rand -base64 24 2>/dev/null || cat /dev/urandom | tr -dc 'a-zA-Z0-9!@#$%^&*' | fold -w 24 | head -n 1
-}
+    local length="${1:-24}"
+    local password=""
 
-# Function to validate IP address
-validate_ip() {
-    local ip=$1
-    if [[ $ip =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-        return 0
+    # Try OpenSSL first (most secure)
+    if command -v openssl &>/dev/null; then
+        password=$(openssl rand -base64 48 2>/dev/null | tr -d '/+=' | head -c "$length")
     fi
-    return 1
+
+    # Fallback to /dev/urandom with proper entropy
+    if [ -z "$password" ] || [ ${#password} -lt "$length" ]; then
+        password=$(head -c 100 /dev/urandom 2>/dev/null | LC_ALL=C tr -dc 'a-zA-Z0-9!@#$%^&*' | head -c "$length")
+    fi
+
+    # Ensure password meets minimum requirements
+    if [ ${#password} -lt "$length" ]; then
+        print_error "Failed to generate secure password"
+        exit 1
+    fi
+
+    echo "$password"
 }
 
 # Main setup function
@@ -426,18 +508,27 @@ wazuh_indexer_transport_port: ${DEFAULT_INDEXER_TRANSPORT_PORT}
 wazuh_indexer_heap_size: "${INDEXER_HEAP_SIZE}"
 EOF
 
-    # Only add custom password if provided
+    # Create credentials directory with secure permissions
+    mkdir -p "$SCRIPT_DIR/credentials"
+    chmod 700 "$SCRIPT_DIR/credentials"
+
+    # Store or generate indexer admin password securely
+    local indexer_pass_file="$SCRIPT_DIR/credentials/indexer_admin_password.txt"
     if [ -n "$INDEXER_ADMIN_PASSWORD" ]; then
-        cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
-# Custom admin password (otherwise auto-generated)
-wazuh_indexer_admin_password: "${INDEXER_ADMIN_PASSWORD}"
-EOF
-    else
-        cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
-# Admin password is auto-generated during deployment
-# Credentials saved to: ./credentials/indexer_admin_password.txt
-EOF
+        echo "$INDEXER_ADMIN_PASSWORD" > "$indexer_pass_file"
+        print_info "Custom indexer password saved to credentials file"
+    elif [ ! -f "$indexer_pass_file" ]; then
+        generate_password 24 > "$indexer_pass_file"
+        print_info "Generated indexer password saved to credentials file"
     fi
+    chmod 600 "$indexer_pass_file"
+
+    # Reference password via file lookup (never store in YAML)
+    cat >> "$SCRIPT_DIR/group_vars/all.yml" << 'EOF'
+# Indexer admin password loaded from secure file
+# SECURITY: Password stored in ./credentials/indexer_admin_password.txt (mode 0600)
+wazuh_indexer_admin_password: "{{ lookup('file', playbook_dir + '/credentials/indexer_admin_password.txt') | trim }}"
+EOF
 
     cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
 
@@ -461,25 +552,40 @@ wazuh_manager_agent_port: ${AGENT_PORT}
 wazuh_api_user: "${API_USER}"
 EOF
 
-    # Only add custom API password if provided
+    # Store or generate API password securely
+    local api_pass_file="$SCRIPT_DIR/credentials/api_password.txt"
     if [ -n "$API_PASSWORD" ]; then
-        cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
-wazuh_api_password: "${API_PASSWORD}"
-EOF
-    else
-        cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
-# API password is auto-generated during deployment
-# Credentials saved to: ./credentials/api_password.txt
-EOF
+        echo "$API_PASSWORD" > "$api_pass_file"
+        print_info "Custom API password saved to credentials file"
+    elif [ ! -f "$api_pass_file" ]; then
+        generate_password 24 > "$api_pass_file"
+        print_info "Generated API password saved to credentials file"
     fi
+    chmod 600 "$api_pass_file"
+
+    # Reference password via file lookup (never store in YAML)
+    cat >> "$SCRIPT_DIR/group_vars/all.yml" << 'EOF'
+# API password loaded from secure file
+# SECURITY: Password stored in ./credentials/api_password.txt (mode 0600)
+wazuh_api_password: "{{ lookup('file', playbook_dir + '/credentials/api_password.txt') | trim }}"
+EOF
 
     if [ $MANAGER_COUNT -gt 1 ]; then
+        # Store cluster key securely
+        local cluster_key_file="$SCRIPT_DIR/credentials/manager_cluster_key.txt"
+        echo "$MANAGER_CLUSTER_KEY" > "$cluster_key_file"
+        chmod 600 "$cluster_key_file"
+
         cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
 
 # Manager cluster settings
 wazuh_manager_cluster_enabled: true
 wazuh_manager_cluster_name: "${MANAGER_CLUSTER_NAME}"
-wazuh_manager_cluster_key: "${MANAGER_CLUSTER_KEY}"
+EOF
+        # Reference cluster key via file lookup (never store in YAML)
+        cat >> "$SCRIPT_DIR/group_vars/all.yml" << 'EOF'
+# Cluster key loaded from secure file
+wazuh_manager_cluster_key: "{{ lookup('file', playbook_dir + '/credentials/manager_cluster_key.txt') | trim }}"
 EOF
     else
         echo "wazuh_manager_cluster_enabled: false" >> "$SCRIPT_DIR/group_vars/all.yml"

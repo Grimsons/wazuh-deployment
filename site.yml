@@ -82,11 +82,13 @@
 
           Wazuh Dashboard URL: https://{{ groups['wazuh_dashboards'][0] }}:{{ wazuh_dashboard_port | default(443) }}
 
-          Default Credentials (CHANGE THESE!):
+          Credentials:
             Dashboard User: {{ wazuh_dashboard_admin_user | default('admin') }}
-            Dashboard Pass: {{ wazuh_dashboard_admin_password | default('admin') }}
+            Dashboard Pass: [STORED IN ./credentials/indexer_admin_password.txt]
 
           Wazuh API URL: https://{{ groups['wazuh_managers'][0] }}:{{ wazuh_manager_api_port | default(55000) }}
+            API User: {{ wazuh_api_user | default('wazuh') }}
+            API Pass: [STORED IN ./credentials/api_password.txt]
 
           Manager Nodes:
           {% for host in groups['wazuh_managers'] %}
@@ -99,6 +101,7 @@
           {% endfor %}
 
           ══════════════════════════════════════════════════════════════
-          IMPORTANT: Please change the default passwords immediately!
+          SECURITY: Passwords are stored in ./credentials/ directory
+                    with mode 0600. Keep this directory secure!
           ══════════════════════════════════════════════════════════════
       run_once: true

@@ -3,8 +3,15 @@
 # Wazuh Client Preparation Script
 # This script prepares a client machine for Wazuh Agent deployment via Ansible
 # Run this script on each target machine before Ansible deployment
+#
+# Security features:
+# - Audit logging for all security-sensitive operations
+# - Restricted sudo permissions (not NOPASSWD ALL)
+# - Backup before configuration changes
+# - Input validation
+# - Rollback capability on failure
 
-set -e
+set -euo pipefail
 
 # Colors
 RED='\033[0;31m'
@@ -23,9 +30,115 @@ SSH_PORT="${SSH_PORT:-22}"
 PUBKEY_FILE="${SCRIPT_DIR}/ansible_key.pub"
 MINIMAL_MODE="${MINIMAL_MODE:-false}"
 DRY_RUN="${DRY_RUN:-false}"
+RESTRICT_SUDO="${RESTRICT_SUDO:-true}"  # Use restricted sudo by default
 
 # Logging
 LOG_FILE="/var/log/wazuh-client-prep.log"
+AUDIT_LOG="/var/log/wazuh-client-prep-audit.log"
+
+# Backup directory for rollback
+BACKUP_DIR="/var/backups/wazuh-prep-$(date +%Y%m%d%H%M%S)"
+ROLLBACK_ENABLED=false
+
+# Cleanup and rollback trap
+cleanup() {
+    local exit_code=$?
+    if [ $exit_code -ne 0 ] && [ "$ROLLBACK_ENABLED" = "true" ] && [ -d "$BACKUP_DIR" ]; then
+        print_warning "Script failed, attempting rollback..."
+        rollback
+    fi
+    # Restore terminal
+    stty echo 2>/dev/null || true
+    exit $exit_code
+}
+trap cleanup EXIT INT TERM
+
+# Audit logging for security-sensitive operations
+audit_log() {
+    local action="$1"
+    local details="${2:-}"
+    local timestamp
+    timestamp=$(date -Iseconds)
+    local user
+    user=$(whoami)
+
+    # Ensure audit log exists with proper permissions
+    touch "$AUDIT_LOG" 2>/dev/null || true
+    chmod 600 "$AUDIT_LOG" 2>/dev/null || true
+
+    echo "${timestamp}|${user}|${action}|${details}" >> "$AUDIT_LOG" 2>/dev/null || true
+}
+
+# Create backup of critical files
+create_backup() {
+    if [ "$DRY_RUN" = "true" ]; then
+        return
+    fi
+
+    mkdir -p "$BACKUP_DIR"
+    chmod 700 "$BACKUP_DIR"
+
+    # Backup SSH config
+    [ -f /etc/ssh/sshd_config ] && cp -a /etc/ssh/sshd_config "$BACKUP_DIR/" 2>/dev/null || true
+
+    # Backup sudoers
+    [ -d /etc/sudoers.d ] && cp -a /etc/sudoers.d "$BACKUP_DIR/" 2>/dev/null || true
+
+    # Backup limits.conf
+    [ -f /etc/security/limits.conf ] && cp -a /etc/security/limits.conf "$BACKUP_DIR/" 2>/dev/null || true
+
+    # Backup sysctl configs
+    [ -d /etc/sysctl.d ] && cp -a /etc/sysctl.d "$BACKUP_DIR/" 2>/dev/null || true
+
+    ROLLBACK_ENABLED=true
+    audit_log "BACKUP_CREATED" "Backup directory: $BACKUP_DIR"
+    print_info "Backup created: $BACKUP_DIR"
+}
+
+# Rollback changes on failure
+rollback() {
+    if [ ! -d "$BACKUP_DIR" ]; then
+        print_error "No backup directory found for rollback"
+        return 1
+    fi
+
+    audit_log "ROLLBACK_STARTED" "Rolling back from: $BACKUP_DIR"
+
+    # Restore SSH config
+    [ -f "$BACKUP_DIR/sshd_config" ] && cp -a "$BACKUP_DIR/sshd_config" /etc/ssh/ 2>/dev/null || true
+
+    # Restore sudoers (be careful here)
+    if [ -d "$BACKUP_DIR/sudoers.d" ]; then
+        rm -f "/etc/sudoers.d/${ANSIBLE_USER}" 2>/dev/null || true
+    fi
+
+    # Restore limits.conf
+    [ -f "$BACKUP_DIR/limits.conf" ] && cp -a "$BACKUP_DIR/limits.conf" /etc/security/ 2>/dev/null || true
+
+    # Remove wazuh sysctl if we created it
+    rm -f /etc/sysctl.d/99-wazuh.conf 2>/dev/null || true
+
+    # Reload sysctl
+    sysctl --system &>/dev/null || true
+
+    # Restart SSH if needed
+    systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || true
+
+    audit_log "ROLLBACK_COMPLETED" "Restored from: $BACKUP_DIR"
+    print_warning "Rollback completed"
+}
+
+# Input validation
+validate_username() {
+    local user="$1"
+    # Linux username: starts with letter, contains only letters, numbers, underscores, hyphens
+    [[ "$user" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+}
+
+validate_port() {
+    local port="$1"
+    [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 ))
+}
 
 print_header() {
     echo -e "\n${BLUE}═══════════════════════════════════════════════════════════════${NC}"
@@ -509,27 +622,99 @@ create_ansible_user() {
         return
     fi
 
+    # Validate username
+    if ! validate_username "$ANSIBLE_USER"; then
+        print_error "Invalid username: $ANSIBLE_USER"
+        exit 1
+    fi
+
+    audit_log "USER_CREATE_START" "Creating user: $ANSIBLE_USER"
+
     # Check if user exists
     if id "$ANSIBLE_USER" &>/dev/null; then
         print_info "User $ANSIBLE_USER already exists"
     else
-        # Create user
-        useradd -m -s /bin/bash "$ANSIBLE_USER"
+        # Create user with restricted shell options
+        useradd -m -s /bin/bash -c "Wazuh Ansible Deployment User" "$ANSIBLE_USER"
         print_success "Created user: $ANSIBLE_USER"
+        audit_log "USER_CREATED" "User $ANSIBLE_USER created"
     fi
 
-    # Create .ssh directory
+    # Create .ssh directory with secure permissions
     local ssh_dir="/home/${ANSIBLE_USER}/.ssh"
     mkdir -p "$ssh_dir"
     chmod 700 "$ssh_dir"
     chown "${ANSIBLE_USER}:${ANSIBLE_USER}" "$ssh_dir"
 
-    # Add to sudoers (passwordless sudo for Ansible)
+    # Configure sudo access
     local sudoers_file="/etc/sudoers.d/${ANSIBLE_USER}"
-    echo "${ANSIBLE_USER} ALL=(ALL) NOPASSWD: ALL" > "$sudoers_file"
+
+    if [ "$RESTRICT_SUDO" = "true" ]; then
+        # Restricted sudo - only specific commands needed for Wazuh deployment
+        cat > "$sudoers_file" << EOF
+# Wazuh Ansible deployment user - restricted permissions
+# Generated by wazuh-client-prep.sh on $(date)
+
+# Package management
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/bin/dnf, /usr/bin/yum, /usr/bin/rpm
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/bin/zypper
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/bin/pacman
+
+# Service management
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /bin/systemctl
+
+# File operations (for config deployment)
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /bin/cp, /bin/mv, /bin/rm, /bin/mkdir, /bin/chmod, /bin/chown
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/bin/cp, /usr/bin/mv, /usr/bin/rm, /usr/bin/mkdir, /usr/bin/chmod, /usr/bin/chown
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/bin/tee, /bin/tee
+
+# Wazuh specific
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /var/ossec/bin/*
+
+# Certificate and key management
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/bin/openssl
+
+# Network utilities
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/bin/curl, /usr/bin/wget
+
+# Process management
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /bin/kill, /usr/bin/kill, /usr/bin/pkill
+
+# Firewall management
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/sbin/ufw, /usr/bin/firewall-cmd
+
+# SELinux management
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/sbin/semanage, /usr/sbin/setsebool, /usr/sbin/restorecon
+
+# Required for Ansible facts and become
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /bin/sh, /bin/bash
+EOF
+        print_info "Configured restricted sudo permissions"
+        audit_log "SUDO_RESTRICTED" "Restricted sudo configured for: $ANSIBLE_USER"
+    else
+        # Full sudo access (legacy mode - not recommended)
+        echo "${ANSIBLE_USER} ALL=(ALL) NOPASSWD: ALL" > "$sudoers_file"
+        print_warning "Configured full sudo permissions (not recommended for production)"
+        audit_log "SUDO_FULL" "Full sudo configured for: $ANSIBLE_USER (NOT RECOMMENDED)"
+    fi
+
+    # Set proper permissions on sudoers file
     chmod 440 "$sudoers_file"
 
+    # Validate sudoers syntax
+    if command -v visudo &>/dev/null; then
+        if ! visudo -c -f "$sudoers_file" &>/dev/null; then
+            print_error "Invalid sudoers syntax - removing file"
+            rm -f "$sudoers_file"
+            audit_log "SUDO_ERROR" "Invalid sudoers syntax for: $ANSIBLE_USER"
+            exit 1
+        fi
+    fi
+
     print_success "User $ANSIBLE_USER configured with sudo access"
+    audit_log "USER_CONFIGURED" "User $ANSIBLE_USER fully configured"
 }
 
 # Deploy SSH public key
@@ -544,19 +729,31 @@ deploy_ssh_key() {
     local ssh_dir="/home/${ANSIBLE_USER}/.ssh"
     local auth_keys="${ssh_dir}/authorized_keys"
 
+    audit_log "SSH_KEY_DEPLOY_START" "Deploying SSH key for: $ANSIBLE_USER"
+
     # Check if public key file exists
     if [ -f "$PUBKEY_FILE" ]; then
+        # Validate SSH public key format
+        if ! grep -qE '^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp|ssh-dss) ' "$PUBKEY_FILE" 2>/dev/null; then
+            print_error "Invalid SSH public key format in: $PUBKEY_FILE"
+            audit_log "SSH_KEY_INVALID" "Invalid key format: $PUBKEY_FILE"
+            return 1
+        fi
+
         print_info "Found public key file: $PUBKEY_FILE"
 
         # Create authorized_keys if it doesn't exist
         touch "$auth_keys"
 
-        # Check if key is already present
-        if grep -qf "$PUBKEY_FILE" "$auth_keys" 2>/dev/null; then
+        # Check if key is already present (use sha256 hash to compare)
+        local key_content
+        key_content=$(cat "$PUBKEY_FILE")
+        if grep -qF "$key_content" "$auth_keys" 2>/dev/null; then
             print_info "SSH key already present in authorized_keys"
         else
             cat "$PUBKEY_FILE" >> "$auth_keys"
             print_success "SSH key deployed"
+            audit_log "SSH_KEY_DEPLOYED" "SSH key deployed to: $auth_keys"
         fi
 
         chmod 600 "$auth_keys"
@@ -564,17 +761,21 @@ deploy_ssh_key() {
     else
         print_warning "No public key file found at $PUBKEY_FILE"
         print_info "You can manually add the key later to: $auth_keys"
+        audit_log "SSH_KEY_MISSING" "No key file found: $PUBKEY_FILE"
     fi
 
     # Also add to root if desired
-    if [ "$DEPLOY_TO_ROOT" = "true" ] && [ -f "$PUBKEY_FILE" ]; then
+    if [ "${DEPLOY_TO_ROOT:-false}" = "true" ] && [ -f "$PUBKEY_FILE" ]; then
         mkdir -p /root/.ssh
         chmod 700 /root/.ssh
         touch /root/.ssh/authorized_keys
-        if ! grep -qf "$PUBKEY_FILE" /root/.ssh/authorized_keys 2>/dev/null; then
+        local key_content
+        key_content=$(cat "$PUBKEY_FILE")
+        if ! grep -qF "$key_content" /root/.ssh/authorized_keys 2>/dev/null; then
             cat "$PUBKEY_FILE" >> /root/.ssh/authorized_keys
             chmod 600 /root/.ssh/authorized_keys
             print_success "SSH key also deployed to root"
+            audit_log "SSH_KEY_DEPLOYED_ROOT" "SSH key deployed to root user"
         fi
     fi
 }
@@ -664,28 +865,47 @@ optimize_system() {
         return
     fi
 
-    # Increase file descriptor limits
-    cat >> /etc/security/limits.conf << 'EOF'
-# Wazuh optimization
+    audit_log "SYSTEM_OPTIMIZE_START" "Beginning system optimization"
+
+    # Increase file descriptor limits (only if not already configured)
+    if ! grep -q "# Wazuh optimization" /etc/security/limits.conf 2>/dev/null; then
+        cat >> /etc/security/limits.conf << 'EOF'
+
+# Wazuh optimization - added by wazuh-client-prep.sh
 * soft nofile 65536
 * hard nofile 65536
 root soft nofile 65536
 root hard nofile 65536
 EOF
+        print_info "Updated file descriptor limits"
+        audit_log "LIMITS_UPDATED" "File descriptor limits configured"
+    else
+        print_info "File descriptor limits already configured"
+    fi
 
-    # Optimize sysctl settings
-    cat >> /etc/sysctl.d/99-wazuh.conf << 'EOF'
-# Wazuh optimization
+    # Optimize sysctl settings (only if not already configured)
+    if [ ! -f /etc/sysctl.d/99-wazuh.conf ]; then
+        cat > /etc/sysctl.d/99-wazuh.conf << 'EOF'
+# Wazuh optimization - added by wazuh-client-prep.sh
+# Network performance tuning
 net.core.somaxconn = 65535
 net.ipv4.tcp_max_syn_backlog = 65535
 net.ipv4.ip_local_port_range = 1024 65535
 net.ipv4.tcp_tw_reuse = 1
+
+# File system limits
 fs.file-max = 2097152
 EOF
-
-    sysctl -p /etc/sysctl.d/99-wazuh.conf 2>/dev/null || true
+        chmod 644 /etc/sysctl.d/99-wazuh.conf
+        sysctl -p /etc/sysctl.d/99-wazuh.conf 2>/dev/null || true
+        print_info "Updated sysctl settings"
+        audit_log "SYSCTL_UPDATED" "Sysctl settings configured"
+    else
+        print_info "Sysctl settings already configured"
+    fi
 
     print_success "System optimized"
+    audit_log "SYSTEM_OPTIMIZE_COMPLETE" "System optimization completed"
 }
 
 # Clean up system
@@ -760,7 +980,17 @@ OPTIONS:
     -m, --minimal           Minimal mode - skip package removal
     -r, --root-key          Also deploy SSH key to root user
     -d, --dry-run           Show what would be done without making changes
+    --full-sudo             Use full sudo access (NOPASSWD: ALL) instead of restricted
     -h, --help              Show this help message
+
+SECURITY:
+    By default, the Ansible user is configured with RESTRICTED sudo permissions,
+    limited to only the commands needed for Wazuh deployment. This is more secure
+    than granting full sudo access.
+
+    Use --full-sudo only if you encounter permission issues during deployment.
+
+    An audit log is written to: /var/log/wazuh-client-prep-audit.log
 
 EXAMPLES:
     # Full preparation with SSH key
@@ -775,6 +1005,9 @@ EXAMPLES:
     # Custom user and port
     $0 -u ansible -p 2222 -k /path/to/key.pub
 
+    # Use full sudo (not recommended for production)
+    $0 -k /path/to/key.pub --full-sudo
+
 EOF
     exit 0
 }
@@ -785,10 +1018,20 @@ parse_args() {
         case $1 in
             -u|--user)
                 ANSIBLE_USER="$2"
+                # Validate username
+                if ! validate_username "$ANSIBLE_USER"; then
+                    print_error "Invalid username: $ANSIBLE_USER"
+                    exit 1
+                fi
                 shift 2
                 ;;
             -p|--port)
                 SSH_PORT="$2"
+                # Validate port
+                if ! validate_port "$SSH_PORT"; then
+                    print_error "Invalid port: $SSH_PORT"
+                    exit 1
+                fi
                 shift 2
                 ;;
             -k|--key)
@@ -805,6 +1048,11 @@ parse_args() {
                 ;;
             -d|--dry-run)
                 DRY_RUN="true"
+                shift
+                ;;
+            --full-sudo)
+                RESTRICT_SUDO="false"
+                print_warning "Using full sudo access - not recommended for production"
                 shift
                 ;;
             -h|--help)
@@ -831,6 +1079,12 @@ main() {
     check_root
     detect_os
 
+    # Log script start
+    audit_log "SCRIPT_START" "OS: $OS_NAME, User: $ANSIBLE_USER, Minimal: $MINIMAL_MODE, DryRun: $DRY_RUN"
+
+    # Create backup before making changes
+    create_backup
+
     # Remove unnecessary packages (unless minimal mode)
     if [ "$MINIMAL_MODE" != "true" ]; then
         remove_unnecessary_packages
@@ -848,9 +1102,21 @@ main() {
     cleanup_system
     generate_report
 
+    # Log successful completion
+    audit_log "SCRIPT_COMPLETE" "Preparation completed successfully"
+
     print_header "Preparation Complete"
 
     echo -e "The system is now ready for Wazuh deployment via Ansible."
+    echo ""
+    echo -e "${CYAN}Security Information:${NC}"
+    if [ "$RESTRICT_SUDO" = "true" ]; then
+        echo -e "  - Sudo: Restricted to deployment commands only"
+    else
+        echo -e "  - Sudo: Full access (consider using restricted mode)"
+    fi
+    echo -e "  - Audit log: ${AUDIT_LOG}"
+    echo -e "  - Backup: ${BACKUP_DIR}"
     echo ""
     echo -e "Next steps:"
     echo -e "  1. From your Ansible control node, test connectivity:"

@@ -2,8 +2,23 @@
 
 # Wazuh Client Preparation Deployment Script
 # This script deploys the preparation script to remote hosts and executes it
+#
+# Security features:
+# - SSH host key verification (can be disabled with --insecure)
+# - Input validation for all hosts
+# - Secure temporary file handling
+# - Timeout controls for remote operations
 
-set -e
+set -euo pipefail
+
+# Cleanup trap
+cleanup() {
+    local exit_code=$?
+    # Clean up any sensitive temp files
+    rm -rf "${TEMP_DIR:-}" 2>/dev/null || true
+    exit $exit_code
+}
+trap cleanup EXIT INT TERM
 
 # Colors
 RED='\033[0;31m'
@@ -27,6 +42,30 @@ REMOTE_USER="${REMOTE_USER:-root}"
 SSH_PORT="${SSH_PORT:-22}"
 HOSTS_FILE=""
 PARALLEL_JOBS=5
+SSH_TIMEOUT="${SSH_TIMEOUT:-300}"  # 5 minutes default
+INSECURE_SSH=false  # Disable host key checking (NOT recommended for production)
+KNOWN_HOSTS_FILE="${PARENT_DIR}/.known_hosts"  # Project-local known_hosts
+
+# Input validation functions
+validate_ip() {
+    local ip="$1"
+    local IFS='.'
+    read -ra octets <<< "$ip"
+    [[ ${#octets[@]} -eq 4 ]] || return 1
+    for octet in "${octets[@]}"; do
+        [[ "$octet" =~ ^[0-9]+$ ]] || return 1
+        (( octet >= 0 && octet <= 255 )) || return 1
+    done
+    return 0
+}
+
+validate_hostname() {
+    local host="$1"
+    if validate_ip "$host"; then
+        return 0
+    fi
+    [[ "$host" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]{0,253}[a-zA-Z0-9])?$ ]]
+}
 
 print_header() {
     echo -e "\n${BLUE}═══════════════════════════════════════════════════════════════${NC}"
@@ -69,9 +108,16 @@ OPTIONS:
     -a, --ansible-user USER User to create for Ansible (default: wazuh-deploy)
     -j, --jobs N            Parallel jobs (default: 5)
     -t, --tarball FILE      Use existing tarball instead of creating new
+    --timeout SECONDS       SSH connection timeout (default: 300)
     --password              Use password authentication instead of key
     --minimal               Use minimal mode (don't remove packages)
+    --insecure              Disable SSH host key verification (NOT recommended)
     -h, --help              Show this help message
+
+SECURITY:
+    By default, SSH host keys are verified using a project-local known_hosts file.
+    On first connection to a new host, you'll be prompted to verify the fingerprint.
+    Use --insecure only for testing or when you have other means of verification.
 
 EXAMPLES:
     # Deploy to specific hosts
@@ -85,6 +131,9 @@ EXAMPLES:
 
     # Deploy with custom SSH key
     $0 -k ~/.ssh/id_rsa 192.168.1.10
+
+    # Deploy with custom timeout
+    $0 --timeout 600 192.168.1.10
 
 EOF
     exit 0
@@ -127,12 +176,21 @@ parse_args() {
                 PREP_TARBALL="$2"
                 shift 2
                 ;;
+            --timeout)
+                SSH_TIMEOUT="$2"
+                shift 2
+                ;;
             --password)
                 USE_PASSWORD=true
                 shift
                 ;;
             --minimal)
                 MINIMAL_MODE=true
+                shift
+                ;;
+            --insecure)
+                INSECURE_SSH=true
+                print_warning "SSH host key verification disabled - use only for testing!"
                 shift
                 ;;
             -h|--help)
@@ -143,7 +201,13 @@ parse_args() {
                 usage
                 ;;
             *)
-                HOSTS+=("$1")
+                # Validate host before adding
+                if validate_hostname "$1"; then
+                    HOSTS+=("$1")
+                else
+                    print_error "Invalid hostname/IP: $1"
+                    exit 1
+                fi
                 shift
                 ;;
         esac
@@ -218,50 +282,71 @@ create_tarball() {
     print_success "Created tarball: $PREP_TARBALL"
 }
 
+# Build SSH options based on security settings
+build_ssh_opts() {
+    local opts="-o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -p $SSH_PORT"
+
+    if [ "$INSECURE_SSH" = "true" ]; then
+        # Insecure mode - disable host key checking (NOT recommended)
+        opts="$opts -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    else
+        # Secure mode - use project-local known_hosts
+        touch "$KNOWN_HOSTS_FILE" 2>/dev/null || true
+        chmod 600 "$KNOWN_HOSTS_FILE" 2>/dev/null || true
+        opts="$opts -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$KNOWN_HOSTS_FILE"
+    fi
+
+    if [ "$USE_PASSWORD" != "true" ] && [ -f "$SSH_KEY" ]; then
+        opts="$opts -i $SSH_KEY"
+    fi
+
+    echo "$opts"
+}
+
 # Deploy to a single host
 deploy_to_host() {
     local host="$1"
     local result_file="$2"
 
     echo "STARTED" > "$result_file"
+    chmod 600 "$result_file"
 
     print_info "Deploying to: $host"
 
-    local ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30 -p $SSH_PORT"
+    local ssh_opts
+    ssh_opts=$(build_ssh_opts)
 
-    if [ "$USE_PASSWORD" != "true" ] && [ -f "$SSH_KEY" ]; then
-        ssh_opts="$ssh_opts -i $SSH_KEY"
-    fi
-
-    # Test connectivity
-    if ! ssh $ssh_opts "${REMOTE_USER}@${host}" "echo 'Connection successful'" &>/dev/null; then
+    # Test connectivity with timeout
+    if ! timeout "$SSH_TIMEOUT" ssh $ssh_opts "${REMOTE_USER}@${host}" "echo 'Connection successful'" &>/dev/null; then
         print_error "Cannot connect to $host"
         echo "FAILED: Cannot connect" > "$result_file"
         return 1
     fi
 
-    # Copy tarball
+    # Copy tarball with timeout
     print_info "[$host] Copying preparation files..."
-    local scp_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P $SSH_PORT"
-    if [ "$USE_PASSWORD" != "true" ] && [ -f "$SSH_KEY" ]; then
-        scp_opts="$scp_opts -i $SSH_KEY"
-    fi
+    local scp_opts
+    scp_opts=$(build_ssh_opts | sed 's/-p /-P /')  # scp uses -P for port
 
-    if ! scp $scp_opts "$PREP_TARBALL" "${REMOTE_USER}@${host}:/tmp/" &>/dev/null; then
+    if ! timeout "$SSH_TIMEOUT" scp $scp_opts "$PREP_TARBALL" "${REMOTE_USER}@${host}:/tmp/" &>/dev/null; then
         print_error "[$host] Failed to copy tarball"
         echo "FAILED: Copy failed" > "$result_file"
         return 1
     fi
 
-    # Execute preparation script
+    # Execute preparation script with timeout
     print_info "[$host] Executing preparation script..."
+
+    # Safely escape the ansible user for the remote command
+    local safe_ansible_user
+    safe_ansible_user=$(printf '%s' "$ANSIBLE_USER" | tr -cd 'a-zA-Z0-9._-')
 
     local prep_cmd="
         cd /tmp && \
         tar -xzf wazuh-client-prep.tar.gz && \
         cd wazuh-prep && \
         chmod +x prepare-client.sh && \
-        ./prepare-client.sh -u '$ANSIBLE_USER' -k ansible_key.pub"
+        ./prepare-client.sh -u '${safe_ansible_user}' -k ansible_key.pub"
 
     if [ "$MINIMAL_MODE" = "true" ]; then
         prep_cmd="$prep_cmd --minimal"
@@ -269,7 +354,7 @@ deploy_to_host() {
 
     prep_cmd="$prep_cmd && rm -rf /tmp/wazuh-prep /tmp/wazuh-client-prep.tar.gz"
 
-    if ssh $ssh_opts "${REMOTE_USER}@${host}" "sudo bash -c '$prep_cmd'" 2>&1; then
+    if timeout "$SSH_TIMEOUT" ssh $ssh_opts "${REMOTE_USER}@${host}" "sudo bash -c '$prep_cmd'" 2>&1; then
         print_success "[$host] Preparation complete"
         echo "SUCCESS" > "$result_file"
         return 0

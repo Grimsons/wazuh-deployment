@@ -38,7 +38,7 @@
     user: "{{ wazuh_api_user | default('wazuh') }}"
     password: "{{ wazuh_api_password_groups | default(wazuh_api_password) | default('wazuh') }}"
     force_basic_auth: true
-    validate_certs: false
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     return_content: true
   register: api_auth
   no_log: true
@@ -60,7 +60,7 @@
     body_format: json
     body:
       group_id: "{{ item.name }}"
-    validate_certs: false
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code:
       - 200
       - 400  # Group already exists

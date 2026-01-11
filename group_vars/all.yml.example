@@ -91,6 +91,57 @@ wazuh_dashboard_certs_path: /etc/wazuh-dashboard/certs
 #   - dashboard.pem, dashboard-key.pem (Dashboard certificate)
 
 # ═══════════════════════════════════════════════════════════════
+# Security Hardening Settings (PRODUCTION)
+# ═══════════════════════════════════════════════════════════════
+
+# IMPORTANT: Set to true for production deployments
+# When true, all HTTPS connections verify SSL certificates
+# When false, allows self-signed certs without verification (INSECURE)
+wazuh_ssl_verify_certificates: true
+
+# TLS Protocol Settings
+# Minimum TLS version (TLSv1.2 or TLSv1.3 recommended)
+wazuh_tls_minimum_version: "TLSv1.2"
+
+# Strong cipher suites for TLS connections
+# These ciphers are PCI-DSS and HIPAA compliant
+wazuh_tls_ciphers: "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305"
+
+# Enable hostname verification for inter-node SSL (prevents node spoofing)
+wazuh_ssl_verify_hostname: true
+
+# Audit logging - CRITICAL for compliance (PCI-DSS, HIPAA, SOC2)
+wazuh_audit_logging_enabled: true
+wazuh_audit_log_type: "internal_opensearch"  # or "log4j" for file-based
+
+# Agent enrollment security
+# Require password for agent enrollment (recommended for production)
+wazuh_authd_use_password: true
+# Auto-generated if not specified - saved to credentials/authd_password.txt
+
+# Agent SSL verification
+wazuh_authd_ssl_verify_host: true
+wazuh_authd_ssl_ciphers: "HIGH:!ADH:!EXP:!MD5:!RC4:!3DES:!CAMELLIA:@STRENGTH"
+
+# Dashboard security
+wazuh_dashboard_session_timeout: 60          # minutes
+wazuh_dashboard_ssl_verification_mode: "full"  # full, certificate, or none
+wazuh_dashboard_cookie_secure: true
+wazuh_dashboard_cookie_same_site: "Strict"
+wazuh_dashboard_xframe_options: "DENY"
+wazuh_dashboard_csp_strict: true
+
+# API security hardening (brute-force protection)
+wazuh_api_max_login_attempts: 5              # Lock after N failed attempts
+wazuh_api_lockout_time: 900                  # Lockout duration (seconds)
+wazuh_api_rate_limit: 100                    # Max requests per minute
+wazuh_api_https_only: true                   # Force HTTPS
+
+# Indexer security
+wazuh_indexer_ssl_http_enabled: true
+wazuh_indexer_anonymous_auth_enabled: false  # Disable anonymous access
+
+# ═══════════════════════════════════════════════════════════════
 # Feature Toggles
 # ═══════════════════════════════════════════════════════════════
 wazuh_vulnerability_detection_enabled: true

@@ -28,12 +28,17 @@ wazuh_manager_api_max_requests_per_minute: 100
 wazuh_manager_api_allow_remote_localfile: false
 wazuh_manager_api_allow_remote_wodle: false
 
-# Agent enrollment
+# Agent enrollment - SECURE DEFAULTS
 wazuh_authd_enabled: true
 wazuh_authd_use_source_ip: false
 wazuh_authd_purge: false
-wazuh_authd_ssl_verify_host: false
+# SECURITY: Verify manager hostname during enrollment (prevents rogue manager attacks)
+wazuh_authd_ssl_verify_host: true
 wazuh_authd_ssl_auto_negotiate: true
+# SECURITY: Require password for agent enrollment (recommended for production)
+wazuh_authd_use_password: true
+# Strong cipher suite (disables weak ciphers)
+wazuh_authd_ssl_ciphers: "HIGH:!ADH:!EXP:!MD5:!RC4:!3DES:!CAMELLIA:@STRENGTH"
 
 # Cluster defaults
 wazuh_manager_cluster_enabled: false
@@ -96,3 +101,6 @@ wazuh_indexer_connection_enabled: true
 # Filebeat settings (for alert forwarding to indexer)
 wazuh_filebeat_enabled: true
 wazuh_filebeat_archives_enabled: false
+# Filebeat version - should be compatible with Wazuh version
+# See: https://documentation.wazuh.com/current/installation-guide/wazuh-indexer/step-by-step.html
+wazuh_filebeat_version: "7.10.2"

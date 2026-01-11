@@ -59,7 +59,7 @@
     user: "{{ wazuh_api_user }}"
     password: "wazuh"
     force_basic_auth: true
-    validate_certs: false
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200, 401]
   register: wazuh_api_check
   until: wazuh_api_check.status in [200, 401]

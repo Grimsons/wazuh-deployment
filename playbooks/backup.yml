@@ -94,7 +94,7 @@
               type: fs
               settings:
                 location: "/var/lib/wazuh-indexer/snapshots"
-            validate_certs: false
+            validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
             status_code:
               - 200
               - 400  # Repository already exists
