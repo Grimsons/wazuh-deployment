@@ -88,8 +88,40 @@
   ansible.builtin.include_tasks: security_init.yml
   when: indexer_cluster_initial_master | default(false)
 
-# Verify indexer is responding with default credentials before changing password
-- name: Wait for Wazuh Indexer security to be ready
+# Check if credentials file exists (indicates password was already changed)
+- name: Check for existing credentials file
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/credentials/indexer_admin_password.txt"
+  delegate_to: localhost
+  become: false
+  register: credentials_file
+  run_once: true
+
+# Try stored password first (for re-runs where password was already changed)
+- name: Check Wazuh Indexer with stored credentials
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_cluster/health"
+    user: "admin"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    status_code: [200, 401]
+    return_content: true
+  register: indexer_health_stored
+  until: indexer_health_stored.status in [200, 401]
+  retries: 30
+  delay: 10
+  run_once: true
+  when: credentials_file.stat.exists | default(false)
+
+# Set flag for whether password change is needed
+- name: Determine if password change is needed
+  ansible.builtin.set_fact:
+    password_already_changed: "{{ (credentials_file.stat.exists | default(false)) and (indexer_health_stored.status | default(401)) == 200 }}"
+  run_once: true
+
+# Wait for security to be ready with default credentials (fresh install)
+- name: Wait for Wazuh Indexer security to be ready (fresh install)
   ansible.builtin.uri:
     url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_cluster/health"
     user: "admin"
@@ -103,14 +135,24 @@
   retries: 30
   delay: 10
   run_once: true
+  when: not (password_already_changed | default(false))
 
 # Configure secure admin password (run only on first master after security init)
 - name: Configure secure admin password
   ansible.builtin.include_tasks: security_users.yml
-  when: indexer_cluster_initial_master | default(false)
+  when:
+    - indexer_cluster_initial_master | default(false)
+    - not (password_already_changed | default(false))
+
+# Set wazuh_admin_password from stored credentials when password change was skipped
+- name: Set admin password from stored credentials (re-run)
+  ansible.builtin.set_fact:
+    wazuh_admin_password: "{{ wazuh_indexer_admin_password }}"
+  run_once: true
+  when: password_already_changed | default(false)
 
 # Final health check with new password
-- name: Wait for Wazuh Indexer to be ready with new credentials
+- name: Wait for Wazuh Indexer to be ready with credentials
   ansible.builtin.uri:
     url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_cluster/health"
     user: "admin"
