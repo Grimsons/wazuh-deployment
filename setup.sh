@@ -506,6 +506,8 @@ wazuh_indexer_cluster_name: "${INDEXER_CLUSTER_NAME}"
 wazuh_indexer_http_port: ${INDEXER_HTTP_PORT}
 wazuh_indexer_transport_port: ${DEFAULT_INDEXER_TRANSPORT_PORT}
 wazuh_indexer_heap_size: "${INDEXER_HEAP_SIZE}"
+# Indexer admin credentials
+wazuh_indexer_admin_user: "${INDEXER_ADMIN_USER}"
 EOF
 
     # Create credentials directory with secure permissions
