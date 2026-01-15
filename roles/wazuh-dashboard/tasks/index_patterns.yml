@@ -1,0 +1,114 @@
+---
+# Wazuh Dashboard - Index Pattern Setup
+# Ensures index patterns are created and field lists are refreshed
+
+- name: Wait for dashboard API to be fully available
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/api/status"
+    method: GET
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    status_code: [200]
+  register: api_status
+  until: api_status.status == 200 and api_status.json.status.overall.state == "green"
+  retries: 30
+  delay: 10
+
+- name: Define index patterns to create
+  ansible.builtin.set_fact:
+    wazuh_index_patterns:
+      - id: "wazuh-alerts-*"
+        title: "wazuh-alerts-*"
+        time_field: "timestamp"
+      - id: "wazuh-monitoring-*"
+        title: "wazuh-monitoring-*"
+        time_field: "timestamp"
+      - id: "wazuh-statistics-*"
+        title: "wazuh-statistics-*"
+        time_field: "timestamp"
+
+- name: Check existing index patterns
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/api/saved_objects/_find?type=index-pattern&per_page=100"
+    method: GET
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    headers:
+      osd-xsrf: "true"
+    status_code: [200]
+  register: existing_patterns
+
+- name: Extract existing pattern IDs
+  ansible.builtin.set_fact:
+    existing_pattern_ids: "{{ existing_patterns.json.saved_objects | map(attribute='id') | list }}"
+
+- name: Get field list for each index pattern
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/api/index_patterns/_fields_for_wildcard?pattern={{ item.title }}&meta_fields=_source&meta_fields=_id&meta_fields=_type&meta_fields=_index&meta_fields=_score"
+    method: GET
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    headers:
+      osd-xsrf: "true"
+    status_code: [200]
+  register: field_lists
+  loop: "{{ wazuh_index_patterns }}"
+  loop_control:
+    label: "{{ item.title }}"
+  ignore_errors: true
+
+- name: Create or update index patterns with field mappings
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/api/saved_objects/index-pattern/{{ item.0.id }}?overwrite=true"
+    method: POST
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    headers:
+      osd-xsrf: "true"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      attributes:
+        title: "{{ item.0.title }}"
+        timeFieldName: "{{ item.0.time_field }}"
+        fields: "{{ item.1.json.fields | default([]) | to_json }}"
+    status_code: [200, 409]
+  loop: "{{ wazuh_index_patterns | zip(field_lists.results) | list }}"
+  loop_control:
+    label: "{{ item.0.title }}"
+  when: item.1.status is defined and item.1.status == 200
+  register: pattern_creation
+  ignore_errors: true
+
+- name: Set default index pattern to wazuh-alerts-*
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/api/opensearch-dashboards/settings/defaultIndex"
+    method: POST
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    headers:
+      osd-xsrf: "true"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      value: "wazuh-alerts-*"
+    status_code: [200, 400]
+  ignore_errors: true
+
+- name: Display index pattern setup result
+  ansible.builtin.debug:
+    msg: |
+      Index patterns configured:
+      {% for pattern in wazuh_index_patterns %}
+        - {{ pattern.title }}
+      {% endfor %}

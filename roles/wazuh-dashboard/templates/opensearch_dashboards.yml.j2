@@ -48,7 +48,9 @@ server.customResponseHeaders:
 {% endif %}
 
 # UI settings
-uiSettings.overrides.defaultRoute: /app/wazuh
+# Note: defaultRoute to /app/wazuh can cause "Application Not Found" errors
+# Users should navigate to Wazuh from the menu instead
+# uiSettings.overrides.defaultRoute: /app/wazuh
 
 # Logging
 logging.dest: /var/log/wazuh-dashboard/opensearch-dashboards.log

@@ -105,6 +105,9 @@
     msg: "Wazuh Dashboard failed to start. See diagnostic info above."
   when: dashboard_health.status is not defined or dashboard_health.status not in [200, 302]
 
+- name: Setup index patterns
+  ansible.builtin.include_tasks: index_patterns.yml
+
 - name: Configure log rotation
   ansible.builtin.include_tasks: log_rotation.yml
   when: wazuh_log_rotation_enabled | default(true)
