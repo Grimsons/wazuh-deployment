@@ -18,12 +18,18 @@
     <email_log_source>alerts.log</email_log_source>
     <agents_disconnection_time>10m</agents_disconnection_time>
     <agents_disconnection_alert_time>0</agents_disconnection_alert_time>
+    <max_output_size>20M</max_output_size>
   </global>
 
   <alerts>
     <log_alert_level>3</log_alert_level>
     <email_alert_level>12</email_alert_level>
   </alerts>
+
+  <!-- Choose between "plain", "json", or "plain,json" for the format of internal logs -->
+  <logging>
+    <log_format>plain</log_format>
+  </logging>
 
   <!-- Wazuh Indexer Connection -->
 {% if wazuh_indexer_connection_enabled | default(true) %}
@@ -108,10 +114,19 @@
     <ignore>/etc/cups/certs</ignore>
     <ignore>/etc/dumpdates</ignore>
     <ignore>/etc/svc/volatile</ignore>
+
+    <!-- File types to ignore -->
+    <ignore type="sregex">.log$|.swp$</ignore>
+
+    <!-- Check the file, but never compute the diff -->
+    <nodiff>/etc/ssl/private.key</nodiff>
+
     <skip_nfs>yes</skip_nfs>
     <skip_dev>yes</skip_dev>
     <skip_proc>yes</skip_proc>
     <skip_sys>yes</skip_sys>
+
+    <!-- Nice value for Syscheck process -->
     <process_priority>10</process_priority>
     <max_eps>200</max_eps>
     <synchronization>
@@ -145,6 +160,11 @@
   <localfile>
     <log_format>syslog</log_format>
     <location>/var/ossec/logs/active-responses.log</location>
+  </localfile>
+
+  <localfile>
+    <log_format>journald</log_format>
+    <location>journald</location>
   </localfile>
 
   <localfile>
@@ -233,15 +253,64 @@
     <list>etc/lists/audit-keys</list>
     <list>etc/lists/amazon/aws-eventnames</list>
     <list>etc/lists/security-eventchannel</list>
+    <list>etc/lists/malicious-ioc/malware-hashes</list>
+    <list>etc/lists/malicious-ioc/malicious-ip</list>
+    <list>etc/lists/malicious-ioc/malicious-domains</list>
+
+    <!-- User-defined ruleset -->
+    <decoder_dir>etc/decoders</decoder_dir>
+    <rule_dir>etc/rules</rule_dir>
   </ruleset>
 
-  <!-- Global Configuration -->
-  <global>
-    <max_output_size>20M</max_output_size>
-  </global>
+  <rule_test>
+    <enabled>yes</enabled>
+    <threads>1</threads>
+    <max_sessions>64</max_sessions>
+    <session_timeout>15m</session_timeout>
+  </rule_test>
 
-  <logging>
-    <log_format>plain</log_format>
-  </logging>
+  <wodle name="cis-cat">
+    <disabled>no</disabled>
+    <timeout>1800</timeout>
+    <interval>1d</interval>
+    <scan-on-start>yes</scan-on-start>
+
+    <java_path>wodles/java</java_path>
+    <ciscat_path>wodles/ciscat</ciscat_path>
+  </wodle>
+
+  <!-- Osquery integration -->
+  <wodle name="osquery">
+    <disabled>yes</disabled>
+    <run_daemon>yes</run_daemon>
+    <log_path>/var/log/osquery/osqueryd.results.log</log_path>
+    <config_path>/etc/osquery/osquery.conf</config_path>
+    <add_labels>yes</add_labels>
+  </wodle>
+
+  <!-- System inventory -->
+  <wodle name="syscollector">
+    <disabled>no</disabled>
+    <interval>1h</interval>
+    <scan_on_start>yes</scan_on_start>
+    <hardware>yes</hardware>
+    <os>yes</os>
+    <network>yes</network>
+    <packages>yes</packages>
+    <ports all="yes">yes</ports>
+    <processes>yes</processes>
+
+    <!-- Database synchronization settings -->
+    <synchronization>
+      <max_eps>10</max_eps>
+    </synchronization>
+  </wodle>
+
+  <sca>
+    <enabled>yes</enabled>
+    <scan_on_start>yes</scan_on_start>
+    <interval>12h</interval>
+    <skip_nfs>yes</skip_nfs>
+  </sca>
 
 </ossec_config>
