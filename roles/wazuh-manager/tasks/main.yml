@@ -26,6 +26,10 @@
 - name: Configure Wazuh Manager
   ansible.builtin.include_tasks: configure.yml
 
+- name: Configure agent enrollment password
+  ansible.builtin.include_tasks: agent_enrollment.yml
+  when: wazuh_authd_use_password | default(true)
+
 - name: Deploy custom rules and decoders
   ansible.builtin.include_tasks: custom_rules.yml
   when: wazuh_custom_content_enabled | default(true)

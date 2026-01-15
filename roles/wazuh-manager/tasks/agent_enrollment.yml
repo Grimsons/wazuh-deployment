@@ -1,0 +1,115 @@
+---
+# Wazuh Manager - Agent Enrollment Password Setup
+# Creates the authd.pass file required for password-based agent enrollment
+
+- name: Check if agent enrollment password file exists locally
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/credentials/agent_enrollment_password.txt"
+  delegate_to: localhost
+  become: false
+  register: enrollment_password_file
+  vars:
+    ansible_become: false
+
+- name: Generate agent enrollment password if not exists
+  block:
+    - name: Generate secure enrollment password
+      ansible.builtin.set_fact:
+        wazuh_agent_enrollment_password: "{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits') }}"
+      no_log: true
+      when: wazuh_agent_enrollment_password is not defined
+
+    - name: Save enrollment password to credentials file
+      ansible.builtin.copy:
+        content: |
+          # Wazuh Agent Enrollment Password
+          # Generated: {{ ansible_date_time.iso8601 }}
+          # Manager: {{ inventory_hostname }}
+
+          Password: {{ wazuh_agent_enrollment_password }}
+
+          # Use this password when enrolling agents:
+          # Linux/macOS: WAZUH_REGISTRATION_PASSWORD='{{ wazuh_agent_enrollment_password }}'
+          # Windows: WAZUH_REGISTRATION_PASSWORD={{ wazuh_agent_enrollment_password }}
+          #
+          # Example agent enrollment:
+          # WAZUH_MANAGER='{{ ansible_default_ipv4.address }}' WAZUH_REGISTRATION_PASSWORD='{{ wazuh_agent_enrollment_password }}' apt install wazuh-agent
+
+          # IMPORTANT: Keep this file secure and delete after noting the password!
+        dest: "{{ playbook_dir }}/credentials/agent_enrollment_password.txt"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      vars:
+        ansible_become: false
+      run_once: true
+      no_log: true
+  when: not enrollment_password_file.stat.exists
+
+- name: Read enrollment password from credentials file
+  ansible.builtin.slurp:
+    src: "{{ playbook_dir }}/credentials/agent_enrollment_password.txt"
+  delegate_to: localhost
+  become: false
+  register: enrollment_password_content
+  when:
+    - enrollment_password_file.stat.exists
+    - wazuh_agent_enrollment_password is not defined
+  vars:
+    ansible_become: false
+
+- name: Extract enrollment password from credentials file
+  ansible.builtin.set_fact:
+    wazuh_agent_enrollment_password: "{{ enrollment_password_content.content | b64decode | regex_search('Password:\\s*(.+)', '\\1') | first | trim }}"
+  when:
+    - enrollment_password_content is defined
+    - enrollment_password_content is not skipped
+    - enrollment_password_content.content is defined
+  no_log: true
+
+- name: Create authd.pass file for agent enrollment
+  ansible.builtin.copy:
+    content: "{{ wazuh_agent_enrollment_password }}"
+    dest: /var/ossec/etc/authd.pass
+    owner: wazuh
+    group: wazuh
+    mode: '0640'
+  become: true
+  notify: restart wazuh-manager
+  when:
+    - wazuh_authd_use_password | default(true)
+    - wazuh_agent_enrollment_password is defined
+
+- name: Verify authd.pass file exists
+  ansible.builtin.stat:
+    path: /var/ossec/etc/authd.pass
+  become: true
+  register: authd_pass_file
+  when: wazuh_authd_use_password | default(true)
+
+- name: Fail if authd.pass is required but missing
+  ansible.builtin.fail:
+    msg: |
+      Agent enrollment password is enabled (wazuh_authd_use_password=true) but
+      the password file /var/ossec/etc/authd.pass could not be created.
+      Please set wazuh_agent_enrollment_password variable or check permissions.
+  when:
+    - wazuh_authd_use_password | default(true)
+    - not authd_pass_file.stat.exists | default(false)
+
+- name: Display agent enrollment info
+  ansible.builtin.debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════════
+      Agent Enrollment Password configured!
+
+      Password file: /var/ossec/etc/authd.pass
+      Credentials saved to: {{ playbook_dir }}/credentials/agent_enrollment_password.txt
+
+      To enroll agents, use:
+        WAZUH_MANAGER='{{ ansible_default_ipv4.address }}' \
+        WAZUH_REGISTRATION_PASSWORD='<password>' \
+        apt install wazuh-agent
+      ═══════════════════════════════════════════════════════════════
+  run_once: true
+  when: wazuh_authd_use_password | default(true)
