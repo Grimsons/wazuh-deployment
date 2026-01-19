@@ -47,6 +47,28 @@ wazuh_agent_sca_enabled: true
 # Active response
 wazuh_agent_active_response_disabled: false
 
+# Client buffer settings
+wazuh_agent_buffer_queue_size: 5000
+wazuh_agent_buffer_events_per_second: 500
+
+# Agent Labels
+# Auto-generate labels from Ansible facts (os.type, os.family, environment, etc.)
+wazuh_agent_auto_labels: true
+
+# Custom labels - override auto labels when defined
+# Example:
+# wazuh_agent_labels:
+#   - key: "environment"
+#     value: "production"
+#   - key: "department"
+#     value: "finance"
+#   - key: "datacenter"
+#     value: "us-east-1"
+wazuh_agent_labels: []
+
+# Agent group assignment (used in auto-labels)
+# wazuh_agent_group: "default"
+
 # Windows specific settings (for Windows agents)
 wazuh_agent_windows_audit_enabled: true
 wazuh_agent_windows_eventchannel_enabled: true

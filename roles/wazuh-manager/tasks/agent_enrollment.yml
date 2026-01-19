@@ -67,6 +67,20 @@
     - enrollment_password_content.content is defined
   no_log: true
 
+- name: Validate enrollment password was extracted successfully
+  ansible.builtin.fail:
+    msg: |
+      Failed to extract enrollment password from credentials file.
+
+      The file '{{ playbook_dir }}/credentials/agent_enrollment_password.txt' exists but
+      could not parse the password. Expected format: 'Password: <your-password>'
+
+      Please check the file format or set 'wazuh_agent_enrollment_password' variable directly.
+  when:
+    - wazuh_authd_use_password | default(true)
+    - enrollment_password_file.stat.exists
+    - wazuh_agent_enrollment_password is not defined or wazuh_agent_enrollment_password | length == 0
+
 - name: Create authd.pass file for agent enrollment
   ansible.builtin.copy:
     content: "{{ wazuh_agent_enrollment_password }}"

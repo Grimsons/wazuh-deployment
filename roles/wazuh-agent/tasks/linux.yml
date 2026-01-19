@@ -83,6 +83,69 @@
   become: true
   notify: restart wazuh-agent
 
+- name: Check if enrollment password credentials file exists
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/credentials/agent_enrollment_password.txt"
+  delegate_to: localhost
+  become: false
+  register: agent_enrollment_password_file
+  when:
+    - wazuh_authd_use_password | default(true)
+    - wazuh_agent_enrollment_password is not defined
+  vars:
+    ansible_become: false
+
+- name: Read enrollment password from credentials file
+  ansible.builtin.slurp:
+    src: "{{ playbook_dir }}/credentials/agent_enrollment_password.txt"
+  delegate_to: localhost
+  become: false
+  register: agent_enrollment_password_content
+  when:
+    - wazuh_authd_use_password | default(true)
+    - wazuh_agent_enrollment_password is not defined
+    - agent_enrollment_password_file.stat.exists | default(false)
+  vars:
+    ansible_become: false
+
+- name: Extract enrollment password
+  ansible.builtin.set_fact:
+    wazuh_agent_enrollment_password: "{{ agent_enrollment_password_content.content | b64decode | regex_search('Password:\\s*(.+)', '\\1') | first | trim }}"
+  when:
+    - agent_enrollment_password_content is defined
+    - agent_enrollment_password_content is not skipped
+    - agent_enrollment_password_content.content is defined
+  no_log: true
+
+- name: Fail if enrollment password is required but not available
+  ansible.builtin.fail:
+    msg: |
+      Agent enrollment password is required but could not be obtained.
+
+      Either:
+      1. Set 'wazuh_agent_enrollment_password' variable directly, or
+      2. Ensure the file '{{ playbook_dir }}/credentials/agent_enrollment_password.txt' exists
+         (created by running the wazuh-manager playbook first), or
+      3. Set 'wazuh_authd_use_password: false' to disable password-based enrollment
+
+      File exists: {{ agent_enrollment_password_file.stat.exists | default(false) }}
+  when:
+    - wazuh_authd_use_password | default(true)
+    - wazuh_agent_enrollment_password is not defined or wazuh_agent_enrollment_password | length == 0
+
+- name: Deploy enrollment password file to agent
+  ansible.builtin.copy:
+    content: "{{ wazuh_agent_enrollment_password }}"
+    dest: /var/ossec/etc/authd.pass
+    owner: root
+    group: wazuh
+    mode: '0640'
+  become: true
+  when:
+    - wazuh_authd_use_password | default(true)
+    - wazuh_agent_enrollment_password is defined
+    - wazuh_agent_enrollment_password | length > 0
+
 - name: Enable Wazuh Agent service
   ansible.builtin.systemd:
     name: "{{ wazuh_agent_service_name }}"

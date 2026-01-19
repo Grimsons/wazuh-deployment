@@ -55,11 +55,31 @@ wazuh_syslog_output_server: ""
 wazuh_syslog_output_port: 514
 wazuh_syslog_output_format: "default"
 
+# Alert output formats
+wazuh_jsonout_output: true           # JSON output for alerts (alerts.json)
+wazuh_alerts_log: true               # Plain text alerts (alerts.log)
+wazuh_logall: false                  # Log all events, not just alerts
+wazuh_logall_json: false             # Log all events in JSON format
+wazuh_internal_log_format: "plain"   # Internal logging format: plain, json, or plain,json
+
 # Email alerts
 wazuh_email_notification_enabled: false
 wazuh_email_smtp_server: ""
 wazuh_email_from: "wazuh@localhost"
 wazuh_email_to: ""
+wazuh_email_alert_level: 12
+wazuh_email_maxperhour: 12
+wazuh_log_alert_level: 3
+
+# Agent connection monitoring
+wazuh_agents_disconnection_time: "10m"
+wazuh_agents_disconnection_alert_time: 0
+
+# Output size limit
+wazuh_max_output_size: "20M"
+
+# GeoIP database (optional - for IP geolocation in alerts)
+# wazuh_geoip_database: "/var/ossec/etc/GeoLite2-City.mmdb"
 
 # Global settings
 wazuh_manager_max_agents: 14000
@@ -92,8 +112,142 @@ wazuh_log_collection_enabled: true
 wazuh_active_response_enabled: true
 wazuh_active_response_ca_verification: true
 
-# Integrations
+# Security Configuration Assessment (SCA)
+wazuh_sca_enabled: true
+wazuh_sca_interval: "12h"
+
+# System inventory (Syscollector)
+wazuh_syscollector_enabled: true
+wazuh_syscollector_interval: "1h"
+
+# Osquery integration (disabled by default - requires osquery installation)
+wazuh_osquery_enabled: false
+wazuh_osquery_log_path: "/var/log/osquery/osqueryd.results.log"
+wazuh_osquery_config_path: "/etc/osquery/osquery.conf"
+
+# CIS-CAT integration (disabled by default - requires CIS-CAT download)
+wazuh_ciscat_enabled: false
+wazuh_ciscat_timeout: 1800
+wazuh_ciscat_interval: "1d"
+wazuh_ciscat_scan_on_start: true
+wazuh_ciscat_java_path: "wodles/java"
+wazuh_ciscat_path: "wodles/ciscat"
+
+# Integrations - Slack, VirusTotal, PagerDuty, etc.
+# Example:
+# wazuh_integrations:
+#   - name: slack
+#     hook_url: "https://hooks.slack.com/services/xxx"
+#     level: 10
+#     alert_format: json
+#   - name: virustotal
+#     api_key: "your-api-key"
+#     level: 7
+#     group: "syscheck"
+#   - name: pagerduty
+#     api_key: "your-api-key"
+#     level: 12
 wazuh_integrations: []
+
+# Syslog output - forward alerts to external SIEM
+wazuh_syslog_output_enabled: false
+wazuh_syslog_output_server: ""
+wazuh_syslog_output_port: 514
+wazuh_syslog_output_format: "default"  # default, json, cef
+# Optional filters:
+# wazuh_syslog_output_level: 7
+# wazuh_syslog_output_group: "authentication_success"
+# wazuh_syslog_output_rule_id: "5715"
+
+# AWS CloudTrail, CloudWatch, VPC Flow Logs, etc.
+wazuh_aws_enabled: false
+wazuh_aws_interval: "10m"
+wazuh_aws_run_on_start: true
+wazuh_aws_skip_on_error: true
+# AWS S3 buckets - examples:
+# wazuh_aws_buckets:
+#   - name: "my-cloudtrail-bucket"
+#     type: "cloudtrail"
+#     aws_profile: "default"           # or use access_key/secret_key
+#     # access_key: "AKIAIOSFODNN7EXAMPLE"
+#     # secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+#     # iam_role_arn: "arn:aws:iam::123456789012:role/my-role"
+#     path: "AWSLogs/123456789012"
+#     only_logs_after: "2024-01-01"
+#     regions:
+#       - us-east-1
+#       - us-west-2
+#   - name: "my-vpc-bucket"
+#     type: "vpcflow"
+#     aws_profile: "default"
+# wazuh_aws_services:
+#   - type: "cloudwatchlogs"
+#     aws_profile: "default"
+#     regions:
+#       - us-east-1
+#     aws_log_groups:
+#       - /aws/lambda/my-function
+wazuh_aws_buckets: []
+wazuh_aws_services: []
+
+# Azure Log Analytics, Activity Logs, and Storage
+wazuh_azure_enabled: false
+wazuh_azure_interval: "1h"
+wazuh_azure_run_on_start: true
+# Azure Log Analytics - examples:
+# wazuh_azure_log_analytics:
+#   - application_id: "your-app-id"
+#     application_key: "your-app-key"
+#     tenantdomain: "your-tenant.onmicrosoft.com"
+#     requests:
+#       - tag: "azure-signin"
+#         query: "SigninLogs"
+#         workspace: "your-workspace-id"
+#         time_offset: "1d"
+# wazuh_azure_graph:
+#   - application_id: "your-app-id"
+#     application_key: "your-app-key"
+#     tenantdomain: "your-tenant.onmicrosoft.com"
+#     requests:
+#       - tag: "azure-audit"
+#         query: "auditLogs/directoryAudits"
+# wazuh_azure_storage:
+#   - account_name: "mystorageaccount"
+#     account_key: "your-storage-key"
+#     tag: "azure-storage"
+#     containers:
+#       - name: "insights-logs"
+#         blobs: ".json"
+#         content_type: "json"
+wazuh_azure_log_analytics: []
+wazuh_azure_graph: []
+wazuh_azure_storage: []
+
+# Google Cloud Platform Pub/Sub
+wazuh_gcp_enabled: false
+wazuh_gcp_interval: "1m"
+wazuh_gcp_run_on_start: true
+wazuh_gcp_pull_on_start: true
+wazuh_gcp_logging: "info"
+# GCP Pub/Sub settings - required when wazuh_gcp_enabled: true
+# wazuh_gcp_project_id: "my-project"
+# wazuh_gcp_subscription_name: "wazuh-subscription"
+# wazuh_gcp_credentials_file: "/var/ossec/etc/gcp-credentials.json"
+# wazuh_gcp_max_messages: 100
+# wazuh_gcp_num_threads: 1
+
+# Google Cloud Storage Bucket
+wazuh_gcp_bucket_enabled: false
+wazuh_gcp_bucket_interval: "1h"
+wazuh_gcp_bucket_run_on_start: true
+# GCS buckets - examples:
+# wazuh_gcp_buckets:
+#   - name: "my-access-logs-bucket"
+#     type: "access_logs"
+#     credentials_file: "/var/ossec/etc/gcp-credentials.json"
+#     prefix: "logs/"
+#     only_logs_after: "2024-01-01"
+wazuh_gcp_buckets: []
 
 # Indexer connection
 wazuh_indexer_connection_enabled: true

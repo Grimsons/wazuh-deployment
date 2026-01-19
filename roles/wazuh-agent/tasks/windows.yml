@@ -32,6 +32,37 @@
     backup: true
   notify: restart wazuh-agent-windows
 
+- name: Read enrollment password from credentials file
+  ansible.builtin.slurp:
+    src: "{{ playbook_dir }}/credentials/agent_enrollment_password.txt"
+  delegate_to: localhost
+  become: false
+  register: agent_enrollment_password_content
+  when:
+    - wazuh_authd_use_password | default(true)
+    - wazuh_agent_enrollment_password is not defined
+  vars:
+    ansible_become: false
+  ignore_errors: true
+
+- name: Extract enrollment password
+  ansible.builtin.set_fact:
+    wazuh_agent_enrollment_password: "{{ agent_enrollment_password_content.content | b64decode | regex_search('Password:\\s*(.+)', '\\1') | first | trim }}"
+  when:
+    - agent_enrollment_password_content is defined
+    - agent_enrollment_password_content is not skipped
+    - agent_enrollment_password_content.content is defined
+    - not agent_enrollment_password_content.failed | default(false)
+  no_log: true
+
+- name: Deploy enrollment password file to Windows agent
+  ansible.windows.win_copy:
+    content: "{{ wazuh_agent_enrollment_password }}"
+    dest: 'C:\Program Files (x86)\ossec-agent\authd.pass'
+  when:
+    - wazuh_authd_use_password | default(true)
+    - wazuh_agent_enrollment_password is defined
+
 - name: Start Wazuh Agent service
   ansible.windows.win_service:
     name: WazuhSvc

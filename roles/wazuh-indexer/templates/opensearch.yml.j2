@@ -14,6 +14,10 @@ transport.port: {{ wazuh_indexer_transport_port }}
 path.data: {{ wazuh_indexer_data_path }}
 path.logs: {{ wazuh_indexer_log_path }}
 
+# Memory settings - CRITICAL for production
+# Prevents JVM from being swapped to disk
+bootstrap.memory_lock: {{ wazuh_indexer_memory_lock | default(true) | lower }}
+
 # Discovery settings
 discovery.type: {% if wazuh_indexer_nodes | length == 1 %}single-node{% else %}zen{% endif %}
 

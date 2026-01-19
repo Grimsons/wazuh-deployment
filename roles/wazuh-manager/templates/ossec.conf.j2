@@ -4,31 +4,39 @@
 -->
 <ossec_config>
   <global>
-    <jsonout_output>yes</jsonout_output>
-    <alerts_log>yes</alerts_log>
-    <logall>no</logall>
-    <logall_json>no</logall_json>
+    <!-- Alert output formats -->
+    <jsonout_output>{{ 'yes' if wazuh_jsonout_output | default(true) else 'no' }}</jsonout_output>
+    <alerts_log>{{ 'yes' if wazuh_alerts_log | default(true) else 'no' }}</alerts_log>
+    <logall>{{ 'yes' if wazuh_logall | default(false) else 'no' }}</logall>
+    <logall_json>{{ 'yes' if wazuh_logall_json | default(false) else 'no' }}</logall_json>
+    <!-- Email notifications -->
     <email_notification>{{ 'yes' if wazuh_email_notification_enabled else 'no' }}</email_notification>
 {% if wazuh_email_notification_enabled %}
     <smtp_server>{{ wazuh_email_smtp_server }}</smtp_server>
     <email_from>{{ wazuh_email_from }}</email_from>
     <email_to>{{ wazuh_email_to }}</email_to>
 {% endif %}
-    <email_maxperhour>12</email_maxperhour>
+    <email_maxperhour>{{ wazuh_email_maxperhour | default(12) }}</email_maxperhour>
     <email_log_source>alerts.log</email_log_source>
-    <agents_disconnection_time>10m</agents_disconnection_time>
-    <agents_disconnection_alert_time>0</agents_disconnection_alert_time>
-    <max_output_size>20M</max_output_size>
+    <!-- Agent connection settings -->
+    <agents_disconnection_time>{{ wazuh_agents_disconnection_time | default('10m') }}</agents_disconnection_time>
+    <agents_disconnection_alert_time>{{ wazuh_agents_disconnection_alert_time | default(0) }}</agents_disconnection_alert_time>
+    <!-- Output size limit -->
+    <max_output_size>{{ wazuh_max_output_size | default('20M') }}</max_output_size>
+{% if wazuh_geoip_database is defined %}
+    <!-- GeoIP database for IP geolocation -->
+    <geoip_db_path>{{ wazuh_geoip_database }}</geoip_db_path>
+{% endif %}
   </global>
 
   <alerts>
-    <log_alert_level>3</log_alert_level>
-    <email_alert_level>12</email_alert_level>
+    <log_alert_level>{{ wazuh_log_alert_level | default(3) }}</log_alert_level>
+    <email_alert_level>{{ wazuh_email_alert_level | default(12) }}</email_alert_level>
   </alerts>
 
-  <!-- Choose between "plain", "json", or "plain,json" for the format of internal logs -->
+  <!-- Internal logging format: plain, json, or plain,json -->
   <logging>
-    <log_format>plain</log_format>
+    <log_format>{{ wazuh_internal_log_format | default('plain') }}</log_format>
   </logging>
 
   <!-- Wazuh Indexer Connection -->
@@ -76,7 +84,7 @@
     <port>1516</port>
     <bind_addr>0.0.0.0</bind_addr>
     <nodes>
-      <node>NODE_IP</node>
+      <node>{{ ansible_default_ipv4.address | default(wazuh_manager_nodes[0].ip) }}</node>
     </nodes>
     <hidden>no</hidden>
     <disabled>yes</disabled>
@@ -269,29 +277,31 @@
     <session_timeout>15m</session_timeout>
   </rule_test>
 
+  <!-- CIS-CAT Integration -->
+  <!-- Note: CIS-CAT requires manual download from CIS website -->
+  <!-- Enable only after installing CIS-CAT to wodles/ciscat -->
   <wodle name="cis-cat">
-    <disabled>no</disabled>
-    <timeout>1800</timeout>
-    <interval>1d</interval>
-    <scan-on-start>yes</scan-on-start>
-
-    <java_path>wodles/java</java_path>
-    <ciscat_path>wodles/ciscat</ciscat_path>
+    <disabled>{{ 'no' if wazuh_ciscat_enabled | default(false) else 'yes' }}</disabled>
+    <timeout>{{ wazuh_ciscat_timeout | default(1800) }}</timeout>
+    <interval>{{ wazuh_ciscat_interval | default('1d') }}</interval>
+    <scan-on-start>{{ 'yes' if wazuh_ciscat_scan_on_start | default(true) else 'no' }}</scan-on-start>
+    <java_path>{{ wazuh_ciscat_java_path | default('wodles/java') }}</java_path>
+    <ciscat_path>{{ wazuh_ciscat_path | default('wodles/ciscat') }}</ciscat_path>
   </wodle>
 
   <!-- Osquery integration -->
   <wodle name="osquery">
-    <disabled>yes</disabled>
+    <disabled>{{ 'no' if wazuh_osquery_enabled | default(false) else 'yes' }}</disabled>
     <run_daemon>yes</run_daemon>
-    <log_path>/var/log/osquery/osqueryd.results.log</log_path>
-    <config_path>/etc/osquery/osquery.conf</config_path>
+    <log_path>{{ wazuh_osquery_log_path | default('/var/log/osquery/osqueryd.results.log') }}</log_path>
+    <config_path>{{ wazuh_osquery_config_path | default('/etc/osquery/osquery.conf') }}</config_path>
     <add_labels>yes</add_labels>
   </wodle>
 
   <!-- System inventory -->
   <wodle name="syscollector">
-    <disabled>no</disabled>
-    <interval>1h</interval>
+    <disabled>{{ 'no' if wazuh_syscollector_enabled | default(true) else 'yes' }}</disabled>
+    <interval>{{ wazuh_syscollector_interval | default('1h') }}</interval>
     <scan_on_start>yes</scan_on_start>
     <hardware>yes</hardware>
     <os>yes</os>
@@ -306,11 +316,247 @@
     </synchronization>
   </wodle>
 
+{% if wazuh_aws_enabled | default(false) %}
+  <!-- AWS CloudTrail, CloudWatch Logs, VPC Flow, Config, etc. -->
+  <wodle name="aws-s3">
+    <disabled>no</disabled>
+    <interval>{{ wazuh_aws_interval | default('10m') }}</interval>
+    <run_on_start>{{ 'yes' if wazuh_aws_run_on_start | default(true) else 'no' }}</run_on_start>
+    <skip_on_error>{{ 'yes' if wazuh_aws_skip_on_error | default(true) else 'no' }}</skip_on_error>
+{% for bucket in wazuh_aws_buckets | default([]) %}
+    <bucket type="{{ bucket.type }}">
+      <name>{{ bucket.name }}</name>
+{% if bucket.aws_profile is defined %}
+      <aws_profile>{{ bucket.aws_profile }}</aws_profile>
+{% endif %}
+{% if bucket.access_key is defined %}
+      <access_key>{{ bucket.access_key }}</access_key>
+{% endif %}
+{% if bucket.secret_key is defined %}
+      <secret_key>{{ bucket.secret_key }}</secret_key>
+{% endif %}
+{% if bucket.iam_role_arn is defined %}
+      <iam_role_arn>{{ bucket.iam_role_arn }}</iam_role_arn>
+{% endif %}
+{% if bucket.path is defined %}
+      <path>{{ bucket.path }}</path>
+{% endif %}
+{% if bucket.only_logs_after is defined %}
+      <only_logs_after>{{ bucket.only_logs_after }}</only_logs_after>
+{% endif %}
+{% if bucket.regions is defined %}
+      <regions>{{ bucket.regions | join(',') }}</regions>
+{% endif %}
+{% if bucket.remove_from_bucket is defined %}
+      <remove_from_bucket>{{ 'yes' if bucket.remove_from_bucket else 'no' }}</remove_from_bucket>
+{% endif %}
+    </bucket>
+{% endfor %}
+{% for service in wazuh_aws_services | default([]) %}
+    <service type="{{ service.type }}">
+{% if service.aws_profile is defined %}
+      <aws_profile>{{ service.aws_profile }}</aws_profile>
+{% endif %}
+{% if service.access_key is defined %}
+      <access_key>{{ service.access_key }}</access_key>
+{% endif %}
+{% if service.secret_key is defined %}
+      <secret_key>{{ service.secret_key }}</secret_key>
+{% endif %}
+{% if service.iam_role_arn is defined %}
+      <iam_role_arn>{{ service.iam_role_arn }}</iam_role_arn>
+{% endif %}
+{% if service.only_logs_after is defined %}
+      <only_logs_after>{{ service.only_logs_after }}</only_logs_after>
+{% endif %}
+{% if service.regions is defined %}
+      <regions>{{ service.regions | join(',') }}</regions>
+{% endif %}
+{% if service.aws_log_groups is defined %}
+      <aws_log_groups>{{ service.aws_log_groups | join(',') }}</aws_log_groups>
+{% endif %}
+    </service>
+{% endfor %}
+  </wodle>
+{% endif %}
+
+{% if wazuh_azure_enabled | default(false) %}
+  <!-- Azure Log Analytics and Activity Logs -->
+  <wodle name="azure-logs">
+    <disabled>no</disabled>
+    <interval>{{ wazuh_azure_interval | default('1h') }}</interval>
+    <run_on_start>{{ 'yes' if wazuh_azure_run_on_start | default(true) else 'no' }}</run_on_start>
+{% for log_analytics in wazuh_azure_log_analytics | default([]) %}
+    <log_analytics>
+      <application_id>{{ log_analytics.application_id }}</application_id>
+      <application_key>{{ log_analytics.application_key }}</application_key>
+{% if log_analytics.tenantdomain is defined %}
+      <tenantdomain>{{ log_analytics.tenantdomain }}</tenantdomain>
+{% endif %}
+{% if log_analytics.auth_path is defined %}
+      <auth_path>{{ log_analytics.auth_path }}</auth_path>
+{% endif %}
+{% for request in log_analytics.requests | default([]) %}
+      <request>
+        <tag>{{ request.tag }}</tag>
+        <query>{{ request.query }}</query>
+        <workspace>{{ request.workspace }}</workspace>
+{% if request.time_offset is defined %}
+        <time_offset>{{ request.time_offset }}</time_offset>
+{% endif %}
+      </request>
+{% endfor %}
+    </log_analytics>
+{% endfor %}
+{% for graph in wazuh_azure_graph | default([]) %}
+    <graph>
+      <application_id>{{ graph.application_id }}</application_id>
+      <application_key>{{ graph.application_key }}</application_key>
+{% if graph.tenantdomain is defined %}
+      <tenantdomain>{{ graph.tenantdomain }}</tenantdomain>
+{% endif %}
+{% if graph.auth_path is defined %}
+      <auth_path>{{ graph.auth_path }}</auth_path>
+{% endif %}
+{% for request in graph.requests | default([]) %}
+      <request>
+        <tag>{{ request.tag }}</tag>
+        <query>{{ request.query }}</query>
+{% if request.time_offset is defined %}
+        <time_offset>{{ request.time_offset }}</time_offset>
+{% endif %}
+      </request>
+{% endfor %}
+    </graph>
+{% endfor %}
+{% for storage in wazuh_azure_storage | default([]) %}
+    <storage>
+      <account_name>{{ storage.account_name }}</account_name>
+      <account_key>{{ storage.account_key }}</account_key>
+{% if storage.auth_path is defined %}
+      <auth_path>{{ storage.auth_path }}</auth_path>
+{% endif %}
+      <tag>{{ storage.tag | default('azure-storage') }}</tag>
+{% for container in storage.containers | default([]) %}
+      <container name="{{ container.name }}">
+{% if container.blobs is defined %}
+        <blobs>{{ container.blobs }}</blobs>
+{% endif %}
+{% if container.content_type is defined %}
+        <content_type>{{ container.content_type }}</content_type>
+{% endif %}
+{% if container.time_offset is defined %}
+        <time_offset>{{ container.time_offset }}</time_offset>
+{% endif %}
+      </container>
+{% endfor %}
+    </storage>
+{% endfor %}
+  </wodle>
+{% endif %}
+
+{% if wazuh_gcp_enabled | default(false) %}
+  <!-- Google Cloud Platform Pub/Sub -->
+  <wodle name="gcp-pubsub">
+    <disabled>no</disabled>
+    <interval>{{ wazuh_gcp_interval | default('1m') }}</interval>
+    <run_on_start>{{ 'yes' if wazuh_gcp_run_on_start | default(true) else 'no' }}</run_on_start>
+    <project_id>{{ wazuh_gcp_project_id }}</project_id>
+    <subscription_name>{{ wazuh_gcp_subscription_name }}</subscription_name>
+{% if wazuh_gcp_credentials_file is defined %}
+    <credentials_file>{{ wazuh_gcp_credentials_file }}</credentials_file>
+{% endif %}
+{% if wazuh_gcp_max_messages is defined %}
+    <max_messages>{{ wazuh_gcp_max_messages }}</max_messages>
+{% endif %}
+{% if wazuh_gcp_num_threads is defined %}
+    <num_threads>{{ wazuh_gcp_num_threads }}</num_threads>
+{% endif %}
+    <pull_on_start>{{ 'yes' if wazuh_gcp_pull_on_start | default(true) else 'no' }}</pull_on_start>
+    <logging>{{ wazuh_gcp_logging | default('info') }}</logging>
+  </wodle>
+{% endif %}
+
+{% if wazuh_gcp_bucket_enabled | default(false) %}
+  <!-- Google Cloud Storage Bucket -->
+  <wodle name="gcp-bucket">
+    <disabled>no</disabled>
+    <interval>{{ wazuh_gcp_bucket_interval | default('1h') }}</interval>
+    <run_on_start>{{ 'yes' if wazuh_gcp_bucket_run_on_start | default(true) else 'no' }}</run_on_start>
+{% for bucket in wazuh_gcp_buckets | default([]) %}
+    <bucket type="{{ bucket.type | default('access_logs') }}">
+      <name>{{ bucket.name }}</name>
+{% if bucket.credentials_file is defined %}
+      <credentials_file>{{ bucket.credentials_file }}</credentials_file>
+{% endif %}
+{% if bucket.prefix is defined %}
+      <prefix>{{ bucket.prefix }}</prefix>
+{% endif %}
+{% if bucket.only_logs_after is defined %}
+      <only_logs_after>{{ bucket.only_logs_after }}</only_logs_after>
+{% endif %}
+{% if bucket.remove_from_bucket is defined %}
+      <remove_from_bucket>{{ 'yes' if bucket.remove_from_bucket else 'no' }}</remove_from_bucket>
+{% endif %}
+    </bucket>
+{% endfor %}
+  </wodle>
+{% endif %}
+
+  <!-- Security Configuration Assessment -->
   <sca>
-    <enabled>yes</enabled>
+    <enabled>{{ 'yes' if wazuh_sca_enabled | default(true) else 'no' }}</enabled>
     <scan_on_start>yes</scan_on_start>
-    <interval>12h</interval>
+    <interval>{{ wazuh_sca_interval | default('12h') }}</interval>
     <skip_nfs>yes</skip_nfs>
   </sca>
+
+{% if wazuh_syslog_output_enabled | default(false) %}
+  <!-- Syslog Output -->
+  <syslog_output>
+    <server>{{ wazuh_syslog_output_server }}</server>
+    <port>{{ wazuh_syslog_output_port | default(514) }}</port>
+    <format>{{ wazuh_syslog_output_format | default('default') }}</format>
+{% if wazuh_syslog_output_level is defined %}
+    <level>{{ wazuh_syslog_output_level }}</level>
+{% endif %}
+{% if wazuh_syslog_output_group is defined %}
+    <group>{{ wazuh_syslog_output_group }}</group>
+{% endif %}
+{% if wazuh_syslog_output_rule_id is defined %}
+    <rule_id>{{ wazuh_syslog_output_rule_id }}</rule_id>
+{% endif %}
+  </syslog_output>
+{% endif %}
+
+{% if wazuh_integrations is defined and wazuh_integrations | length > 0 %}
+  <!-- Integrations -->
+{% for integration in wazuh_integrations %}
+  <integration>
+    <name>{{ integration.name }}</name>
+{% if integration.hook_url is defined %}
+    <hook_url>{{ integration.hook_url }}</hook_url>
+{% endif %}
+{% if integration.api_key is defined %}
+    <api_key>{{ integration.api_key }}</api_key>
+{% endif %}
+{% if integration.level is defined %}
+    <level>{{ integration.level }}</level>
+{% endif %}
+{% if integration.rule_id is defined %}
+    <rule_id>{{ integration.rule_id }}</rule_id>
+{% endif %}
+{% if integration.group is defined %}
+    <group>{{ integration.group }}</group>
+{% endif %}
+{% if integration.alert_format is defined %}
+    <alert_format>{{ integration.alert_format }}</alert_format>
+{% endif %}
+{% if integration.options is defined %}
+    <options>{{ integration.options | to_json }}</options>
+{% endif %}
+  </integration>
+{% endfor %}
+{% endif %}
 
 </ossec_config>

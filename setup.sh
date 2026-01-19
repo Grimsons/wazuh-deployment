@@ -277,7 +277,22 @@ main() {
     if [ $MANAGER_COUNT -gt 1 ]; then
         print_info "Multiple managers detected. Configuring cluster..."
         prompt_with_default "Manager cluster name" "wazuh-manager-cluster" "MANAGER_CLUSTER_NAME"
-        prompt_with_default "Cluster key (32 characters)" "$(openssl rand -hex 16 2>/dev/null || echo 'MyClusterKey32CharactersLong!!')" "MANAGER_CLUSTER_KEY"
+
+        # Generate secure cluster key - fail if we can't generate one securely
+        local cluster_key_default=""
+        if command -v openssl &>/dev/null; then
+            cluster_key_default=$(openssl rand -hex 16 2>/dev/null)
+        fi
+        if [ -z "$cluster_key_default" ]; then
+            # Fallback to /dev/urandom
+            cluster_key_default=$(head -c 16 /dev/urandom 2>/dev/null | od -An -tx1 | tr -d ' \n' | head -c 32)
+        fi
+        if [ -z "$cluster_key_default" ] || [ ${#cluster_key_default} -lt 32 ]; then
+            print_error "FATAL: Cannot generate secure cluster key. OpenSSL and /dev/urandom both failed."
+            print_error "Please install OpenSSL or ensure /dev/urandom is available."
+            exit 1
+        fi
+        prompt_with_default "Cluster key (32 characters)" "$cluster_key_default" "MANAGER_CLUSTER_KEY"
     fi
 
     # ═══════════════════════════════════════════════════════════════
@@ -385,15 +400,89 @@ main() {
     prompt_yes_no "Create client preparation package?" "yes" "CREATE_PREP_PACKAGE"
 
     # ═══════════════════════════════════════════════════════════════
-    # ADDITIONAL OPTIONS
+    # SECURITY FEATURES
     # ═══════════════════════════════════════════════════════════════
-    print_section "Additional Options"
+    print_section "Security Features"
 
-    prompt_yes_no "Enable Wazuh vulnerability detection?" "yes" "ENABLE_VULN_DETECTION"
-    prompt_yes_no "Enable Wazuh file integrity monitoring?" "yes" "ENABLE_FIM"
-    prompt_yes_no "Enable Wazuh rootkit detection?" "yes" "ENABLE_ROOTKIT"
-    prompt_yes_no "Enable Wazuh log collection?" "yes" "ENABLE_LOG_COLLECTION"
+    print_info "Configure which Wazuh security modules to enable."
+    echo
+
+    prompt_yes_no "Enable Vulnerability Detection?" "yes" "ENABLE_VULN_DETECTION"
+    prompt_yes_no "Enable File Integrity Monitoring (FIM)?" "yes" "ENABLE_FIM"
+    prompt_yes_no "Enable Rootkit Detection?" "yes" "ENABLE_ROOTKIT"
+    prompt_yes_no "Enable Security Configuration Assessment (SCA)?" "yes" "ENABLE_SCA"
+    prompt_yes_no "Enable System Inventory (Syscollector)?" "yes" "ENABLE_SYSCOLLECTOR"
+    prompt_yes_no "Enable Log Collection?" "yes" "ENABLE_LOG_COLLECTION"
     prompt_yes_no "Enable Active Response?" "yes" "ENABLE_ACTIVE_RESPONSE"
+
+    # ═══════════════════════════════════════════════════════════════
+    # EMAIL ALERTS CONFIGURATION
+    # ═══════════════════════════════════════════════════════════════
+    print_section "Email Alerts Configuration"
+
+    prompt_yes_no "Enable email alerts?" "no" "ENABLE_EMAIL_ALERTS"
+
+    if [ "$ENABLE_EMAIL_ALERTS" = "true" ]; then
+        print_info "Configure SMTP settings for email alerts."
+        echo
+        prompt_with_default "SMTP server address" "smtp.example.com" "EMAIL_SMTP_SERVER"
+        prompt_with_default "Email from address" "wazuh@${ORG_NAME,,}.local" "EMAIL_FROM"
+        prompt_with_default "Email to address (alerts recipient)" "security@${ORG_NAME,,}.local" "EMAIL_TO"
+        prompt_with_default "Minimum alert level for email (1-15)" "12" "EMAIL_ALERT_LEVEL"
+    fi
+
+    # ═══════════════════════════════════════════════════════════════
+    # SYSLOG OUTPUT CONFIGURATION
+    # ═══════════════════════════════════════════════════════════════
+    print_section "Syslog Output Configuration"
+
+    print_info "Forward alerts to external SIEM/log collector via syslog."
+    echo
+
+    prompt_yes_no "Enable syslog output?" "no" "ENABLE_SYSLOG_OUTPUT"
+
+    if [ "$ENABLE_SYSLOG_OUTPUT" = "true" ]; then
+        prompt_with_default "Syslog server address" "" "SYSLOG_SERVER"
+        while [ -z "$SYSLOG_SERVER" ]; do
+            print_error "Syslog server address is required when syslog output is enabled."
+            prompt_with_default "Syslog server address" "" "SYSLOG_SERVER"
+        done
+        prompt_with_default "Syslog port" "514" "SYSLOG_PORT"
+        echo -e "${CYAN}Syslog format options: default, json, cef${NC}"
+        prompt_with_default "Syslog format" "json" "SYSLOG_FORMAT"
+        prompt_with_default "Minimum alert level for syslog (1-15, leave empty for all)" "" "SYSLOG_LEVEL"
+    fi
+
+    # ═══════════════════════════════════════════════════════════════
+    # INTEGRATIONS
+    # ═══════════════════════════════════════════════════════════════
+    print_section "Integrations"
+
+    print_info "Configure third-party integrations for alerts."
+    echo
+
+    prompt_yes_no "Enable Slack notifications?" "no" "ENABLE_SLACK"
+
+    if [ "$ENABLE_SLACK" = "true" ]; then
+        print_info "Get your Slack webhook URL from: https://api.slack.com/messaging/webhooks"
+        prompt_with_default "Slack webhook URL" "" "SLACK_WEBHOOK_URL"
+        while [ -z "$SLACK_WEBHOOK_URL" ]; do
+            print_error "Slack webhook URL is required when Slack is enabled."
+            prompt_with_default "Slack webhook URL" "" "SLACK_WEBHOOK_URL"
+        done
+        prompt_with_default "Minimum alert level for Slack (1-15)" "10" "SLACK_ALERT_LEVEL"
+    fi
+
+    prompt_yes_no "Enable VirusTotal integration?" "no" "ENABLE_VIRUSTOTAL"
+
+    if [ "$ENABLE_VIRUSTOTAL" = "true" ]; then
+        print_info "Get your API key from: https://www.virustotal.com/gui/my-apikey"
+        prompt_with_default "VirusTotal API key" "" "VIRUSTOTAL_API_KEY" "true"
+        while [ -z "$VIRUSTOTAL_API_KEY" ]; do
+            print_error "VirusTotal API key is required when VirusTotal is enabled."
+            prompt_with_default "VirusTotal API key" "" "VIRUSTOTAL_API_KEY" "true"
+        done
+    fi
 
     # ═══════════════════════════════════════════════════════════════
     # GENERATE CONFIGURATION FILES
@@ -517,19 +606,39 @@ EOF
     # Store or generate indexer admin password securely
     local indexer_pass_file="$SCRIPT_DIR/credentials/indexer_admin_password.txt"
     if [ -n "$INDEXER_ADMIN_PASSWORD" ]; then
-        echo "$INDEXER_ADMIN_PASSWORD" > "$indexer_pass_file"
+        cat > "$indexer_pass_file" << PASSEOF
+# Wazuh Indexer Admin Credentials
+# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+Username: ${INDEXER_ADMIN_USER}
+Password: ${INDEXER_ADMIN_PASSWORD}
+
+# IMPORTANT: Keep this file secure and delete after noting the password!
+PASSEOF
         print_info "Custom indexer password saved to credentials file"
     elif [ ! -f "$indexer_pass_file" ]; then
-        generate_password 24 > "$indexer_pass_file"
+        local gen_pass
+        gen_pass=$(generate_password 24)
+        cat > "$indexer_pass_file" << PASSEOF
+# Wazuh Indexer Admin Credentials
+# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+Username: ${INDEXER_ADMIN_USER}
+Password: ${gen_pass}
+
+# IMPORTANT: Keep this file secure and delete after noting the password!
+PASSEOF
         print_info "Generated indexer password saved to credentials file"
     fi
     chmod 600 "$indexer_pass_file"
 
     # Reference password via file lookup (never store in YAML)
+    # Use regex to extract password from "Password: xxx" format, fail if not found
     cat >> "$SCRIPT_DIR/group_vars/all.yml" << 'EOF'
 # Indexer admin password loaded from secure file
 # SECURITY: Password stored in ./credentials/indexer_admin_password.txt (mode 0600)
-wazuh_indexer_admin_password: "{{ lookup('file', playbook_dir + '/credentials/indexer_admin_password.txt') | trim }}"
+# NOTE: Will fail deployment if password file is missing or malformed (no unsafe defaults)
+wazuh_indexer_admin_password: "{{ (lookup('file', playbook_dir + '/credentials/indexer_admin_password.txt') | regex_search('Password:\\s*(.+)', '\\1') | first) | trim }}"
 EOF
 
     cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
@@ -557,19 +666,39 @@ EOF
     # Store or generate API password securely
     local api_pass_file="$SCRIPT_DIR/credentials/api_password.txt"
     if [ -n "$API_PASSWORD" ]; then
-        echo "$API_PASSWORD" > "$api_pass_file"
+        cat > "$api_pass_file" << PASSEOF
+# Wazuh API Credentials
+# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+Username: ${API_USER}
+Password: ${API_PASSWORD}
+
+# IMPORTANT: Keep this file secure and delete after noting the password!
+PASSEOF
         print_info "Custom API password saved to credentials file"
     elif [ ! -f "$api_pass_file" ]; then
-        generate_password 24 > "$api_pass_file"
+        local gen_api_pass
+        gen_api_pass=$(generate_password 24)
+        cat > "$api_pass_file" << PASSEOF
+# Wazuh API Credentials
+# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+Username: ${API_USER}
+Password: ${gen_api_pass}
+
+# IMPORTANT: Keep this file secure and delete after noting the password!
+PASSEOF
         print_info "Generated API password saved to credentials file"
     fi
     chmod 600 "$api_pass_file"
 
     # Reference password via file lookup (never store in YAML)
+    # Use regex to extract password from "Password: xxx" format, fail if not found
     cat >> "$SCRIPT_DIR/group_vars/all.yml" << 'EOF'
 # API password loaded from secure file
 # SECURITY: Password stored in ./credentials/api_password.txt (mode 0600)
-wazuh_api_password: "{{ lookup('file', playbook_dir + '/credentials/api_password.txt') | trim }}"
+# NOTE: Will fail deployment if password file is missing or malformed (no unsafe defaults)
+wazuh_api_password: "{{ (lookup('file', playbook_dir + '/credentials/api_password.txt') | regex_search('Password:\\s*(.+)', '\\1') | first) | trim }}"
 EOF
 
     if [ $MANAGER_COUNT -gt 1 ]; then
@@ -636,13 +765,101 @@ wazuh_manager_certs_path: /var/ossec/etc/certs
 wazuh_dashboard_certs_path: /etc/wazuh-dashboard/certs
 
 # ═══════════════════════════════════════════════════════════════
-# Feature Toggles
+# Security Feature Toggles
 # ═══════════════════════════════════════════════════════════════
 wazuh_vulnerability_detection_enabled: ${ENABLE_VULN_DETECTION}
 wazuh_fim_enabled: ${ENABLE_FIM}
 wazuh_rootkit_detection_enabled: ${ENABLE_ROOTKIT}
+wazuh_sca_enabled: ${ENABLE_SCA:-true}
+wazuh_syscollector_enabled: ${ENABLE_SYSCOLLECTOR:-true}
 wazuh_log_collection_enabled: ${ENABLE_LOG_COLLECTION}
 wazuh_active_response_enabled: ${ENABLE_ACTIVE_RESPONSE}
+EOF
+
+    # Add email alerts configuration if enabled
+    if [ "$ENABLE_EMAIL_ALERTS" = "true" ]; then
+        cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
+
+# ═══════════════════════════════════════════════════════════════
+# Email Alerts Configuration
+# ═══════════════════════════════════════════════════════════════
+wazuh_email_notification_enabled: true
+wazuh_email_smtp_server: "${EMAIL_SMTP_SERVER}"
+wazuh_email_from: "${EMAIL_FROM}"
+wazuh_email_to: "${EMAIL_TO}"
+wazuh_email_alert_level: ${EMAIL_ALERT_LEVEL:-12}
+EOF
+    else
+        cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
+
+# Email alerts disabled
+wazuh_email_notification_enabled: false
+EOF
+    fi
+
+    # Add syslog output configuration if enabled
+    if [ "$ENABLE_SYSLOG_OUTPUT" = "true" ]; then
+        cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
+
+# ═══════════════════════════════════════════════════════════════
+# Syslog Output Configuration
+# ═══════════════════════════════════════════════════════════════
+wazuh_syslog_output_enabled: true
+wazuh_syslog_output_server: "${SYSLOG_SERVER}"
+wazuh_syslog_output_port: ${SYSLOG_PORT:-514}
+wazuh_syslog_output_format: "${SYSLOG_FORMAT:-json}"
+EOF
+        if [ -n "$SYSLOG_LEVEL" ]; then
+            echo "wazuh_syslog_output_level: ${SYSLOG_LEVEL}" >> "$SCRIPT_DIR/group_vars/all.yml"
+        fi
+    else
+        cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
+
+# Syslog output disabled
+wazuh_syslog_output_enabled: false
+EOF
+    fi
+
+    # Add integrations configuration
+    local has_integrations=false
+    if [ "$ENABLE_SLACK" = "true" ] || [ "$ENABLE_VIRUSTOTAL" = "true" ]; then
+        has_integrations=true
+        cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
+
+# ═══════════════════════════════════════════════════════════════
+# Integrations
+# ═══════════════════════════════════════════════════════════════
+wazuh_integrations:
+EOF
+    fi
+
+    if [ "$ENABLE_SLACK" = "true" ]; then
+        cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
+  - name: slack
+    hook_url: "${SLACK_WEBHOOK_URL}"
+    level: ${SLACK_ALERT_LEVEL:-10}
+    alert_format: json
+EOF
+    fi
+
+    if [ "$ENABLE_VIRUSTOTAL" = "true" ]; then
+        cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
+  - name: virustotal
+    api_key: "${VIRUSTOTAL_API_KEY}"
+    group: "syscheck"
+    alert_format: json
+EOF
+    fi
+
+    if [ "$has_integrations" = "false" ]; then
+        cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
+
+# No integrations configured
+wazuh_integrations: []
+EOF
+    fi
+
+    cat >> "$SCRIPT_DIR/group_vars/all.yml" << EOF
 
 # ═══════════════════════════════════════════════════════════════
 # Network/Firewall Settings
@@ -873,12 +1090,33 @@ SELFEXTRACT_EOF
     fi
 
     echo
-    echo -e "${CYAN}Features Enabled:${NC}"
+    echo -e "${CYAN}Security Features Enabled:${NC}"
     [ "$ENABLE_VULN_DETECTION" = "true" ] && echo "  - Vulnerability Detection"
     [ "$ENABLE_FIM" = "true" ] && echo "  - File Integrity Monitoring"
     [ "$ENABLE_ROOTKIT" = "true" ] && echo "  - Rootkit Detection"
+    [ "${ENABLE_SCA:-true}" = "true" ] && echo "  - Security Configuration Assessment (SCA)"
+    [ "${ENABLE_SYSCOLLECTOR:-true}" = "true" ] && echo "  - System Inventory (Syscollector)"
     [ "$ENABLE_LOG_COLLECTION" = "true" ] && echo "  - Log Collection"
     [ "$ENABLE_ACTIVE_RESPONSE" = "true" ] && echo "  - Active Response"
+
+    echo
+    echo -e "${CYAN}Alerting & Integrations:${NC}"
+    if [ "$ENABLE_EMAIL_ALERTS" = "true" ]; then
+        echo "  - Email Alerts: ${EMAIL_TO} (via ${EMAIL_SMTP_SERVER})"
+    fi
+    if [ "$ENABLE_SYSLOG_OUTPUT" = "true" ]; then
+        echo "  - Syslog Output: ${SYSLOG_SERVER}:${SYSLOG_PORT} (${SYSLOG_FORMAT})"
+    fi
+    if [ "$ENABLE_SLACK" = "true" ]; then
+        echo "  - Slack Notifications (level >= ${SLACK_ALERT_LEVEL})"
+    fi
+    if [ "$ENABLE_VIRUSTOTAL" = "true" ]; then
+        echo "  - VirusTotal Integration"
+    fi
+    if [ "$ENABLE_EMAIL_ALERTS" != "true" ] && [ "$ENABLE_SYSLOG_OUTPUT" != "true" ] && \
+       [ "$ENABLE_SLACK" != "true" ] && [ "$ENABLE_VIRUSTOTAL" != "true" ]; then
+        echo "  - None configured (alerts will only appear in Wazuh Dashboard)"
+    fi
 
     print_header "Next Steps"
 

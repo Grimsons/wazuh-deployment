@@ -20,17 +20,46 @@
 
   <client_buffer>
     <disabled>no</disabled>
-    <queue_size>5000</queue_size>
-    <events_per_second>500</events_per_second>
+    <queue_size>{{ wazuh_agent_buffer_queue_size | default(5000) }}</queue_size>
+    <events_per_second>{{ wazuh_agent_buffer_events_per_second | default(500) }}</events_per_second>
   </client_buffer>
+
+{% if wazuh_agent_labels is defined and wazuh_agent_labels | length > 0 %}
+  <!-- Agent Labels - for categorization and filtering -->
+  <labels>
+{% for label in wazuh_agent_labels %}
+    <label key="{{ label.key }}">{{ label.value }}</label>
+{% endfor %}
+  </labels>
+{% elif wazuh_agent_auto_labels | default(true) %}
+  <!-- Auto-generated labels from Ansible facts -->
+  <labels>
+    <label key="os.type">darwin</label>
+    <label key="os.family">darwin</label>
+    <label key="os.name">macOS</label>
+    <label key="os.version">{{ ansible_distribution_version | default('') }}</label>
+{% if environment_name is defined %}
+    <label key="environment">{{ environment_name }}</label>
+{% endif %}
+{% if organization_name is defined %}
+    <label key="organization">{{ organization_name }}</label>
+{% endif %}
+{% if wazuh_agent_group is defined %}
+    <label key="group">{{ wazuh_agent_group }}</label>
+{% endif %}
+  </labels>
+{% endif %}
 
 {% if wazuh_agent_enrollment_enabled | default(true) %}
   <!-- Agent Enrollment -->
   <enrollment>
     <enabled>yes</enabled>
-    <manager_address>{{ wazuh_manager_address }}</manager_address>
+    <manager_address>{{ wazuh_manager_address | default(wazuh_manager_nodes[0].ip) }}</manager_address>
     <port>1515</port>
     <agent_name>{{ ansible_hostname }}</agent_name>
+{% if wazuh_authd_use_password | default(true) %}
+    <authorization_pass_path>/Library/Ossec/etc/authd.pass</authorization_pass_path>
+{% endif %}
     <delay_after_enrollment>{{ wazuh_agent_enrollment_delay | default(30) }}</delay_after_enrollment>
   </enrollment>
 {% endif %}
