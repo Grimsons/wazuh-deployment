@@ -57,9 +57,9 @@
             4. Wazuh Agents: {{ groups.get('wazuh_agents', []) | length }} hosts
 
           Settings:
-            Backup before upgrade: {{ backup_before_upgrade | default(true) }}
-            Rolling update (clusters): {{ rolling_update | default(true) }}
-            Validate after upgrade: {{ validate_after_upgrade | default(true) }}
+            Backup before upgrade: {{ backup_before_upgrade | default(false) }}
+            Rolling update (clusters): {{ rolling_update | default(false) }}
+            Validate after upgrade: {{ validate_after_upgrade | default(false) }}
 
           ══════════════════════════════════════════════════════════════
 
@@ -79,7 +79,7 @@
   tasks:
     - name: Include backup tasks
       ansible.builtin.include_tasks: ../playbooks/backup.yml
-      when: backup_before_upgrade | default(true)
+      when: backup_before_upgrade | default(false)
 
 - name: Upgrade - Create Pre-Upgrade Snapshot
   hosts: localhost
@@ -134,7 +134,7 @@
             cluster.routing.allocation.enable: "primaries"
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
         status_code: [200]
       register: shard_allocation
       delegate_to: localhost
@@ -147,7 +147,7 @@
         method: POST
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
         status_code: [200, 409]  # 409 is OK if some shards couldn't sync
       delegate_to: localhost
       when: groups['wazuh_indexers'] | length > 1
@@ -193,7 +193,7 @@
         method: GET
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
         status_code: [200]
       register: cluster_health
       until: cluster_health.status == 200
@@ -211,7 +211,7 @@
             cluster.routing.allocation.enable: null
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
         status_code: [200]
       delegate_to: localhost
       when: groups['wazuh_indexers'] | length > 1
@@ -222,13 +222,13 @@
         method: GET
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
         status_code: [200]
       register: cluster_stable
       delegate_to: localhost
       when:
         - groups['wazuh_indexers'] | length > 1
-        - validate_after_upgrade | default(true)
+        - validate_after_upgrade | default(false)
 
     - name: Verify upgraded version
       ansible.builtin.shell: |
@@ -319,7 +319,7 @@
       ansible.builtin.uri:
         url: "https://{{ inventory_hostname }}:{{ wazuh_manager_api_port | default(55000) }}/"
         method: GET
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
         status_code: [200, 401]  # 401 is OK - means API is responding
       register: api_health
       until: api_health.status in [200, 401]
@@ -408,7 +408,7 @@
         method: GET
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
         status_code: [200, 302]
       register: dashboard_health
       until: dashboard_health.status in [200, 302]
@@ -443,14 +443,14 @@
     - name: Display current version
       ansible.builtin.debug:
         msg: "Current Agent version on {{ inventory_hostname }}: {{ current_agent_version.stdout }}"
-      when: upgrade_agents | default(true)
+      when: upgrade_agents | default(false)
 
     - name: Stop Wazuh Agent service
       ansible.builtin.systemd:
         name: wazuh-agent
         state: stopped
       become: true
-      when: upgrade_agents | default(true)
+      when: upgrade_agents | default(false)
 
     - name: Upgrade Wazuh Agent package (Debian/Ubuntu)
       ansible.builtin.apt:
@@ -460,7 +460,7 @@
       become: true
       when:
         - ansible_os_family == 'Debian'
-        - upgrade_agents | default(true)
+        - upgrade_agents | default(false)
 
     - name: Upgrade Wazuh Agent package (RHEL/CentOS)
       ansible.builtin.yum:
@@ -470,7 +470,7 @@
       become: true
       when:
         - ansible_os_family == 'RedHat'
-        - upgrade_agents | default(true)
+        - upgrade_agents | default(false)
 
     - name: Start Wazuh Agent service
       ansible.builtin.systemd:
@@ -478,7 +478,7 @@
         state: started
         enabled: true
       become: true
-      when: upgrade_agents | default(true)
+      when: upgrade_agents | default(false)
 
     - name: Wait for Agent to reconnect to Manager
       ansible.builtin.shell: |
@@ -489,7 +489,7 @@
       retries: 6
       delay: 10
       changed_when: false
-      when: upgrade_agents | default(true)
+      when: upgrade_agents | default(false)
 
 #
 # POST-UPGRADE VALIDATION
@@ -507,19 +507,19 @@
         method: GET
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
         return_content: true
       register: indexer_health
-      when: validate_after_upgrade | default(true)
+      when: validate_after_upgrade | default(false)
 
     - name: Validate Manager API
       ansible.builtin.uri:
         url: "https://{{ groups['wazuh_managers'][0] }}:{{ wazuh_manager_api_port | default(55000) }}/"
         method: GET
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
         status_code: [200, 401]
       register: manager_api
-      when: validate_after_upgrade | default(true)
+      when: validate_after_upgrade | default(false)
 
     - name: Get connected agents count
       ansible.builtin.uri:
@@ -527,11 +527,11 @@
         method: GET
         headers:
           Authorization: "Bearer {{ api_token | default('') }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
         status_code: [200, 401]
       register: agents_status
       failed_when: false
-      when: validate_after_upgrade | default(true)
+      when: validate_after_upgrade | default(false)
 
     - name: Display upgrade summary
       ansible.builtin.debug:

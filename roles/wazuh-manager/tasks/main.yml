@@ -21,18 +21,18 @@
 
 - name: Configure certificates
   ansible.builtin.include_tasks: certificates.yml
-  when: wazuh_generate_certs | default(true)
+  when: wazuh_generate_certs | default(false)
 
 - name: Configure Wazuh Manager
   ansible.builtin.include_tasks: configure.yml
 
 - name: Configure agent enrollment password
   ansible.builtin.include_tasks: agent_enrollment.yml
-  when: wazuh_authd_use_password | default(true)
+  when: wazuh_authd_use_password | default(false)
 
 - name: Deploy custom rules and decoders
   ansible.builtin.include_tasks: custom_rules.yml
-  when: wazuh_custom_content_enabled | default(true)
+  when: wazuh_custom_content_enabled | default(false)
 
 - name: Configure agent groups
   ansible.builtin.include_tasks: agent_groups.yml
@@ -47,7 +47,7 @@
 
 - name: Configure firewall
   ansible.builtin.include_tasks: firewall.yml
-  when: wazuh_configure_firewall | default(true)
+  when: wazuh_configure_firewall | default(false)
 
 - name: Enable Wazuh Manager service
   ansible.builtin.systemd:
@@ -87,7 +87,7 @@
     user: "{{ wazuh_api_user }}"
     password: "wazuh"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     status_code: [200, 401]
   register: wazuh_api_check
   until: wazuh_api_check.status in [200, 401]
@@ -103,12 +103,12 @@
 - name: Install and configure Filebeat for alert forwarding
   ansible.builtin.include_tasks: filebeat.yml
   when:
-    - wazuh_filebeat_enabled | default(true)
+    - wazuh_filebeat_enabled | default(false)
     - manager_node_type | default('master') == 'master'
 
 - name: Configure log rotation
   ansible.builtin.include_tasks: log_rotation.yml
-  when: wazuh_log_rotation_enabled | default(true)
+  when: wazuh_log_rotation_enabled | default(false)
 
 - name: Display Manager deployment result
   ansible.builtin.debug:

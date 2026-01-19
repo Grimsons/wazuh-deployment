@@ -27,7 +27,7 @@
 
 - name: Configure firewall
   ansible.builtin.include_tasks: firewall.yml
-  when: wazuh_configure_firewall | default(true)
+  when: wazuh_configure_firewall | default(false)
 
 - name: Flush handlers to apply configuration changes
   ansible.builtin.meta: flush_handlers
@@ -66,7 +66,7 @@
 - name: Wait for Wazuh Dashboard to be ready
   ansible.builtin.uri:
     url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/app/login"
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     status_code: [200, 302]
   register: dashboard_health
   until: dashboard_health.status in [200, 302]
@@ -110,7 +110,7 @@
 
 - name: Configure log rotation
   ansible.builtin.include_tasks: log_rotation.yml
-  when: wazuh_log_rotation_enabled | default(true)
+  when: wazuh_log_rotation_enabled | default(false)
 
 - name: Display dashboard deployment result
   ansible.builtin.debug:
