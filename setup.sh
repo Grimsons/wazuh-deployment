@@ -65,6 +65,10 @@ print_error() {
     echo -e "${RED}✗ $1${NC}"
 }
 
+print_warning() {
+    echo -e "${YELLOW}⚠ $1${NC}"
+}
+
 # Secure variable assignment without eval
 set_var() {
     local var_name="$1"
@@ -188,21 +192,37 @@ prompt_hosts() {
 }
 
 # Function to generate cryptographically secure random password
+# Wazuh requires: upper, lower, number, and symbol
 generate_password() {
     local length="${1:-24}"
     local password=""
+    local symbols='!@#$%^&*'
 
-    # Try OpenSSL first (most secure)
+    # Generate base password with mixed characters
     if command -v openssl &>/dev/null; then
-        password=$(openssl rand -base64 48 2>/dev/null | tr -d '/+=' | head -c "$length")
+        # Generate alphanumeric base, leaving room for guaranteed special chars
+        local base_len=$((length - 4))
+        password=$(openssl rand -base64 48 2>/dev/null | tr -d '/+=' | head -c "$base_len")
     fi
 
-    # Fallback to /dev/urandom with proper entropy
-    if [ -z "$password" ] || [ ${#password} -lt "$length" ]; then
-        password=$(head -c 100 /dev/urandom 2>/dev/null | LC_ALL=C tr -dc 'a-zA-Z0-9!@#$%^&*' | head -c "$length")
+    # Fallback to /dev/urandom
+    if [ -z "$password" ] || [ ${#password} -lt $((length - 4)) ]; then
+        password=$(head -c 100 /dev/urandom 2>/dev/null | LC_ALL=C tr -dc 'a-zA-Z0-9' | head -c $((length - 4)))
     fi
 
-    # Ensure password meets minimum requirements
+    # Ensure password meets Wazuh requirements by appending guaranteed characters
+    # Add: 1 uppercase, 1 lowercase, 1 number, 1 symbol
+    local upper=$(head -c 10 /dev/urandom | LC_ALL=C tr -dc 'A-Z' | head -c 1)
+    local lower=$(head -c 10 /dev/urandom | LC_ALL=C tr -dc 'a-z' | head -c 1)
+    local number=$(head -c 10 /dev/urandom | LC_ALL=C tr -dc '0-9' | head -c 1)
+    local symbol="${symbols:$((RANDOM % ${#symbols})):1}"
+
+    password="${password}${upper}${lower}${number}${symbol}"
+
+    # Shuffle the password to distribute special chars
+    password=$(echo "$password" | fold -w1 | shuf | tr -d '\n')
+
+    # Ensure password meets minimum length
     if [ ${#password} -lt "$length" ]; then
         print_error "Failed to generate secure password"
         exit 1
@@ -882,6 +902,14 @@ wazuh_configure_selinux: true
 wazuh_repo_gpg_key: "https://packages.wazuh.com/key/GPG-KEY-WAZUH"
 wazuh_repo_url_apt: "https://packages.wazuh.com/4.x/apt/"
 wazuh_repo_url_yum: "https://packages.wazuh.com/4.x/yum/"
+
+# ═══════════════════════════════════════════════════════════════
+# Post-Deployment Security
+# ═══════════════════════════════════════════════════════════════
+# Lock down the ansible deployment user after deployment completes
+# When locked, the user can only run the unlock script and check Wazuh status
+# Set to false to keep full sudo access after deployment
+wazuh_lockdown_deploy_user: true
 EOF
 
     print_success "Group variables created: group_vars/all.yml"
@@ -1050,6 +1078,33 @@ SELFEXTRACT_EOF
     fi
 
     # ═══════════════════════════════════════════════════════════════
+    # CERTIFICATE GENERATION
+    # ═══════════════════════════════════════════════════════════════
+    print_section "Generating SSL/TLS Certificates"
+
+    if [ -f "${SCRIPT_DIR}/generate-certs.sh" ]; then
+        # Check if certs already exist
+        if [ -f "${SCRIPT_DIR}/files/certs/root-ca.pem" ]; then
+            print_warning "Certificates already exist in files/certs/"
+            prompt_yes_no "Regenerate certificates?" "no" "REGEN_CERTS"
+            if [ "$REGEN_CERTS" = "true" ]; then
+                print_info "Regenerating certificates..."
+                bash "${SCRIPT_DIR}/generate-certs.sh"
+                print_success "Certificates regenerated"
+            else
+                print_info "Using existing certificates"
+            fi
+        else
+            print_info "Generating SSL/TLS certificates for all nodes..."
+            bash "${SCRIPT_DIR}/generate-certs.sh"
+            print_success "Certificates generated in files/certs/"
+        fi
+    else
+        print_error "Certificate generation script not found: generate-certs.sh"
+        print_info "You will need to generate certificates manually"
+    fi
+
+    # ═══════════════════════════════════════════════════════════════
     # SUMMARY
     # ═══════════════════════════════════════════════════════════════
     print_header "Configuration Summary"
@@ -1149,17 +1204,9 @@ SELFEXTRACT_EOF
     echo
 
     if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
-        echo -e "4. Generate SSL certificates:"
-    else
-        echo -e "3. Generate SSL certificates:"
-    fi
-    echo -e "   ${YELLOW}./generate-certs.sh${NC}"
-    echo
-
-    if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
-        echo -e "5. Run the deployment:"
-    else
         echo -e "4. Run the deployment:"
+    else
+        echo -e "3. Run the deployment:"
     fi
     echo -e "   ${YELLOW}ansible-playbook site.yml${NC}"
     echo
@@ -1172,9 +1219,9 @@ SELFEXTRACT_EOF
 
     if [ "$CUSTOM_PASSWORDS" != "true" ]; then
         if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
-            echo -e "6. After deployment, find your credentials:"
-        else
             echo -e "5. After deployment, find your credentials:"
+        else
+            echo -e "4. After deployment, find your credentials:"
         fi
         echo -e "   ${CYAN}./credentials/indexer_admin_password.txt${NC} - Indexer/Dashboard admin"
         echo -e "   ${CYAN}./credentials/api_password.txt${NC}          - Wazuh API password"

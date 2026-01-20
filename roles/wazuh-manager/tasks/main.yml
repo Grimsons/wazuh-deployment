@@ -19,16 +19,15 @@
 - name: Install Wazuh Manager
   ansible.builtin.include_tasks: install.yml
 
-- name: Configure certificates
+- name: Deploy certificates
   ansible.builtin.include_tasks: certificates.yml
-  when: wazuh_generate_certs | default(false)
 
 - name: Configure Wazuh Manager
   ansible.builtin.include_tasks: configure.yml
 
 - name: Configure agent enrollment password
   ansible.builtin.include_tasks: agent_enrollment.yml
-  when: wazuh_authd_use_password | default(false)
+  when: wazuh_authd_use_password | default(true)
 
 - name: Deploy custom rules and decoders
   ansible.builtin.include_tasks: custom_rules.yml
@@ -103,12 +102,12 @@
 - name: Install and configure Filebeat for alert forwarding
   ansible.builtin.include_tasks: filebeat.yml
   when:
-    - wazuh_filebeat_enabled | default(false)
+    - wazuh_filebeat_enabled | default(true)
     - manager_node_type | default('master') == 'master'
 
 - name: Configure log rotation
   ansible.builtin.include_tasks: log_rotation.yml
-  when: wazuh_log_rotation_enabled | default(false)
+  when: wazuh_log_rotation_enabled | default(true)
 
 - name: Display Manager deployment result
   ansible.builtin.debug:

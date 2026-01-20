@@ -244,6 +244,9 @@
     <purge>{{ 'yes' if wazuh_authd_purge | default(false) else 'no' }}</purge>
     <!-- Password-based enrollment - RECOMMENDED for production -->
     <use_password>{{ 'yes' if wazuh_authd_use_password | default(true) else 'no' }}</use_password>
+{% if wazuh_authd_use_password | default(true) %}
+    <authorization_pass_path>/var/ossec/etc/authd.pass</authorization_pass_path>
+{% endif %}
     <!-- Strong cipher suite for agent enrollment -->
     <ciphers>{{ wazuh_authd_ssl_ciphers | default('HIGH:!ADH:!EXP:!MD5:!RC4:!3DES:!CAMELLIA:@STRENGTH') }}</ciphers>
     <!-- Hostname verification - prevents rogue manager attacks -->
@@ -558,5 +561,106 @@
   </integration>
 {% endfor %}
 {% endif %}
+
+{% if wazuh_docker_listener_enabled | default(false) %}
+  <!-- Docker Listener - Monitor Docker events and container activity -->
+  <wodle name="docker-listener">
+    <disabled>no</disabled>
+    <interval>{{ wazuh_docker_listener_interval | default('10m') }}</interval>
+    <attempts>{{ wazuh_docker_listener_attempts | default(5) }}</attempts>
+    <run_on_start>{{ 'yes' if wazuh_docker_listener_run_on_start | default(true) else 'no' }}</run_on_start>
+  </wodle>
+{% endif %}
+
+{% if wazuh_office365_enabled | default(false) %}
+  <!-- Office 365 Integration - Azure AD and Office 365 audit logs -->
+  <wodle name="office365">
+    <disabled>no</disabled>
+    <interval>{{ wazuh_office365_interval | default('1m') }}</interval>
+    <run_on_start>{{ 'yes' if wazuh_office365_run_on_start | default(true) else 'no' }}</run_on_start>
+    <curl_max_size>{{ wazuh_office365_curl_max_size | default(1048576) }}</curl_max_size>
+    <only_future_events>{{ 'yes' if wazuh_office365_only_future_events | default(true) else 'no' }}</only_future_events>
+{% for tenant in wazuh_office365_tenants | default([]) %}
+    <api_auth>
+      <tenant_id>{{ tenant.tenant_id }}</tenant_id>
+      <client_id>{{ tenant.client_id }}</client_id>
+      <client_secret>{{ tenant.client_secret }}</client_secret>
+      <api_type>{{ tenant.api_type | default('commercial') }}</api_type>
+    </api_auth>
+{% for subscription in tenant.subscriptions | default(['Audit.AzureActiveDirectory', 'Audit.Exchange', 'Audit.SharePoint', 'Audit.General', 'DLP.All']) %}
+    <subscriptions>
+      <subscription>{{ subscription }}</subscription>
+    </subscriptions>
+{% endfor %}
+{% endfor %}
+  </wodle>
+{% endif %}
+
+{% if wazuh_github_enabled | default(false) %}
+  <!-- GitHub Integration - GitHub audit logs for enterprise -->
+  <wodle name="github">
+    <disabled>no</disabled>
+    <interval>{{ wazuh_github_interval | default('10m') }}</interval>
+    <run_on_start>{{ 'yes' if wazuh_github_run_on_start | default(true) else 'no' }}</run_on_start>
+    <time_delay>{{ wazuh_github_time_delay | default('1m') }}</time_delay>
+    <curl_max_size>{{ wazuh_github_curl_max_size | default(1048576) }}</curl_max_size>
+    <only_future_events>{{ 'yes' if wazuh_github_only_future_events | default(true) else 'no' }}</only_future_events>
+{% for org in wazuh_github_organizations | default([]) %}
+    <api_auth>
+      <org_name>{{ org.name }}</org_name>
+      <api_token>{{ org.api_token }}</api_token>
+{% if org.event_type is defined %}
+      <event_type>{{ org.event_type }}</event_type>
+{% endif %}
+    </api_auth>
+{% endfor %}
+  </wodle>
+{% endif %}
+
+{% if wazuh_command_monitoring_enabled | default(false) %}
+  <!-- Command Monitoring - Execute commands and monitor output -->
+  <wodle name="command">
+    <disabled>no</disabled>
+{% for cmd in wazuh_command_monitoring_commands | default([]) %}
+    <command>
+      <tag>{{ cmd.tag }}</tag>
+      <command>{{ cmd.command }}</command>
+      <interval>{{ cmd.interval | default('1h') }}</interval>
+{% if cmd.timeout is defined %}
+      <timeout>{{ cmd.timeout }}</timeout>
+{% endif %}
+{% if cmd.ignore_output is defined %}
+      <ignore_output>{{ 'yes' if cmd.ignore_output else 'no' }}</ignore_output>
+{% endif %}
+{% if cmd.run_on_start is defined %}
+      <run_on_start>{{ 'yes' if cmd.run_on_start else 'no' }}</run_on_start>
+{% endif %}
+{% if cmd.verify_md5 is defined %}
+      <verify_md5>{{ cmd.verify_md5 }}</verify_md5>
+{% endif %}
+{% if cmd.verify_sha1 is defined %}
+      <verify_sha1>{{ cmd.verify_sha1 }}</verify_sha1>
+{% endif %}
+{% if cmd.verify_sha256 is defined %}
+      <verify_sha256>{{ cmd.verify_sha256 }}</verify_sha256>
+{% endif %}
+    </command>
+{% endfor %}
+  </wodle>
+{% endif %}
+
+{% if wazuh_agent_upgrade_enabled | default(true) %}
+  <!-- Agent Upgrade Module - Remote agent upgrades -->
+  <wodle name="agent-upgrade">
+    <enabled>yes</enabled>
+    <chunk_size>{{ wazuh_agent_upgrade_chunk_size | default(512) }}</chunk_size>
+    <wpk_repository>{{ wazuh_agent_upgrade_wpk_repository | default('packages.wazuh.com/4.x/wpk/') }}</wpk_repository>
+  </wodle>
+{% endif %}
+
+  <!-- Task Manager Settings -->
+  <task-manager>
+    <cleanup_time>{{ wazuh_task_manager_cleanup_time | default('3600') }}</cleanup_time>
+  </task-manager>
 
 </ossec_config>

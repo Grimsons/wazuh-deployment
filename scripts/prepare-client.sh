@@ -30,7 +30,9 @@ SSH_PORT="${SSH_PORT:-22}"
 PUBKEY_FILE="${SCRIPT_DIR}/ansible_key.pub"
 MINIMAL_MODE="${MINIMAL_MODE:-false}"
 DRY_RUN="${DRY_RUN:-false}"
-RESTRICT_SUDO="${RESTRICT_SUDO:-true}"  # Use restricted sudo by default
+# Note: Restricted sudo doesn't work well with Ansible's become mechanism
+# which runs: sudo /bin/sh -c '...; python3'. Default to full sudo.
+RESTRICT_SUDO="${RESTRICT_SUDO:-false}"
 
 # Logging
 LOG_FILE="/var/log/wazuh-client-prep.log"
@@ -437,20 +439,30 @@ get_essential_packages() {
             packages="
                 openssh
                 python3
+                python3-pip
                 sudo
                 curl
                 wget
                 ca-certificates
+                iproute2
+                procps
+                which
+                systemd
             "
             ;;
         arch)
             packages="
                 openssh
                 python
+                python-pip
                 sudo
                 curl
                 wget
                 ca-certificates
+                iproute2
+                procps-ng
+                which
+                base-devel
             "
             ;;
     esac
@@ -588,6 +600,12 @@ configure_ssh() {
         rhel|fedora)
             $PKG_MANAGER install -y openssh-server
             ;;
+        suse)
+            zypper install -y openssh
+            ;;
+        arch)
+            pacman -S --noconfirm --needed openssh
+            ;;
     esac
 
     # Configure sshd
@@ -596,9 +614,16 @@ configure_ssh() {
     # Backup original config
     cp "$sshd_config" "${sshd_config}.backup.$(date +%Y%m%d)" 2>/dev/null || true
 
-    # Ensure key authentication is enabled
-    sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' "$sshd_config"
-    sed -i 's/^#*AuthorizedKeysFile.*/AuthorizedKeysFile .ssh\/authorized_keys/' "$sshd_config"
+    # Ensure key authentication is enabled (use -E for extended regex on all platforms)
+    if grep -qE '^#?PubkeyAuthentication' "$sshd_config"; then
+        sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' "$sshd_config"
+    else
+        echo "PubkeyAuthentication yes" >> "$sshd_config"
+    fi
+
+    if grep -qE '^#?AuthorizedKeysFile' "$sshd_config"; then
+        sed -i 's/^#*AuthorizedKeysFile.*/AuthorizedKeysFile .ssh\/authorized_keys/' "$sshd_config"
+    fi
 
     # Optionally disable password auth (uncomment if desired)
     # sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' "$sshd_config"
@@ -606,9 +631,18 @@ configure_ssh() {
     # Ensure root login is permitted (or use dedicated user)
     # sed -i 's/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/' "$sshd_config"
 
+    # Determine SSH service name based on OS
+    local ssh_service="sshd"
+    if [ "$OS_FAMILY" = "debian" ]; then
+        # Debian/Ubuntu uses 'ssh' as service name
+        if systemctl list-unit-files | grep -q "^ssh.service"; then
+            ssh_service="ssh"
+        fi
+    fi
+
     # Enable and restart SSH
-    systemctl enable sshd 2>/dev/null || systemctl enable ssh 2>/dev/null || true
-    systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || true
+    systemctl enable "$ssh_service" 2>/dev/null || true
+    systemctl restart "$ssh_service" 2>/dev/null || true
 
     print_success "SSH configured"
 }
@@ -634,8 +668,18 @@ create_ansible_user() {
     if id "$ANSIBLE_USER" &>/dev/null; then
         print_info "User $ANSIBLE_USER already exists"
     else
-        # Create user with restricted shell options
-        useradd -m -s /bin/bash -c "Wazuh Ansible Deployment User" "$ANSIBLE_USER"
+        # Create user - handle different distro behaviors
+        case "$OS_FAMILY" in
+            arch)
+                # Arch Linux useradd
+                useradd -m -s /bin/bash -G wheel "$ANSIBLE_USER" 2>/dev/null || \
+                useradd -m -s /bin/bash "$ANSIBLE_USER"
+                ;;
+            *)
+                # Standard useradd for Debian, RHEL, SUSE
+                useradd -m -s /bin/bash -c "Wazuh Ansible Deployment User" "$ANSIBLE_USER"
+                ;;
+        esac
         print_success "Created user: $ANSIBLE_USER"
         audit_log "USER_CREATED" "User $ANSIBLE_USER created"
     fi
@@ -694,10 +738,10 @@ EOF
         print_info "Configured restricted sudo permissions"
         audit_log "SUDO_RESTRICTED" "Restricted sudo configured for: $ANSIBLE_USER"
     else
-        # Full sudo access (legacy mode - not recommended)
+        # Full sudo access - required for Ansible's become mechanism
         echo "${ANSIBLE_USER} ALL=(ALL) NOPASSWD: ALL" > "$sudoers_file"
-        print_warning "Configured full sudo permissions (not recommended for production)"
-        audit_log "SUDO_FULL" "Full sudo configured for: $ANSIBLE_USER (NOT RECOMMENDED)"
+        print_success "Configured sudo permissions for Ansible"
+        audit_log "SUDO_CONFIGURED" "Full sudo configured for: $ANSIBLE_USER"
     fi
 
     # Set proper permissions on sudoers file
@@ -715,6 +759,65 @@ EOF
 
     print_success "User $ANSIBLE_USER configured with sudo access"
     audit_log "USER_CONFIGURED" "User $ANSIBLE_USER fully configured"
+
+    # Install the unlock script for post-deployment lockdown support
+    install_unlock_script
+}
+
+# Install unlock script for post-deployment lockdown
+install_unlock_script() {
+    print_info "Installing deployment unlock script..."
+
+    local unlock_script="/usr/local/bin/wazuh-unlock-deploy"
+
+    cat > "$unlock_script" << 'UNLOCKEOF'
+#!/bin/bash
+# Wazuh Deployment - Unlock Script
+# Restores full sudo access to the ansible deployment user
+# This script can be run by the locked-down user via restricted sudo
+
+set -euo pipefail
+
+ANSIBLE_USER="${SUDO_USER:-wazuh-deploy}"
+SUDOERS_FILE="/etc/sudoers.d/${ANSIBLE_USER}"
+LOCK_FLAG="/var/lib/wazuh-deploy/.locked"
+
+# Verify we're being run correctly
+if [[ $EUID -ne 0 ]]; then
+    echo "This script must be run with sudo"
+    exit 1
+fi
+
+# Restore full sudo access
+echo "${ANSIBLE_USER} ALL=(ALL) NOPASSWD: ALL" > "$SUDOERS_FILE"
+chmod 440 "$SUDOERS_FILE"
+
+# Validate sudoers syntax
+if ! visudo -c -f "$SUDOERS_FILE" &>/dev/null; then
+    echo "ERROR: Invalid sudoers syntax"
+    exit 1
+fi
+
+# Remove lock flag
+rm -f "$LOCK_FLAG"
+
+# Log the unlock
+logger -t wazuh-deploy "Ansible deployment user $ANSIBLE_USER unlocked by $(whoami)"
+
+echo "Deployment user $ANSIBLE_USER has been unlocked"
+echo "Full sudo access has been restored"
+echo "Remember to run lockdown after deployment completes"
+UNLOCKEOF
+
+    chmod 755 "$unlock_script"
+    chown root:root "$unlock_script"
+
+    # Create the lock flag directory
+    mkdir -p /var/lib/wazuh-deploy
+    chmod 755 /var/lib/wazuh-deploy
+
+    print_success "Unlock script installed at $unlock_script"
+    audit_log "UNLOCK_SCRIPT_INSTALLED" "Unlock script installed at: $unlock_script"
 }
 
 # Deploy SSH public key
@@ -789,13 +892,15 @@ configure_firewall() {
         return
     fi
 
+    local firewall_configured=false
+
     # UFW (Debian/Ubuntu)
     if command -v ufw &> /dev/null; then
         print_info "Configuring UFW..."
-        ufw allow "$SSH_PORT"/tcp comment 'SSH'
-        ufw allow 1514/tcp comment 'Wazuh Agent'
-        ufw allow 1514/udp comment 'Wazuh Agent'
-        ufw allow 1515/tcp comment 'Wazuh Registration'
+        ufw allow "$SSH_PORT"/tcp comment 'SSH' 2>/dev/null || ufw allow "$SSH_PORT"/tcp
+        ufw allow 1514/tcp comment 'Wazuh Agent' 2>/dev/null || ufw allow 1514/tcp
+        ufw allow 1514/udp comment 'Wazuh Agent' 2>/dev/null || ufw allow 1514/udp
+        ufw allow 1515/tcp comment 'Wazuh Registration' 2>/dev/null || ufw allow 1515/tcp
 
         # Enable UFW if not already
         if ! ufw status | grep -q "active"; then
@@ -803,23 +908,88 @@ configure_firewall() {
         fi
 
         print_success "UFW configured"
+        firewall_configured=true
     fi
 
-    # Firewalld (RHEL/Fedora)
-    if command -v firewall-cmd &> /dev/null; then
+    # Firewalld (RHEL/Fedora/SUSE)
+    if command -v firewall-cmd &> /dev/null && [ "$firewall_configured" = "false" ]; then
         print_info "Configuring firewalld..."
 
         # Ensure firewalld is running
         systemctl start firewalld 2>/dev/null || true
         systemctl enable firewalld 2>/dev/null || true
 
-        firewall-cmd --permanent --add-port="$SSH_PORT"/tcp
-        firewall-cmd --permanent --add-port=1514/tcp
-        firewall-cmd --permanent --add-port=1514/udp
-        firewall-cmd --permanent --add-port=1515/tcp
-        firewall-cmd --reload
+        firewall-cmd --permanent --add-port="$SSH_PORT"/tcp 2>/dev/null || true
+        firewall-cmd --permanent --add-port=1514/tcp 2>/dev/null || true
+        firewall-cmd --permanent --add-port=1514/udp 2>/dev/null || true
+        firewall-cmd --permanent --add-port=1515/tcp 2>/dev/null || true
+        firewall-cmd --reload 2>/dev/null || true
 
         print_success "firewalld configured"
+        firewall_configured=true
+    fi
+
+    # iptables (Arch Linux and others without ufw/firewalld)
+    if command -v iptables &> /dev/null && [ "$firewall_configured" = "false" ]; then
+        print_info "Configuring iptables..."
+
+        # Check if iptables has any rules (i.e., firewall is active)
+        if iptables -L INPUT -n 2>/dev/null | grep -q "ACCEPT\|DROP\|REJECT"; then
+            # Add rules for Wazuh (insert at top to ensure they're processed)
+            iptables -I INPUT -p tcp --dport "$SSH_PORT" -j ACCEPT 2>/dev/null || true
+            iptables -I INPUT -p tcp --dport 1514 -j ACCEPT 2>/dev/null || true
+            iptables -I INPUT -p udp --dport 1514 -j ACCEPT 2>/dev/null || true
+            iptables -I INPUT -p tcp --dport 1515 -j ACCEPT 2>/dev/null || true
+
+            # Save iptables rules
+            if command -v iptables-save &> /dev/null; then
+                case "$OS_FAMILY" in
+                    arch)
+                        iptables-save > /etc/iptables/iptables.rules 2>/dev/null || true
+                        systemctl enable iptables 2>/dev/null || true
+                        ;;
+                    rhel|fedora)
+                        iptables-save > /etc/sysconfig/iptables 2>/dev/null || true
+                        ;;
+                    debian)
+                        iptables-save > /etc/iptables.rules 2>/dev/null || true
+                        ;;
+                esac
+            fi
+
+            print_success "iptables configured"
+            firewall_configured=true
+        else
+            print_info "iptables present but no active firewall rules detected"
+        fi
+    fi
+
+    # nftables (modern replacement for iptables)
+    if command -v nft &> /dev/null && [ "$firewall_configured" = "false" ]; then
+        print_info "Configuring nftables..."
+
+        # Check if nftables is active
+        if nft list tables 2>/dev/null | grep -q "inet\|ip"; then
+            # Create Wazuh chain if it doesn't exist
+            nft add table inet filter 2>/dev/null || true
+            nft add chain inet filter input '{ type filter hook input priority 0; policy accept; }' 2>/dev/null || true
+
+            # Add rules
+            nft add rule inet filter input tcp dport "$SSH_PORT" accept 2>/dev/null || true
+            nft add rule inet filter input tcp dport 1514 accept 2>/dev/null || true
+            nft add rule inet filter input udp dport 1514 accept 2>/dev/null || true
+            nft add rule inet filter input tcp dport 1515 accept 2>/dev/null || true
+
+            print_success "nftables configured"
+            firewall_configured=true
+        else
+            print_info "nftables present but no active ruleset detected"
+        fi
+    fi
+
+    if [ "$firewall_configured" = "false" ]; then
+        print_info "No active firewall detected - skipping firewall configuration"
+        print_info "Ensure ports $SSH_PORT, 1514/tcp, 1514/udp, 1515/tcp are accessible"
     fi
 }
 
@@ -917,28 +1087,47 @@ cleanup_system() {
         return
     fi
 
-    # Remove old kernels (keep current + 1)
+    # Remove old kernels (keep current + 1) and clean up
     case "$OS_FAMILY" in
         debian)
-            apt-get autoremove --purge -y
+            apt-get autoremove --purge -y 2>/dev/null || true
             # Clean package cache
-            apt-get clean
-            # Remove old logs
-            find /var/log -type f -name "*.gz" -delete 2>/dev/null || true
-            find /var/log -type f -name "*.1" -delete 2>/dev/null || true
-            journalctl --vacuum-time=7d 2>/dev/null || true
+            apt-get clean 2>/dev/null || true
             ;;
         rhel|fedora)
-            $PKG_MANAGER autoremove -y
-            $PKG_MANAGER clean all
-            # Remove old logs
-            find /var/log -type f -name "*.gz" -delete 2>/dev/null || true
-            journalctl --vacuum-time=7d 2>/dev/null || true
+            $PKG_MANAGER autoremove -y 2>/dev/null || true
+            $PKG_MANAGER clean all 2>/dev/null || true
+            ;;
+        suse)
+            zypper clean --all 2>/dev/null || true
+            ;;
+        arch)
+            # Clean package cache (keep latest version only)
+            if command -v paccache &> /dev/null; then
+                paccache -rk1 2>/dev/null || true
+            else
+                pacman -Sc --noconfirm 2>/dev/null || true
+            fi
+            # Remove orphaned packages
+            pacman -Qtdq 2>/dev/null | pacman -Rns --noconfirm - 2>/dev/null || true
             ;;
     esac
 
-    # Clear temp files
-    rm -rf /tmp/* 2>/dev/null || true
+    # Clean old logs (common to all)
+    find /var/log -type f -name "*.gz" -delete 2>/dev/null || true
+    find /var/log -type f -name "*.1" -delete 2>/dev/null || true
+    journalctl --vacuum-time=7d 2>/dev/null || true
+
+    # Clear temp files (exclude our own directory if running from /tmp)
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+    if [[ "$script_dir" == /tmp/* ]]; then
+        # Running from /tmp, exclude our directory
+        find /tmp -mindepth 1 -maxdepth 1 ! -name "$(basename "$script_dir")" -exec rm -rf {} \; 2>/dev/null || true
+    else
+        rm -rf /tmp/* 2>/dev/null || true
+    fi
     rm -rf /var/tmp/* 2>/dev/null || true
 
     print_success "System cleaned up"
@@ -946,24 +1135,33 @@ cleanup_system() {
 
 # Generate system report
 generate_report() {
+    # Disable errexit for this function as it's informational only
+    set +e
+
     print_section "System Report"
 
     echo -e "${CYAN}Hostname:${NC} $(hostname)"
     echo -e "${CYAN}OS:${NC} $OS_NAME"
     echo -e "${CYAN}Kernel:${NC} $(uname -r)"
     echo -e "${CYAN}Architecture:${NC} $(uname -m)"
-    echo -e "${CYAN}IP Address:${NC} $(hostname -I | awk '{print $1}')"
+
+    local ip_addr
+    ip_addr=$(hostname -I 2>/dev/null | awk '{print $1}') || ip_addr="unknown"
+    echo -e "${CYAN}IP Address:${NC} $ip_addr"
     echo -e "${CYAN}Ansible User:${NC} $ANSIBLE_USER"
     echo -e "${CYAN}SSH Port:${NC} $SSH_PORT"
     echo ""
     echo -e "${CYAN}Disk Usage:${NC}"
-    df -h / | tail -1
+    df -h / 2>/dev/null | tail -1 || echo "  Unable to determine"
     echo ""
     echo -e "${CYAN}Memory:${NC}"
-    free -h | head -2
+    free -h 2>/dev/null | head -2 || echo "  Unable to determine"
     echo ""
     echo -e "${CYAN}Running Services:${NC}"
-    systemctl list-units --type=service --state=running | head -10
+    systemctl list-units --type=service --state=running 2>/dev/null | head -10 || echo "  Unable to list services"
+
+    # Re-enable errexit
+    set -e
 }
 
 # Display usage
@@ -971,7 +1169,8 @@ usage() {
     cat << EOF
 Usage: $0 [OPTIONS]
 
-Prepare a client machine for Wazuh Agent deployment via Ansible.
+Prepare a client machine for Wazuh deployment via Ansible.
+Supports: Debian/Ubuntu, RHEL/CentOS/Rocky/Alma, Fedora, SUSE, Arch Linux
 
 OPTIONS:
     -u, --user NAME         Ansible user to create (default: wazuh-deploy)
@@ -980,20 +1179,20 @@ OPTIONS:
     -m, --minimal           Minimal mode - skip package removal
     -r, --root-key          Also deploy SSH key to root user
     -d, --dry-run           Show what would be done without making changes
-    --full-sudo             Use full sudo access (NOPASSWD: ALL) instead of restricted
+    --restrict-sudo         Use restricted sudo (may cause issues with Ansible)
     -h, --help              Show this help message
 
 SECURITY:
-    By default, the Ansible user is configured with RESTRICTED sudo permissions,
-    limited to only the commands needed for Wazuh deployment. This is more secure
-    than granting full sudo access.
+    By default, the Ansible user is configured with full sudo (NOPASSWD: ALL).
+    This is required for Ansible's become mechanism to work properly.
 
-    Use --full-sudo only if you encounter permission issues during deployment.
+    Use --restrict-sudo for a more locked-down configuration, but note that
+    this may cause "Missing sudo password" errors with Ansible.
 
     An audit log is written to: /var/log/wazuh-client-prep-audit.log
 
 EXAMPLES:
-    # Full preparation with SSH key
+    # Full preparation with SSH key (recommended)
     $0 -k /path/to/ansible_key.pub
 
     # Dry run to see what would happen
@@ -1005,8 +1204,8 @@ EXAMPLES:
     # Custom user and port
     $0 -u ansible -p 2222 -k /path/to/key.pub
 
-    # Use full sudo (not recommended for production)
-    $0 -k /path/to/key.pub --full-sudo
+    # Use restricted sudo (may not work with Ansible)
+    $0 -k /path/to/key.pub --restrict-sudo
 
 EOF
     exit 0
@@ -1050,9 +1249,14 @@ parse_args() {
                 DRY_RUN="true"
                 shift
                 ;;
+            --restrict-sudo)
+                RESTRICT_SUDO="true"
+                print_warning "Using restricted sudo - may cause 'Missing sudo password' errors with Ansible"
+                shift
+                ;;
             --full-sudo)
+                # Legacy flag - now the default, kept for compatibility
                 RESTRICT_SUDO="false"
-                print_warning "Using full sudo access - not recommended for production"
                 shift
                 ;;
             -h|--help)
@@ -1107,26 +1311,38 @@ main() {
 
     print_header "Preparation Complete"
 
+    # Get IP address in a portable way
+    local ip_addr
+    ip_addr=$(hostname -I 2>/dev/null | awk '{print $1}') || \
+    ip_addr=$(ip -4 addr show scope global 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1) || \
+    ip_addr="<this-host-ip>"
+
     echo -e "The system is now ready for Wazuh deployment via Ansible."
     echo ""
-    echo -e "${CYAN}Security Information:${NC}"
+    echo -e "${CYAN}Configuration:${NC}"
+    echo -e "  - OS Family: ${OS_FAMILY}"
+    echo -e "  - Ansible User: ${ANSIBLE_USER}"
+    echo -e "  - SSH Port: ${SSH_PORT}"
     if [ "$RESTRICT_SUDO" = "true" ]; then
-        echo -e "  - Sudo: Restricted to deployment commands only"
+        echo -e "  - Sudo: Restricted (may need --full-sudo if Ansible fails)"
     else
-        echo -e "  - Sudo: Full access (consider using restricted mode)"
+        echo -e "  - Sudo: Full access (NOPASSWD: ALL)"
     fi
     echo -e "  - Audit log: ${AUDIT_LOG}"
     echo -e "  - Backup: ${BACKUP_DIR}"
     echo ""
-    echo -e "Next steps:"
+    echo -e "${CYAN}Next steps:${NC}"
     echo -e "  1. From your Ansible control node, test connectivity:"
-    echo -e "     ${CYAN}ssh -i ~/.ssh/wazuh_ansible_key ${ANSIBLE_USER}@$(hostname -I | awk '{print $1}')${NC}"
+    echo -e "     ${GREEN}ssh -i ~/.ssh/wazuh_ansible_key ${ANSIBLE_USER}@${ip_addr}${NC}"
     echo ""
     echo -e "  2. Add this host to your Ansible inventory"
     echo ""
     echo -e "  3. Run the Wazuh deployment playbook:"
-    echo -e "     ${CYAN}ansible-playbook site.yml${NC}"
+    echo -e "     ${GREEN}ansible-playbook site.yml${NC}"
     echo ""
 }
 
 main "$@"
+
+# Explicit successful exit
+exit 0

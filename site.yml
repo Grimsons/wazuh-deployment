@@ -67,6 +67,42 @@
     - agent
     - wazuh-agent
 
+# Post-deployment: Lock down the ansible deployment user
+- name: Wazuh Deployment - Security Lockdown
+  hosts: all
+  become: true
+  gather_facts: false
+  tags:
+    - lockdown
+    - security
+  tasks:
+    - name: Check if lockdown is enabled
+      ansible.builtin.set_fact:
+        do_lockdown: "{{ wazuh_lockdown_deploy_user | default(true) }}"
+
+    - name: Copy lockdown script to target
+      ansible.builtin.copy:
+        src: scripts/lockdown-ansible-user.sh
+        dest: /usr/local/bin/wazuh-lockdown-deploy
+        mode: '0755'
+        owner: root
+        group: root
+      when: do_lockdown | bool
+
+    - name: Execute lockdown script
+      ansible.builtin.command:
+        cmd: /usr/local/bin/wazuh-lockdown-deploy
+      environment:
+        ANSIBLE_USER: "{{ ansible_user }}"
+      register: lockdown_result
+      changed_when: lockdown_result.rc == 0
+      when: do_lockdown | bool
+
+    - name: Display lockdown status
+      ansible.builtin.debug:
+        msg: "Deployment user '{{ ansible_user }}' has been locked down on {{ inventory_hostname }}"
+      when: do_lockdown | bool
+
 # Post-deployment Summary
 - name: Wazuh Deployment - Summary
   hosts: localhost
@@ -101,7 +137,9 @@
           {% endfor %}
 
           ══════════════════════════════════════════════════════════════
-          SECURITY: Passwords are stored in ./credentials/ directory
-                    with mode 0600. Keep this directory secure!
+          SECURITY NOTES:
+          - Passwords are stored in ./credentials/ (mode 0600)
+          - Deployment user has been LOCKED DOWN on all hosts
+          - Before next deployment, run: ansible-playbook unlock-deploy-user.yml
           ══════════════════════════════════════════════════════════════
       run_once: true

@@ -49,12 +49,6 @@ wazuh_manager_cluster_key: ""
 wazuh_manager_cluster_port: 1516
 wazuh_manager_cluster_bind_addr: "0.0.0.0"
 
-# Syslog output
-wazuh_syslog_output_enabled: false
-wazuh_syslog_output_server: ""
-wazuh_syslog_output_port: 514
-wazuh_syslog_output_format: "default"
-
 # Alert output formats
 wazuh_jsonout_output: true           # JSON output for alerts (alerts.json)
 wazuh_alerts_log: true               # Plain text alerts (alerts.log)
@@ -249,6 +243,67 @@ wazuh_gcp_bucket_run_on_start: true
 #     only_logs_after: "2024-01-01"
 wazuh_gcp_buckets: []
 
+# Docker Listener - Monitor Docker events
+wazuh_docker_listener_enabled: false
+wazuh_docker_listener_interval: "10m"
+wazuh_docker_listener_attempts: 5
+wazuh_docker_listener_run_on_start: true
+
+# Office 365 Integration - Azure AD and Office 365 audit logs
+wazuh_office365_enabled: false
+wazuh_office365_interval: "1m"
+wazuh_office365_run_on_start: true
+wazuh_office365_curl_max_size: 1048576
+wazuh_office365_only_future_events: true
+# Office 365 tenants - examples:
+# wazuh_office365_tenants:
+#   - tenant_id: "your-tenant-id"
+#     client_id: "your-client-id"
+#     client_secret: "your-client-secret"
+#     api_type: "commercial"  # or "gcc", "gcc-high"
+#     subscriptions:
+#       - "Audit.AzureActiveDirectory"
+#       - "Audit.Exchange"
+#       - "Audit.SharePoint"
+#       - "Audit.General"
+#       - "DLP.All"
+wazuh_office365_tenants: []
+
+# GitHub Integration - GitHub audit logs for enterprise
+wazuh_github_enabled: false
+wazuh_github_interval: "10m"
+wazuh_github_run_on_start: true
+wazuh_github_time_delay: "1m"
+wazuh_github_curl_max_size: 1048576
+wazuh_github_only_future_events: true
+# GitHub organizations - examples:
+# wazuh_github_organizations:
+#   - name: "my-organization"
+#     api_token: "ghp_xxxxxxxxxxxx"
+#     event_type: "all"  # or "git", "web", "all"
+wazuh_github_organizations: []
+
+# Command Monitoring - Execute commands and monitor output
+wazuh_command_monitoring_enabled: false
+# Command monitoring commands - examples:
+# wazuh_command_monitoring_commands:
+#   - tag: "check-disk-space"
+#     command: "df -h"
+#     interval: "1h"
+#     run_on_start: true
+#   - tag: "check-users"
+#     command: "who"
+#     interval: "30m"
+wazuh_command_monitoring_commands: []
+
+# Agent Upgrade Module
+wazuh_agent_upgrade_enabled: true
+wazuh_agent_upgrade_chunk_size: 512
+wazuh_agent_upgrade_wpk_repository: "packages.wazuh.com/4.x/wpk/"
+
+# Task Manager Settings
+wazuh_task_manager_cleanup_time: 3600
+
 # Indexer connection
 wazuh_indexer_connection_enabled: true
 
@@ -258,3 +313,9 @@ wazuh_filebeat_archives_enabled: false
 # Filebeat version - should be compatible with Wazuh version
 # See: https://documentation.wazuh.com/current/installation-guide/wazuh-indexer/step-by-step.html
 wazuh_filebeat_version: "7.10.2"
+
+# Log rotation settings
+wazuh_log_rotation_enabled: true
+wazuh_log_rotation_keep_days: 30
+wazuh_log_rotation_max_size: "100M"
+wazuh_log_rotation_compress: true
