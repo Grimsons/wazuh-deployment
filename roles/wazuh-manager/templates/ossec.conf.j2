@@ -237,6 +237,7 @@
   </remote>
 
   <!-- Authentication - Agent Enrollment Security -->
+  <!-- Note: When use_password is enabled, authd reads from /var/ossec/etc/authd.pass automatically -->
   <auth>
     <disabled>no</disabled>
     <port>1515</port>
@@ -244,9 +245,6 @@
     <purge>{{ 'yes' if wazuh_authd_purge | default(false) else 'no' }}</purge>
     <!-- Password-based enrollment - RECOMMENDED for production -->
     <use_password>{{ 'yes' if wazuh_authd_use_password | default(true) else 'no' }}</use_password>
-{% if wazuh_authd_use_password | default(true) %}
-    <authorization_pass_path>/var/ossec/etc/authd.pass</authorization_pass_path>
-{% endif %}
     <!-- Strong cipher suite for agent enrollment -->
     <ciphers>{{ wazuh_authd_ssl_ciphers | default('HIGH:!ADH:!EXP:!MD5:!RC4:!3DES:!CAMELLIA:@STRENGTH') }}</ciphers>
     <!-- Hostname verification - prevents rogue manager attacks -->
@@ -648,19 +646,5 @@
 {% endfor %}
   </wodle>
 {% endif %}
-
-{% if wazuh_agent_upgrade_enabled | default(true) %}
-  <!-- Agent Upgrade Module - Remote agent upgrades -->
-  <wodle name="agent-upgrade">
-    <enabled>yes</enabled>
-    <chunk_size>{{ wazuh_agent_upgrade_chunk_size | default(512) }}</chunk_size>
-    <wpk_repository>{{ wazuh_agent_upgrade_wpk_repository | default('packages.wazuh.com/4.x/wpk/') }}</wpk_repository>
-  </wodle>
-{% endif %}
-
-  <!-- Task Manager Settings -->
-  <task-manager>
-    <cleanup_time>{{ wazuh_task_manager_cleanup_time | default('3600') }}</cleanup_time>
-  </task-manager>
 
 </ossec_config>

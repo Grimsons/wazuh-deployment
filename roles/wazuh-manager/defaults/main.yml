@@ -296,14 +296,6 @@ wazuh_command_monitoring_enabled: false
 #     interval: "30m"
 wazuh_command_monitoring_commands: []
 
-# Agent Upgrade Module
-wazuh_agent_upgrade_enabled: true
-wazuh_agent_upgrade_chunk_size: 512
-wazuh_agent_upgrade_wpk_repository: "packages.wazuh.com/4.x/wpk/"
-
-# Task Manager Settings
-wazuh_task_manager_cleanup_time: 3600
-
 # Indexer connection
 wazuh_indexer_connection_enabled: true
 
