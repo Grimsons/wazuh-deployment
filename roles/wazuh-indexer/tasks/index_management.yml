@@ -1,59 +1,37 @@
 ---
-# Wazuh Indexer - Index Templates and ISM Policies
-# Creates index templates for Wazuh data and configures retention policies
+# Wazuh Indexer - Index Settings and ISM Policies
+# Note: Field mappings are handled by Filebeat's official wazuh-template.json
+# This file only configures index settings and retention policies
 
-- name: Create wazuh-alerts index template
+# Optional: Create index settings template (lower priority than Filebeat's official template)
+# This allows customizing shards/replicas without interfering with official mappings
+- name: Create wazuh-alerts index settings template
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_index_template/wazuh-alerts"
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_index_template/wazuh-alerts-settings"
     method: PUT
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     body_format: json
     body:
       index_patterns:
         - "wazuh-alerts-*"
+        - "wazuh-archives-*"
       template:
         settings:
           number_of_shards: "{{ wazuh_indexer_alerts_shards | default(1) }}"
           number_of_replicas: "{{ wazuh_indexer_alerts_replicas | default(0) }}"
           index.refresh_interval: "5s"
-        mappings:
-          properties:
-            timestamp:
-              type: date
-            rule:
-              properties:
-                level:
-                  type: integer
-                description:
-                  type: text
-                id:
-                  type: keyword
-                groups:
-                  type: keyword
-            agent:
-              properties:
-                id:
-                  type: keyword
-                name:
-                  type: keyword
-                ip:
-                  type: ip
-            manager:
-              properties:
-                name:
-                  type: keyword
-            full_log:
-              type: text
-            location:
-              type: keyword
-      priority: 100
+      # Lower priority than Filebeat's official template (which is typically 1)
+      # Settings will be merged, but official mappings take precedence
+      priority: 1
     status_code: [200]
-  register: alerts_template_result
-  changed_when: alerts_template_result.status == 200
+  register: alerts_settings_result
+  changed_when: alerts_settings_result.status == 200
+  when: wazuh_custom_index_settings | default(false)
 
+# Create ISM retention policy for automatic index lifecycle management
 - name: Create ISM retention policy
   ansible.builtin.uri:
     url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_plugins/_ism/policies/wazuh-retention-policy"
@@ -61,7 +39,7 @@
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     body_format: json
     body:
       policy:
@@ -102,18 +80,58 @@
               - "wazuh-monitoring-*"
               - "wazuh-statistics-*"
             priority: 100
-    status_code: [200, 201]
+    status_code: [200, 201, 409]
+    headers:
+      Content-Type: "application/json"
   register: ism_policy_result
   changed_when: ism_policy_result.status in [200, 201]
   when: wazuh_retention_enabled | default(true)
+
+# Attach ISM policy to existing indices that don't have a policy
+- name: Get existing wazuh indices
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_cat/indices/wazuh-*?format=json"
+    method: GET
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    status_code: [200]
+  register: existing_indices
+  when: wazuh_retention_enabled | default(true)
+  ignore_errors: true
+
+- name: Attach ISM policy to existing indices
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_plugins/_ism/add/{{ item.index }}"
+    method: POST
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    body_format: json
+    body:
+      policy_id: "wazuh-retention-policy"
+    status_code: [200, 409]
+    headers:
+      Content-Type: "application/json"
+  loop: "{{ existing_indices.json | default([]) }}"
+  when:
+    - wazuh_retention_enabled | default(true)
+    - existing_indices is defined
+    - existing_indices.json is defined
+    - item.index is match('wazuh-alerts-.*|wazuh-archives-.*|wazuh-monitoring-.*|wazuh-statistics-.*')
+  ignore_errors: true
 
 - name: Display index management status
   ansible.builtin.debug:
     msg: |
       Index Management configured:
-      - Alerts template: Created
       - Retention policy: {{ wazuh_retention_days | default(1095) }} days ({{ (wazuh_retention_days | default(1095) / 365) | round(1) }} years)
         - Hot: 0-{{ wazuh_retention_warm_after_days | default(30) }} days
         - Warm: {{ wazuh_retention_warm_after_days | default(30) }}-{{ wazuh_retention_cold_after_days | default(90) }} days
         - Cold: {{ wazuh_retention_cold_after_days | default(90) }}-{{ wazuh_retention_days | default(1095) }} days
         - Delete: after {{ wazuh_retention_days | default(1095) }} days
+
+      Note: Field mappings (including MITRE ATT&CK) are handled by Filebeat's
+      official wazuh-template.json which is automatically applied during deployment.

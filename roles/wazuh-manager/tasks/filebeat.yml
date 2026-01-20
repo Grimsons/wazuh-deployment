@@ -126,11 +126,21 @@
     daemon_reload: true
   become: true
 
-- name: Start Filebeat service
-  ansible.builtin.service:
+- name: Start Filebeat service (non-blocking)
+  ansible.builtin.systemd:
     name: filebeat
     state: started
+    no_block: true
   become: true
+
+- name: Verify Filebeat service is running
+  ansible.builtin.systemd:
+    name: filebeat
+  become: true
+  register: filebeat_service_status
+  until: filebeat_service_status.status.ActiveState == "active"
+  retries: 30
+  delay: 5
 
 - name: Wait for Filebeat to start sending data
   ansible.builtin.pause:

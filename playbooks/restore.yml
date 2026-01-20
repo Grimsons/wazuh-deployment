@@ -49,7 +49,7 @@
           ═══════════════════════════════════════════════════════════════
 
 - name: Restore Wazuh Indexer
-  hosts: wazuh_indexer
+  hosts: wazuh_indexers
   become: true
   vars:
     backup_source_path: "{{ hostvars['localhost']['backup_source_path'] }}"
@@ -126,7 +126,7 @@
             - restart_services | default(true) | bool
 
 - name: Restore Wazuh Manager
-  hosts: wazuh_manager
+  hosts: wazuh_managers
   become: true
   vars:
     backup_source_path: "{{ hostvars['localhost']['backup_source_path'] }}"
@@ -251,7 +251,7 @@
             - restart_services | default(true) | bool
 
 - name: Restore Wazuh Dashboard
-  hosts: wazuh_dashboard
+  hosts: wazuh_dashboards
   become: true
   vars:
     backup_source_path: "{{ hostvars['localhost']['backup_source_path'] }}"

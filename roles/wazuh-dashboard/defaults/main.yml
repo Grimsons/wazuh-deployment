@@ -1,38 +1,164 @@
 ---
 # Wazuh Dashboard Role - Default Variables
 
-# Package settings
+# ═══════════════════════════════════════════════════════════════════════════════
+# Package Settings
+# ═══════════════════════════════════════════════════════════════════════════════
 wazuh_dashboard_package_name: "wazuh-dashboard"
 wazuh_dashboard_service_name: "wazuh-dashboard"
 
-# Dashboard configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+# Path Settings
+# ═══════════════════════════════════════════════════════════════════════════════
 wazuh_dashboard_config_path: /etc/wazuh-dashboard
 wazuh_dashboard_data_path: /var/lib/wazuh-dashboard
 wazuh_dashboard_log_path: /var/log/wazuh-dashboard
+wazuh_dashboard_certs_path: /etc/wazuh-dashboard/certs
 
-# Network settings
+# ═══════════════════════════════════════════════════════════════════════════════
+# Network Settings
+# ═══════════════════════════════════════════════════════════════════════════════
 wazuh_dashboard_port: 443
 wazuh_dashboard_host: "0.0.0.0"
 
-# SSL/TLS settings
+# ═══════════════════════════════════════════════════════════════════════════════
+# SSL/TLS Settings
+# ═══════════════════════════════════════════════════════════════════════════════
 wazuh_dashboard_ssl_enabled: true
+# Verification mode: none, certificate, full
 wazuh_dashboard_ssl_verification_mode: "certificate"
 
-# Session settings (in minutes)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Session Settings
+# ═══════════════════════════════════════════════════════════════════════════════
+# Session timeout in minutes
 wazuh_dashboard_session_timeout: 60
 
-# Cookie security settings
+# ═══════════════════════════════════════════════════════════════════════════════
+# Cookie Security Settings
+# ═══════════════════════════════════════════════════════════════════════════════
 wazuh_dashboard_cookie_secure: true
 wazuh_dashboard_cookie_same_site: "Strict"
 
-# Security settings
+# ═══════════════════════════════════════════════════════════════════════════════
+# Authentication Settings
+# ═══════════════════════════════════════════════════════════════════════════════
 # Dashboard uses indexer admin credentials - auto-generated if not set
 wazuh_dashboard_admin_user: "admin"
 # wazuh_dashboard_admin_password: auto-read from credentials/indexer_admin_password.txt
 
-# HTTP security headers
+# ═══════════════════════════════════════════════════════════════════════════════
+# HTTP Security Headers
+# ═══════════════════════════════════════════════════════════════════════════════
 wazuh_dashboard_csp_strict: true
 wazuh_dashboard_xframe_options: "SAMEORIGIN"
 
-# Paths
-wazuh_dashboard_certs_path: /etc/wazuh-dashboard/certs
+# ═══════════════════════════════════════════════════════════════════════════════
+# Wazuh App - API Connection Settings
+# ═══════════════════════════════════════════════════════════════════════════════
+# API timeout in milliseconds
+wazuh_dashboard_api_timeout: 20000
+wazuh_dashboard_api_request_timeout: 20000
+
+# Enable API selector (show dropdown to select different managers)
+wazuh_dashboard_api_selector: true
+
+# Run as different user (RBAC feature)
+wazuh_dashboard_api_run_as: false
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Wazuh App - Index Pattern Settings
+# ═══════════════════════════════════════════════════════════════════════════════
+# Default alerts index pattern
+wazuh_dashboard_pattern: "wazuh-alerts-*"
+
+# Sample alerts prefix (for testing)
+wazuh_dashboard_sample_prefix: "wazuh-alerts-4.x-"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Wazuh App - Monitoring Settings
+# ═══════════════════════════════════════════════════════════════════════════════
+# Enable agent monitoring
+wazuh_dashboard_monitoring_enabled: true
+
+# Monitoring frequency in seconds (default: 900 = 15 minutes)
+wazuh_dashboard_monitoring_frequency: 900
+
+# Monitoring index settings
+wazuh_dashboard_monitoring_shards: 1
+wazuh_dashboard_monitoring_replicas: 0
+
+# Monitoring index creation interval: h=hourly, d=daily, w=weekly, m=monthly
+wazuh_dashboard_monitoring_creation: "w"
+
+# Monitoring index pattern
+wazuh_dashboard_monitoring_pattern: "wazuh-monitoring-*"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Wazuh App - Statistics Settings
+# ═══════════════════════════════════════════════════════════════════════════════
+# Enable statistics collection
+wazuh_dashboard_statistics_enabled: true
+
+# APIs to collect statistics from (empty = all configured APIs)
+wazuh_dashboard_statistics_apis: []
+
+# Statistics collection interval (cron format)
+wazuh_dashboard_statistics_interval: "0 0 * * * *"
+
+# Statistics index settings
+wazuh_dashboard_statistics_index: "statistics"
+wazuh_dashboard_statistics_creation: "w"
+wazuh_dashboard_statistics_shards: 1
+wazuh_dashboard_statistics_replicas: 0
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Wazuh App - Health Check Settings
+# ═══════════════════════════════════════════════════════════════════════════════
+# Enable various health checks at startup
+wazuh_dashboard_check_pattern: true
+wazuh_dashboard_check_template: true
+wazuh_dashboard_check_api: true
+wazuh_dashboard_check_setup: true
+wazuh_dashboard_check_fields: true
+wazuh_dashboard_check_metafields: true
+wazuh_dashboard_check_maxbuckets: true
+wazuh_dashboard_check_timefilter: true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Wazuh App - Agent Enrollment Settings
+# ═══════════════════════════════════════════════════════════════════════════════
+# DNS/IP shown in dashboard for agent enrollment instructions
+# Leave empty to use first manager IP
+wazuh_dashboard_enrollment_dns: ""
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Wazuh App - Customization Settings
+# ═══════════════════════════════════════════════════════════════════════════════
+# Custom logos - paths relative to /usr/share/wazuh-dashboard/plugins/wazuh/public/assets/
+# Leave empty to use defaults
+# wazuh_dashboard_custom_logo: "custom/logo.png"
+# wazuh_dashboard_custom_logo_sidebar: "custom/logo-sidebar.png"
+# wazuh_dashboard_custom_logo_healthcheck: "custom/logo-healthcheck.png"
+# wazuh_dashboard_custom_logo_reports: "custom/logo-reports.png"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Wazuh App - Logging Settings
+# ═══════════════════════════════════════════════════════════════════════════════
+# Log level: info, debug, error
+wazuh_dashboard_log_level: "info"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Wazuh App - UI Settings
+# ═══════════════════════════════════════════════════════════════════════════════
+# Hide alerts from the manager itself in dashboards
+wazuh_dashboard_hide_manager_alerts: false
+
+# Show IP selector on Overview and Agents pages
+wazuh_dashboard_ip_selector: true
+
+# Agent IDs to exclude from IP selector
+wazuh_dashboard_ip_ignore: []
+
+# Allow configuration changes via the dashboard UI
+wazuh_dashboard_ui_api_editable: true

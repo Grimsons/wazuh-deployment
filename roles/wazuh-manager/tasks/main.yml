@@ -19,16 +19,19 @@
 - name: Install Wazuh Manager
   ansible.builtin.include_tasks: install.yml
 
-- name: Configure certificates
+- name: Deploy certificates
   ansible.builtin.include_tasks: certificates.yml
-  when: wazuh_generate_certs | default(true)
 
 - name: Configure Wazuh Manager
   ansible.builtin.include_tasks: configure.yml
 
+- name: Configure agent enrollment password
+  ansible.builtin.include_tasks: agent_enrollment.yml
+  when: wazuh_authd_use_password | default(true)
+
 - name: Deploy custom rules and decoders
   ansible.builtin.include_tasks: custom_rules.yml
-  when: wazuh_custom_content_enabled | default(true)
+  when: wazuh_custom_content_enabled | default(false)
 
 - name: Configure agent groups
   ansible.builtin.include_tasks: agent_groups.yml
@@ -43,14 +46,38 @@
 
 - name: Configure firewall
   ansible.builtin.include_tasks: firewall.yml
-  when: wazuh_configure_firewall | default(true)
+  when: wazuh_configure_firewall | default(false)
 
-- name: Start and enable Wazuh Manager service
-  ansible.builtin.service:
+- name: Enable Wazuh Manager service
+  ansible.builtin.systemd:
+    name: "{{ wazuh_manager_service_name }}"
+    enabled: true
+    daemon_reload: true
+  become: true
+
+- name: Start Wazuh Manager service (non-blocking)
+  ansible.builtin.systemd:
     name: "{{ wazuh_manager_service_name }}"
     state: started
-    enabled: true
+    no_block: true
   become: true
+
+- name: Wait for Wazuh Manager to be listening
+  ansible.builtin.wait_for:
+    port: 1514
+    host: "{{ ansible_default_ipv4.address }}"
+    delay: 10
+    timeout: 300
+  become: true
+
+- name: Verify Wazuh Manager service is running
+  ansible.builtin.systemd:
+    name: "{{ wazuh_manager_service_name }}"
+  become: true
+  register: manager_service_status
+  until: manager_service_status.status.ActiveState == "active"
+  retries: 30
+  delay: 10
 
 - name: Wait for Wazuh Manager API to be ready
   ansible.builtin.uri:
@@ -59,7 +86,7 @@
     user: "{{ wazuh_api_user }}"
     password: "wazuh"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     status_code: [200, 401]
   register: wazuh_api_check
   until: wazuh_api_check.status in [200, 401]

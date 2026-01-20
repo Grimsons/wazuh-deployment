@@ -67,3 +67,8 @@ __pycache__/
 venv/
 .env
 .venv/
+
+# Claude Code working files
+CLAUDE.md
+improvements.md
+.claude/

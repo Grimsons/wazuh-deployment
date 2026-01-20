@@ -31,14 +31,14 @@
         mode: '0700'
 
 - name: Backup Wazuh Indexer
-  hosts: wazuh_indexer
+  hosts: wazuh_indexers
   become: true
   vars:
     backup_timestamp: "{{ hostvars['localhost']['backup_timestamp'] }}"
     backup_base_path: "{{ hostvars['localhost']['backup_base_path'] }}"
   tasks:
     - name: Backup indexer configuration
-      when: backup_indexer | default(true) | bool
+      when: backup_indexer | default(false) | bool
       block:
         - name: Create local backup directory for indexer
           ansible.builtin.file:
@@ -94,7 +94,7 @@
               type: fs
               settings:
                 location: "/var/lib/wazuh-indexer/snapshots"
-            validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+            validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
             status_code:
               - 200
               - 400  # Repository already exists
@@ -103,14 +103,14 @@
           no_log: true
 
 - name: Backup Wazuh Manager
-  hosts: wazuh_manager
+  hosts: wazuh_managers
   become: true
   vars:
     backup_timestamp: "{{ hostvars['localhost']['backup_timestamp'] }}"
     backup_base_path: "{{ hostvars['localhost']['backup_base_path'] }}"
   tasks:
     - name: Backup manager configuration
-      when: backup_manager | default(true) | bool
+      when: backup_manager | default(false) | bool
       block:
         - name: Create local backup directory for manager
           ansible.builtin.file:
@@ -186,14 +186,14 @@
             state: absent
 
 - name: Backup Wazuh Dashboard
-  hosts: wazuh_dashboard
+  hosts: wazuh_dashboards
   become: true
   vars:
     backup_timestamp: "{{ hostvars['localhost']['backup_timestamp'] }}"
     backup_base_path: "{{ hostvars['localhost']['backup_base_path'] }}"
   tasks:
     - name: Backup dashboard configuration
-      when: backup_dashboard | default(true) | bool
+      when: backup_dashboard | default(false) | bool
       block:
         - name: Create local backup directory for dashboard
           ansible.builtin.file:

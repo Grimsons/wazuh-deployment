@@ -1,0 +1,70 @@
+---
+# Wazuh Deployment - Unlock Deployment User
+# Run this playbook BEFORE running site.yml to unlock the deployment user
+#
+# Usage:
+#   ansible-playbook unlock-deploy-user.yml
+#
+# The locked-down deployment user has restricted sudo that only allows
+# running the unlock script. This playbook uses that capability.
+
+- name: Unlock Wazuh Deployment User
+  hosts: all
+  gather_facts: false
+  # Note: become works here because the locked-down sudoers allows
+  # running the unlock script with NOPASSWD
+  become: true
+  tasks:
+    - name: Check if user is locked down
+      ansible.builtin.stat:
+        path: /var/lib/wazuh-deploy/.locked
+      register: lock_flag
+      become: false
+
+    - name: Display current status
+      ansible.builtin.debug:
+        msg: "{{ 'User is LOCKED - unlocking...' if lock_flag.stat.exists else 'User is already UNLOCKED' }}"
+
+    - name: Run unlock script
+      ansible.builtin.command:
+        cmd: /usr/local/bin/wazuh-unlock-deploy
+      register: unlock_result
+      changed_when: unlock_result.rc == 0
+      when: lock_flag.stat.exists
+
+    - name: Verify unlock was successful
+      ansible.builtin.stat:
+        path: /var/lib/wazuh-deploy/.locked
+      register: lock_check
+      become: false
+
+    - name: Confirm unlock status
+      ansible.builtin.debug:
+        msg: "{{ 'SUCCESS: User unlocked on ' + inventory_hostname if not lock_check.stat.exists else 'WARNING: User may still be locked on ' + inventory_hostname }}"
+
+- name: Unlock Summary
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Display next steps
+      ansible.builtin.debug:
+        msg: |
+
+          ══════════════════════════════════════════════════════════════
+                      DEPLOYMENT USER UNLOCKED
+          ══════════════════════════════════════════════════════════════
+
+          The deployment user has been unlocked on all hosts.
+          You can now run the main deployment playbook:
+
+            ansible-playbook site.yml
+
+          After deployment completes, the user will automatically be
+          locked down again for security.
+
+          To skip the automatic lockdown, use:
+
+            ansible-playbook site.yml --skip-tags lockdown
+
+          ══════════════════════════════════════════════════════════════
+      run_once: true

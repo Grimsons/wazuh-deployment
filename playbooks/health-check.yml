@@ -10,7 +10,7 @@
 #   -e "verbose=true"            - Show detailed output
 
 - name: Health Check - Wazuh Indexer
-  hosts: wazuh_indexer
+  hosts: wazuh_indexers
   become: true
   gather_facts: true
   vars:
@@ -31,7 +31,7 @@
         method: GET
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
         return_content: true
       register: cluster_health
       failed_when: false
@@ -67,7 +67,7 @@
         method: GET
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
         return_content: true
       register: index_stats
       failed_when: false
@@ -89,7 +89,7 @@
           ═══════════════════════════════════════════════════════════════
 
 - name: Health Check - Wazuh Manager
-  hosts: wazuh_manager
+  hosts: wazuh_managers
   become: true
   gather_facts: true
   tasks:
@@ -116,7 +116,7 @@
       ansible.builtin.uri:
         url: "https://127.0.0.1:{{ wazuh_manager_api_port | default(55000) }}/"
         method: GET
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
         status_code:
           - 200
           - 401  # 401 is expected without auth
@@ -193,7 +193,7 @@
         - agent_list.stdout is defined
 
 - name: Health Check - Wazuh Dashboard
-  hosts: wazuh_dashboard
+  hosts: wazuh_dashboards
   become: true
   gather_facts: true
   tasks:
@@ -210,7 +210,7 @@
       ansible.builtin.uri:
         url: "https://127.0.0.1:{{ wazuh_dashboard_port }}/app/wazuh"
         method: GET
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
         status_code:
           - 200
           - 302
@@ -264,9 +264,9 @@
           Timestamp: {{ lookup('pipe', 'date -Iseconds') }}
 
           Components Checked:
-            - Indexer nodes:   {{ groups['wazuh_indexer'] | length }}
-            - Manager nodes:   {{ groups['wazuh_manager'] | length }}
-            - Dashboard nodes: {{ groups['wazuh_dashboard'] | length }}
+            - Indexer nodes:   {{ groups['wazuh_indexers'] | length }}
+            - Manager nodes:   {{ groups['wazuh_managers'] | length }}
+            - Dashboard nodes: {{ groups['wazuh_dashboards'] | length }}
 
           For detailed checks, run with:
             -e "check_agents=true"   - Check agent connectivity

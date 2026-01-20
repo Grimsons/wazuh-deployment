@@ -2,13 +2,14 @@
 # Wazuh Manager - Handlers
 
 - name: restart wazuh-manager
-  ansible.builtin.service:
+  ansible.builtin.systemd:
     name: "{{ wazuh_manager_service_name }}"
     state: restarted
+    no_block: true
   become: true
 
 - name: reload wazuh-manager
-  ansible.builtin.service:
+  ansible.builtin.systemd:
     name: "{{ wazuh_manager_service_name }}"
     state: reloaded
   become: true
@@ -20,7 +21,8 @@
   become: true
 
 - name: restart filebeat
-  ansible.builtin.service:
+  ansible.builtin.systemd:
     name: filebeat
     state: restarted
+    no_block: true
   become: true

@@ -147,8 +147,116 @@ wazuh_indexer_anonymous_auth_enabled: false  # Disable anonymous access
 wazuh_vulnerability_detection_enabled: true
 wazuh_fim_enabled: true
 wazuh_rootkit_detection_enabled: true
+wazuh_sca_enabled: true                    # Security Configuration Assessment
+wazuh_syscollector_enabled: true           # System inventory collection
 wazuh_log_collection_enabled: true
 wazuh_active_response_enabled: true
+
+# ═══════════════════════════════════════════════════════════════
+# Post-Deployment Security
+# ═══════════════════════════════════════════════════════════════
+# Lock down deployment user after successful deployment
+# User can only run unlock script and basic status checks
+wazuh_lockdown_deploy_user: true
+
+# ═══════════════════════════════════════════════════════════════
+# Email Alerts
+# ═══════════════════════════════════════════════════════════════
+wazuh_email_notification_enabled: false
+# wazuh_email_smtp_server: "smtp.example.com"
+# wazuh_email_from: "wazuh@example.com"
+# wazuh_email_to: "security@example.com"
+# wazuh_email_alert_level: 12
+
+# ═══════════════════════════════════════════════════════════════
+# Syslog Output (SIEM Forwarding)
+# ═══════════════════════════════════════════════════════════════
+wazuh_syslog_output_enabled: false
+# wazuh_syslog_output_server: "siem.example.com"
+# wazuh_syslog_output_port: 514
+# wazuh_syslog_output_format: "json"  # default, json, or cef
+
+# ═══════════════════════════════════════════════════════════════
+# Integrations
+# ═══════════════════════════════════════════════════════════════
+
+# Slack notifications
+# wazuh_integrations:
+#   - name: slack
+#     hook_url: "https://hooks.slack.com/services/xxx/yyy/zzz"
+#     level: 10
+#     alert_format: json
+
+# VirusTotal file hash lookups
+#   - name: virustotal
+#     api_key: "your-virustotal-api-key"
+#     level: 7
+#     group: "syscheck"
+
+# PagerDuty incident management
+#   - name: pagerduty
+#     api_key: "your-pagerduty-api-key"
+#     level: 12
+
+# ═══════════════════════════════════════════════════════════════
+# Container Monitoring
+# ═══════════════════════════════════════════════════════════════
+wazuh_docker_listener_enabled: false
+# wazuh_docker_listener_interval: "10m"
+
+# ═══════════════════════════════════════════════════════════════
+# Cloud Integrations
+# ═══════════════════════════════════════════════════════════════
+
+# AWS CloudTrail, GuardDuty, VPC Flow Logs
+wazuh_aws_enabled: false
+# wazuh_aws_buckets:
+#   - name: "my-cloudtrail-bucket"
+#     type: "cloudtrail"
+#     aws_profile: "default"
+#     regions:
+#       - us-east-1
+
+# Azure Log Analytics
+wazuh_azure_enabled: false
+# wazuh_azure_log_analytics:
+#   - application_id: "your-app-id"
+#     application_key: "your-app-key"
+#     tenantdomain: "your-tenant.onmicrosoft.com"
+
+# GCP Pub/Sub
+wazuh_gcp_enabled: false
+# wazuh_gcp_project_id: "my-project"
+# wazuh_gcp_subscription_name: "wazuh-subscription"
+
+# Office 365 Audit Logs
+wazuh_office365_enabled: false
+# wazuh_office365_tenants:
+#   - tenant_id: "your-tenant-id"
+#     client_id: "your-client-id"
+#     client_secret: "your-client-secret"
+
+# GitHub Enterprise Audit Logs
+wazuh_github_enabled: false
+# wazuh_github_organizations:
+#   - name: "my-organization"
+#     api_token: "ghp_xxxxxxxxxxxx"
+
+# ═══════════════════════════════════════════════════════════════
+# Data Retention (Index Lifecycle Management)
+# ═══════════════════════════════════════════════════════════════
+wazuh_retention_enabled: true
+wazuh_retention_days: 1095                 # 3 years total retention
+wazuh_retention_warm_after_days: 30        # Move to warm tier after 30 days
+wazuh_retention_cold_after_days: 90        # Move to cold tier after 90 days
+
+# ═══════════════════════════════════════════════════════════════
+# Log Rotation
+# ═══════════════════════════════════════════════════════════════
+wazuh_log_rotation_enabled: true
+wazuh_log_rotation_keep_days: 30
+wazuh_log_rotation_max_size: "100M"
+wazuh_log_rotation_compress: true
 
 # ═══════════════════════════════════════════════════════════════
 # Network/Firewall Settings

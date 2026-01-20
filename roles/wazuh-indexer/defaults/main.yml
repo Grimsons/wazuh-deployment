@@ -22,6 +22,8 @@ wazuh_indexer_cluster_initial_master_nodes: []
 # JVM settings
 wazuh_indexer_heap_size: "1g"
 wazuh_indexer_max_map_count: 262144
+# Memory lock - prevents JVM from being swapped (CRITICAL for production)
+wazuh_indexer_memory_lock: true
 
 # Security settings
 wazuh_indexer_admin_user: "admin"

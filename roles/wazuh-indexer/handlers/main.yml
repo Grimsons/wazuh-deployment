@@ -2,13 +2,14 @@
 # Wazuh Indexer - Handlers
 
 - name: restart wazuh-indexer
-  ansible.builtin.service:
+  ansible.builtin.systemd:
     name: "{{ wazuh_indexer_service_name }}"
     state: restarted
+    no_block: true
   become: true
 
 - name: reload wazuh-indexer
-  ansible.builtin.service:
+  ansible.builtin.systemd:
     name: "{{ wazuh_indexer_service_name }}"
     state: reloaded
   become: true

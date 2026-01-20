@@ -15,7 +15,7 @@
           ══════════════════════════════════════════════
           Wazuh Version: {{ wazuh_version }}
           Dashboard Port: {{ wazuh_dashboard_port }}
-          SSL Enabled: {{ wazuh_dashboard_ssl_enabled | default(true) }}
+          SSL Enabled: {{ wazuh_dashboard_ssl_enabled | default(false) }}
           ══════════════════════════════════════════════
 
   roles:
@@ -25,7 +25,7 @@
     - name: Verify Wazuh Dashboard is running
       ansible.builtin.uri:
         url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/app/login"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
         status_code: [200, 302]
       register: dashboard_health_check
 

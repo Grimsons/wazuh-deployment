@@ -4,7 +4,7 @@
 
 - name: Generate random admin password
   ansible.builtin.set_fact:
-    wazuh_indexer_admin_password_generated: "{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits,punctuation') | regex_replace('[\"\\\\]', '') }}"
+    wazuh_indexer_admin_password_generated: "{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits') }}{{ ['!', '@', '#', '%', '^', '*', '-', '_', '+', '='] | random }}{{ ['!', '@', '#', '%', '^', '*', '-', '_', '+', '='] | random }}"
   run_once: true
   when: wazuh_indexer_admin_password_generated is not defined
 
@@ -58,7 +58,7 @@
 - name: Hash the admin password using OpenSearch security tools
   ansible.builtin.shell: |
     export JAVA_HOME=/usr/share/wazuh-indexer/jdk
-    /usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p '{{ wazuh_admin_password }}'
+    /usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p {{ wazuh_admin_password | quote }}
   become: true
   register: password_hash
   changed_when: false

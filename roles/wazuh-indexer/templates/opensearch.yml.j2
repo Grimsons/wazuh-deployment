@@ -14,6 +14,10 @@ transport.port: {{ wazuh_indexer_transport_port }}
 path.data: {{ wazuh_indexer_data_path }}
 path.logs: {{ wazuh_indexer_log_path }}
 
+# Memory settings - CRITICAL for production
+# Prevents JVM from being swapped to disk
+bootstrap.memory_lock: {{ wazuh_indexer_memory_lock | default(true) | lower }}
+
 # Discovery settings
 discovery.type: {% if wazuh_indexer_nodes | length == 1 %}single-node{% else %}zen{% endif %}
 
@@ -86,8 +90,6 @@ plugins.security.audit.config.enable_transport: true
 plugins.security.enable_snapshot_restore_privilege: true
 plugins.security.check_snapshot_restore_write_privileges: true
 
-# Anonymous authentication - DISABLED for security
-plugins.security.authcz.anonymous_auth_enabled: {{ wazuh_indexer_anonymous_auth_enabled | default(false) | lower }}
 plugins.security.restapi.roles_enabled:
   - all_access
   - security_rest_api_access
