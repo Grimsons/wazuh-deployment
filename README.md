@@ -6,11 +6,12 @@ Production-ready automated deployment of Wazuh SIEM/XDR stack using Ansible with
 
 This project provides an enterprise-grade deployment solution for Wazuh with:
 
-- **Secure by Default** - Auto-generated credentials, API rate limiting, TLS 1.2+, secure cookies
+- **Secure by Default** - Ansible Vault encrypted credentials, API rate limiting, TLS 1.2+
 - **Interactive Setup** - Configure your deployment through a guided CLI wizard
 - **Client Preparation** - Cross-platform target host preparation (Ubuntu, Debian, RHEL, Arch Linux)
 - **Multiple Deployment Modes** - All-in-One or Distributed multi-node cluster
-- **Certificate Management** - Automatic SSL/TLS certificate generation during setup
+- **Certificate Management** - Self-signed or external CA with rotation/renewal playbooks
+- **Encrypted Secrets** - Ansible Vault for credential encryption (enabled by default)
 - **Post-Deployment Security** - Automatic lockdown of deployment user after completion
 - **Operational Tooling** - Backup/restore, health checks, and log rotation
 - **Extensible** - Custom rules, decoders, agent groups, and integrations
@@ -64,10 +65,13 @@ The wizard configures:
 Generated files:
 - `inventory/hosts.yml` - Ansible inventory
 - `group_vars/all.yml` - Configuration variables
+- `group_vars/vault.yml` - Encrypted credentials (Ansible Vault)
+- `.vault_password` - Vault encryption key (keep secure!)
 - `ansible.cfg` - Ansible settings
 - `keys/` - SSH keypair for deployment
 - `client-prep/` - Host preparation package
 - `files/certs/` - SSL/TLS certificates
+- `credentials/` - Plaintext credential copies (delete after noting)
 
 ### 2. Prepare Target Hosts
 
@@ -134,17 +138,26 @@ wazuh-deployment/
 ├── wazuh-aio.yml               # All-in-One deployment
 ├── wazuh-distributed.yml       # Multi-node cluster deployment
 ├── wazuh-agent.yml             # Agent-only deployment
+├── .vault_password              # Ansible Vault encryption key (keep secure!)
 │
 ├── inventory/
 │   └── hosts.yml               # Generated inventory
 │
 ├── group_vars/
-│   └── all.yml                 # Configuration variables
+│   ├── all.yml                 # Configuration variables
+│   └── vault.yml               # Encrypted credentials (Ansible Vault)
 │
-├── credentials/                 # Auto-generated credentials (created at deploy)
+├── credentials/                 # Plaintext credential copies (delete after setup)
 │   ├── indexer_admin_password.txt
 │   ├── api_password.txt
 │   └── agent_enrollment_password.txt
+│
+├── scripts/
+│   ├── manage-vault.sh         # Vault credential management
+│   ├── deploy-with-rollback.sh # Deploy with automatic rollback support
+│   ├── setup-health-cron.sh    # Setup automated health monitoring
+│   ├── prepare-client.sh       # Client host preparation
+│   └── deploy-prep.sh          # Multi-host preparation
 │
 ├── unlock-deploy-user.yml       # Unlock deployment user for redeployment
 │
@@ -153,9 +166,13 @@ wazuh-deployment/
 │   ├── wazuh-manager.yml       # Manager deployment
 │   ├── wazuh-dashboard.yml     # Dashboard deployment
 │   ├── wazuh-agents.yml        # Agent deployment
+│   ├── pre-flight-checks.yml   # Pre-deployment validation
+│   ├── certificate-management.yml  # Certificate validation/rotation/renewal
 │   ├── backup.yml              # Backup all components
 │   ├── restore.yml             # Restore from backup
-│   └── health-check.yml        # Health monitoring
+│   ├── health-check.yml        # Health monitoring
+│   ├── health-check-alerts.yml # Health monitoring with alerting
+│   └── upgrade.yml             # In-place version upgrades
 │
 ├── roles/
 │   ├── wazuh-indexer/          # Indexer role
@@ -178,11 +195,20 @@ wazuh-deployment/
 
 ## Security Features
 
-### Automatic Credential Management
-- Secure random password generation (24 characters)
+### Ansible Vault Credential Management
+- **Encrypted by default** - All credentials stored in Ansible Vault
+- Secure random password generation (24+ characters)
 - No hardcoded default passwords
-- Credentials stored with restricted permissions (0600)
+- Vault password file with restricted permissions (0600)
 - Automatic propagation to all components
+
+### Credential Management Commands
+```bash
+./scripts/manage-vault.sh view      # View current credentials
+./scripts/manage-vault.sh edit      # Edit credentials
+./scripts/manage-vault.sh rotate    # Rotate all credentials
+./scripts/manage-vault.sh rekey     # Change vault password
+```
 
 ### API Security Hardening
 | Setting | Value | Description |
@@ -192,6 +218,26 @@ wazuh-deployment/
 | `max_request_per_minute` | 100 | Rate limiting |
 | `remote_commands` | disabled | Prevents remote code execution |
 | `ssl_protocol` | TLSv1.2 | Minimum TLS version |
+
+### Certificate Management
+- **Self-signed** (default) - Automatically generated during setup
+- **External CA** - Optional support for enterprise CA certificates
+- Certificate rotation and renewal playbooks
+- Certificate expiration monitoring
+
+```bash
+# Check certificate expiration
+ansible-playbook playbooks/certificate-management.yml --tags check-expiry
+
+# Rotate certificates (self-signed)
+ansible-playbook playbooks/certificate-management.yml --tags rotate
+
+# Rotate certificates (external CA - place new certs in files/certs/ first)
+ansible-playbook playbooks/certificate-management.yml --tags rotate -e "external_ca=true"
+
+# Renew expiring certificates (within 30 days)
+ansible-playbook playbooks/certificate-management.yml --tags renew
+```
 
 ### Dashboard Security
 - TLS 1.2/1.3 only
@@ -207,6 +253,39 @@ Default 3-year retention with tiered storage:
 - **Delete**: After 1095 days (3 years)
 
 ## Operational Playbooks
+
+### Pre-Flight Checks
+
+```bash
+# Full validation before deployment
+ansible-playbook playbooks/pre-flight-checks.yml
+
+# Quick validation (skip slow network tests)
+ansible-playbook playbooks/pre-flight-checks.yml --tags quick
+
+# Check specific components
+ansible-playbook playbooks/pre-flight-checks.yml --tags indexer
+ansible-playbook playbooks/pre-flight-checks.yml --tags manager
+```
+
+### Deployment with Rollback
+
+```bash
+# Deploy with automatic rollback point (recommended)
+./scripts/deploy-with-rollback.sh
+
+# List available rollback points
+./scripts/deploy-with-rollback.sh --list
+
+# Rollback to previous state
+./scripts/deploy-with-rollback.sh --rollback
+
+# Rollback to specific point
+./scripts/deploy-with-rollback.sh --rollback --point 20260120T143000
+
+# Clean old rollback points (keep 3 most recent)
+./scripts/deploy-with-rollback.sh --cleanup 3
+```
 
 ### Backup
 
@@ -249,6 +328,26 @@ ansible-playbook playbooks/health-check.yml -e "check_agents=true"
 
 # Include index statistics
 ansible-playbook playbooks/health-check.yml -e "check_indices=true"
+```
+
+### Health Check with Alerting
+
+```bash
+# Health check with Slack alerts
+ansible-playbook playbooks/health-check-alerts.yml -e "alert_slack=true"
+
+# Health check with email alerts
+ansible-playbook playbooks/health-check-alerts.yml -e "alert_email=true"
+
+# Health check writing to file (for monitoring integration)
+ansible-playbook playbooks/health-check-alerts.yml -e "alert_file=true"
+
+# Also alert on warnings (not just critical)
+ansible-playbook playbooks/health-check-alerts.yml -e "alert_slack=true" -e "alert_on_warning=true"
+
+# Setup automated health monitoring (cron)
+./scripts/setup-health-cron.sh --interval 5 --slack
+./scripts/setup-health-cron.sh --remove  # Remove cron job
 ```
 
 ## Configuration
@@ -448,20 +547,99 @@ tail -f /var/log/wazuh-dashboard/opensearch-dashboards.log
 tail -f /var/log/filebeat/filebeat
 ```
 
-### Reset Credentials
-
-If you need to regenerate credentials, delete the credentials directory and re-run the deployment:
+### Reset/Rotate Credentials
 
 ```bash
-rm -rf credentials/
-ansible-playbook site.yml
+# Rotate all credentials (generates new passwords)
+./scripts/manage-vault.sh rotate
+ansible-playbook site.yml  # Redeploy with new credentials
+
+# View current credentials
+./scripts/manage-vault.sh view
+
+# Change vault encryption password
+./scripts/manage-vault.sh rekey
 ```
 
 ## Upgrading
 
-1. Update `wazuh_version` in `group_vars/all.yml`
-2. Create a backup: `ansible-playbook playbooks/backup.yml`
-3. Run deployment: `ansible-playbook site.yml`
+The upgrade playbook provides safe in-place version upgrades with automatic backup, version validation, and rollback support.
+
+### Basic Upgrade
+
+```bash
+# Upgrade to the version specified in group_vars/all.yml
+ansible-playbook playbooks/upgrade.yml
+```
+
+### Check Current Versions (No Changes)
+
+```bash
+# View current vs target versions without making changes
+ansible-playbook playbooks/upgrade.yml --tags check
+```
+
+### Upgrade to Specific Version
+
+```bash
+# Upgrade to a specific version
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.15.0"
+```
+
+### Selective Component Upgrades
+
+```bash
+# Upgrade only specific components
+ansible-playbook playbooks/upgrade.yml --tags indexer
+ansible-playbook playbooks/upgrade.yml --tags manager
+ansible-playbook playbooks/upgrade.yml --tags dashboard
+ansible-playbook playbooks/upgrade.yml --tags agent -e "upgrade_agents=true"
+```
+
+### Include Agent Upgrades
+
+Agents are skipped by default for safety. Enable with:
+
+```bash
+ansible-playbook playbooks/upgrade.yml -e "upgrade_agents=true"
+
+# Upgrade in smaller batches (default: 10)
+ansible-playbook playbooks/upgrade.yml -e "upgrade_agents=true" -e "agent_batch_size=5"
+```
+
+### Skip Confirmation Prompt
+
+```bash
+ansible-playbook playbooks/upgrade.yml -e "skip_confirmation=true"
+```
+
+### Upgrade Features
+
+- **Automatic backup** - Pre-upgrade backup created before any changes
+- **Version validation** - Validates version format and upgrade path (no downgrades)
+- **Major version warning** - Alerts when upgrading across major versions
+- **Rolling upgrades** - Cluster nodes upgraded one at a time
+- **Cluster-aware** - Manages shard allocation during indexer upgrades
+- **Post-upgrade validation** - Verifies all components are healthy after upgrade
+
+### Rollback After Failed Upgrade
+
+```bash
+# Restore from pre-upgrade backup
+ansible-playbook playbooks/restore.yml -e "restore_from=pre-upgrade-TIMESTAMP"
+
+# Or use the rollback script
+./scripts/deploy-with-rollback.sh --rollback
+```
+
+### Upgrade Order
+
+The playbook upgrades components in the correct order:
+1. Wazuh Indexer (one node at a time)
+2. Wazuh Manager (one node at a time)
+3. Filebeat (on managers)
+4. Wazuh Dashboard
+5. Wazuh Agents (batched)
 
 ## Post-Deployment Security Lockdown
 
@@ -502,11 +680,13 @@ wazuh_lockdown_deploy_user: false
 
 ## Security Recommendations
 
-- Store `credentials/` directory securely and restrict access
-- Use external CA certificates for production
+- **Back up `.vault_password`** - Required to decrypt credentials; store securely offline
+- Delete plaintext `credentials/` files after noting passwords
+- Use external CA certificates for production environments
 - Restrict network access to management ports
 - Enable audit logging on all nodes
-- Regularly review and rotate credentials
+- Regularly rotate credentials using `./scripts/manage-vault.sh rotate`
+- Monitor certificate expiration with `ansible-playbook playbooks/certificate-management.yml --tags check-expiry`
 - Monitor health check results
 - Maintain regular backups
 - Keep deployment user locked down between deployments

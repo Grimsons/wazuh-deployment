@@ -16,7 +16,7 @@
   tasks:
     - name: Set backup timestamp
       ansible.builtin.set_fact:
-        backup_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+        backup_timestamp: "{{ backup_timestamp | default(ansible_date_time.iso8601_basic_short) }}"
       run_once: true
 
     - name: Set backup destination
@@ -29,6 +29,18 @@
         path: "{{ backup_base_path }}/{{ backup_timestamp }}"
         state: directory
         mode: '0700'
+
+    - name: Save backup metadata
+      ansible.builtin.copy:
+        content: |
+          timestamp: {{ backup_timestamp }}
+          created: {{ ansible_date_time.iso8601 }}
+          type: {{ backup_type | default('manual') }}
+          indexer: {{ backup_indexer | default(true) }}
+          manager: {{ backup_manager | default(true) }}
+          dashboard: {{ backup_dashboard | default(true) }}
+        dest: "{{ backup_base_path }}/{{ backup_timestamp }}/metadata.yml"
+        mode: '0600'
 
 - name: Backup Wazuh Indexer
   hosts: wazuh_indexers

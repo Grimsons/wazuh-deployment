@@ -15,9 +15,10 @@ client-prep/
 wazuh-client-prep.tar.gz
 wazuh-client-prep.sh
 
-# Generated configuration files (may contain passwords)
+# Generated configuration files (may contain passwords/secrets)
 inventory/hosts.yml
 group_vars/all.yml
+group_vars/vault.yml
 ansible.cfg
 
 # Generated certificates (keep directory structure, ignore cert files)
@@ -25,6 +26,7 @@ files/certs/*.pem
 files/certs/*.crt
 files/certs/*.csr
 files/certs/*.srl
+files/certs/backup/
 /certs/
 *.crt
 *.csr
@@ -59,6 +61,9 @@ temp/
 
 # Backups created during deployment
 backups/
+
+# Rollback points
+rollback-points/
 
 # Python
 __pycache__/
