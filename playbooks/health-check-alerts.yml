@@ -1,0 +1,360 @@
+---
+# Wazuh Health Check with Alerting
+# Performs health checks and sends alerts when issues are detected
+#
+# Usage:
+#   ansible-playbook playbooks/health-check-alerts.yml
+#
+# Options:
+#   -e "alert_email=true"             - Send email alerts
+#   -e "alert_slack=true"             - Send Slack alerts
+#   -e "alert_webhook=true"           - Send webhook alerts
+#   -e "alert_file=true"              - Write alerts to file (for monitoring)
+#   -e "alert_on_warning=true"        - Also alert on warnings (not just critical)
+#
+# Configuration (in group_vars/all.yml):
+#   health_alert_email_to: "admin@example.com"
+#   health_alert_slack_webhook: "https://hooks.slack.com/..."
+#   health_alert_webhook_url: "https://your-monitoring-system/webhook"
+#   health_alert_file_path: "/var/log/wazuh-health-alerts.json"
+#
+# Cron setup (check every 5 minutes):
+#   */5 * * * * cd /path/to/wazuh-deployment && ansible-playbook playbooks/health-check-alerts.yml -e "alert_slack=true" >> /var/log/wazuh-health-cron.log 2>&1
+
+- name: Health Check with Alerting - Gather Data
+  hosts: wazuh_indexers:wazuh_managers:wazuh_dashboards
+  become: true
+  gather_facts: true
+  vars:
+    alert_threshold_disk_warning: 80
+    alert_threshold_disk_critical: 90
+    alert_threshold_memory_warning: 85
+    alert_threshold_memory_critical: 95
+
+  tasks:
+    # ═══════════════════════════════════════════════════════════════
+    # INDEXER CHECKS
+    # ═══════════════════════════════════════════════════════════════
+    - name: Check indexer service
+      ansible.builtin.systemd:
+        name: wazuh-indexer
+      register: indexer_service
+      failed_when: false
+      when: inventory_hostname in groups.get('wazuh_indexers', [])
+
+    - name: Check indexer cluster health
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health"
+        method: GET
+        user: "{{ wazuh_indexer_admin_user | default('admin') }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        return_content: true
+      register: cluster_health
+      failed_when: false
+      no_log: true
+      when: inventory_hostname in groups.get('wazuh_indexers', [])
+
+    - name: Check indexer disk usage
+      ansible.builtin.shell: df /var/lib/wazuh-indexer 2>/dev/null | tail -1 | awk '{print $5}' | tr -d '%'
+      register: indexer_disk
+      changed_when: false
+      failed_when: false
+      when: inventory_hostname in groups.get('wazuh_indexers', [])
+
+    - name: Set indexer health facts
+      ansible.builtin.set_fact:
+        indexer_health:
+          host: "{{ inventory_hostname }}"
+          service: "{{ indexer_service.status.ActiveState | default('unknown') }}"
+          cluster: "{{ cluster_health.json.status | default('unknown') }}"
+          disk_percent: "{{ indexer_disk.stdout | default('0') | int }}"
+          status: >-
+            {% if indexer_service.status.ActiveState | default('') != 'active' %}CRITICAL
+            {% elif cluster_health.json.status | default('') == 'red' %}CRITICAL
+            {% elif cluster_health.json.status | default('') == 'yellow' %}WARNING
+            {% elif indexer_disk.stdout | default('0') | int >= alert_threshold_disk_critical %}CRITICAL
+            {% elif indexer_disk.stdout | default('0') | int >= alert_threshold_disk_warning %}WARNING
+            {% else %}OK{% endif %}
+          issues: >-
+            {% set issues = [] %}
+            {% if indexer_service.status.ActiveState | default('') != 'active' %}{{ issues.append('Service not running') }}{% endif %}
+            {% if cluster_health.json.status | default('') == 'red' %}{{ issues.append('Cluster status RED') }}{% endif %}
+            {% if cluster_health.json.status | default('') == 'yellow' %}{{ issues.append('Cluster status YELLOW') }}{% endif %}
+            {% if indexer_disk.stdout | default('0') | int >= alert_threshold_disk_critical %}{{ issues.append('Disk usage critical: ' + indexer_disk.stdout + '%') }}{% endif %}
+            {% if indexer_disk.stdout | default('0') | int >= alert_threshold_disk_warning and indexer_disk.stdout | default('0') | int < alert_threshold_disk_critical %}{{ issues.append('Disk usage warning: ' + indexer_disk.stdout + '%') }}{% endif %}
+            {{ issues | join(', ') if issues else 'None' }}
+      when: inventory_hostname in groups.get('wazuh_indexers', [])
+
+    # ═══════════════════════════════════════════════════════════════
+    # MANAGER CHECKS
+    # ═══════════════════════════════════════════════════════════════
+    - name: Check manager service
+      ansible.builtin.systemd:
+        name: wazuh-manager
+      register: manager_service
+      failed_when: false
+      when: inventory_hostname in groups.get('wazuh_managers', [])
+
+    - name: Check filebeat service
+      ansible.builtin.systemd:
+        name: filebeat
+      register: filebeat_service
+      failed_when: false
+      when: inventory_hostname in groups.get('wazuh_managers', [])
+
+    - name: Check manager API
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:{{ wazuh_manager_api_port | default(55000) }}/"
+        method: GET
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        status_code: [200, 401]
+      register: manager_api
+      failed_when: false
+      when: inventory_hostname in groups.get('wazuh_managers', [])
+
+    - name: Check manager disk usage
+      ansible.builtin.shell: df /var/ossec 2>/dev/null | tail -1 | awk '{print $5}' | tr -d '%'
+      register: manager_disk
+      changed_when: false
+      failed_when: false
+      when: inventory_hostname in groups.get('wazuh_managers', [])
+
+    - name: Get agent connection stats
+      ansible.builtin.shell: |
+        /var/ossec/bin/agent_control -l 2>/dev/null | grep -c "Active" || echo "0"
+      register: active_agents
+      changed_when: false
+      failed_when: false
+      when: inventory_hostname in groups.get('wazuh_managers', [])
+
+    - name: Set manager health facts
+      ansible.builtin.set_fact:
+        manager_health:
+          host: "{{ inventory_hostname }}"
+          service: "{{ manager_service.status.ActiveState | default('unknown') }}"
+          filebeat: "{{ filebeat_service.status.ActiveState | default('unknown') }}"
+          api: "{{ 'up' if manager_api.status | default(0) in [200, 401] else 'down' }}"
+          disk_percent: "{{ manager_disk.stdout | default('0') | int }}"
+          active_agents: "{{ active_agents.stdout | default('0') | int }}"
+          status: >-
+            {% if manager_service.status.ActiveState | default('') != 'active' %}CRITICAL
+            {% elif filebeat_service.status.ActiveState | default('') != 'active' %}WARNING
+            {% elif manager_api.status | default(0) not in [200, 401] %}CRITICAL
+            {% elif manager_disk.stdout | default('0') | int >= alert_threshold_disk_critical %}CRITICAL
+            {% elif manager_disk.stdout | default('0') | int >= alert_threshold_disk_warning %}WARNING
+            {% else %}OK{% endif %}
+          issues: >-
+            {% set issues = [] %}
+            {% if manager_service.status.ActiveState | default('') != 'active' %}{{ issues.append('Manager service not running') }}{% endif %}
+            {% if filebeat_service.status.ActiveState | default('') != 'active' %}{{ issues.append('Filebeat not running') }}{% endif %}
+            {% if manager_api.status | default(0) not in [200, 401] %}{{ issues.append('API not responding') }}{% endif %}
+            {% if manager_disk.stdout | default('0') | int >= alert_threshold_disk_critical %}{{ issues.append('Disk usage critical: ' + manager_disk.stdout + '%') }}{% endif %}
+            {% if manager_disk.stdout | default('0') | int >= alert_threshold_disk_warning and manager_disk.stdout | default('0') | int < alert_threshold_disk_critical %}{{ issues.append('Disk usage warning: ' + manager_disk.stdout + '%') }}{% endif %}
+            {{ issues | join(', ') if issues else 'None' }}
+      when: inventory_hostname in groups.get('wazuh_managers', [])
+
+    # ═══════════════════════════════════════════════════════════════
+    # DASHBOARD CHECKS
+    # ═══════════════════════════════════════════════════════════════
+    - name: Check dashboard service
+      ansible.builtin.systemd:
+        name: wazuh-dashboard
+      register: dashboard_service
+      failed_when: false
+      when: inventory_hostname in groups.get('wazuh_dashboards', [])
+
+    - name: Check dashboard HTTP
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:{{ wazuh_dashboard_port | default(443) }}/api/status"
+        method: GET
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        status_code: [200, 401, 302]
+      register: dashboard_http
+      failed_when: false
+      when: inventory_hostname in groups.get('wazuh_dashboards', [])
+
+    - name: Check dashboard disk usage
+      ansible.builtin.shell: df /usr/share/wazuh-dashboard 2>/dev/null | tail -1 | awk '{print $5}' | tr -d '%'
+      register: dashboard_disk
+      changed_when: false
+      failed_when: false
+      when: inventory_hostname in groups.get('wazuh_dashboards', [])
+
+    - name: Set dashboard health facts
+      ansible.builtin.set_fact:
+        dashboard_health:
+          host: "{{ inventory_hostname }}"
+          service: "{{ dashboard_service.status.ActiveState | default('unknown') }}"
+          http: "{{ 'up' if dashboard_http.status | default(0) in [200, 401, 302] else 'down' }}"
+          disk_percent: "{{ dashboard_disk.stdout | default('0') | int }}"
+          status: >-
+            {% if dashboard_service.status.ActiveState | default('') != 'active' %}CRITICAL
+            {% elif dashboard_http.status | default(0) not in [200, 401, 302] %}CRITICAL
+            {% elif dashboard_disk.stdout | default('0') | int >= alert_threshold_disk_critical %}CRITICAL
+            {% elif dashboard_disk.stdout | default('0') | int >= alert_threshold_disk_warning %}WARNING
+            {% else %}OK{% endif %}
+          issues: >-
+            {% set issues = [] %}
+            {% if dashboard_service.status.ActiveState | default('') != 'active' %}{{ issues.append('Dashboard service not running') }}{% endif %}
+            {% if dashboard_http.status | default(0) not in [200, 401, 302] %}{{ issues.append('Dashboard HTTP not responding') }}{% endif %}
+            {% if dashboard_disk.stdout | default('0') | int >= alert_threshold_disk_critical %}{{ issues.append('Disk usage critical: ' + dashboard_disk.stdout + '%') }}{% endif %}
+            {% if dashboard_disk.stdout | default('0') | int >= alert_threshold_disk_warning and dashboard_disk.stdout | default('0') | int < alert_threshold_disk_critical %}{{ issues.append('Disk usage warning: ' + dashboard_disk.stdout + '%') }}{% endif %}
+            {{ issues | join(', ') if issues else 'None' }}
+      when: inventory_hostname in groups.get('wazuh_dashboards', [])
+
+# ═══════════════════════════════════════════════════════════════
+# ALERTING
+# ═══════════════════════════════════════════════════════════════
+- name: Health Check with Alerting - Send Alerts
+  hosts: localhost
+  gather_facts: true
+  vars:
+    alert_on_warning: "{{ alert_on_warning | default(false) }}"
+    alert_email: "{{ alert_email | default(false) }}"
+    alert_slack: "{{ alert_slack | default(false) }}"
+    alert_webhook: "{{ alert_webhook | default(false) }}"
+    alert_file: "{{ alert_file | default(false) }}"
+
+  tasks:
+    - name: Collect all health data
+      ansible.builtin.set_fact:
+        all_health_data:
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+          indexers: "{{ groups['wazuh_indexers'] | map('extract', hostvars, 'indexer_health') | select('defined') | list }}"
+          managers: "{{ groups['wazuh_managers'] | map('extract', hostvars, 'manager_health') | select('defined') | list }}"
+          dashboards: "{{ groups['wazuh_dashboards'] | map('extract', hostvars, 'dashboard_health') | select('defined') | list }}"
+
+    - name: Determine if alerting is needed
+      ansible.builtin.set_fact:
+        has_critical: "{{ (all_health_data.indexers | selectattr('status', 'equalto', 'CRITICAL') | list | length > 0) or
+                         (all_health_data.managers | selectattr('status', 'equalto', 'CRITICAL') | list | length > 0) or
+                         (all_health_data.dashboards | selectattr('status', 'equalto', 'CRITICAL') | list | length > 0) }}"
+        has_warning: "{{ (all_health_data.indexers | selectattr('status', 'equalto', 'WARNING') | list | length > 0) or
+                        (all_health_data.managers | selectattr('status', 'equalto', 'WARNING') | list | length > 0) or
+                        (all_health_data.dashboards | selectattr('status', 'equalto', 'WARNING') | list | length > 0) }}"
+
+    - name: Determine alert level
+      ansible.builtin.set_fact:
+        alert_level: "{{ 'CRITICAL' if has_critical else ('WARNING' if has_warning else 'OK') }}"
+        should_alert: "{{ has_critical or (has_warning and alert_on_warning | bool) }}"
+
+    - name: Build alert message
+      ansible.builtin.set_fact:
+        alert_message: |
+          Wazuh Health Check Alert - {{ alert_level }}
+          Timestamp: {{ all_health_data.timestamp }}
+
+          INDEXERS:
+          {% for idx in all_health_data.indexers %}
+          - {{ idx.host }}: {{ idx.status }} {% if idx.issues != 'None' %}({{ idx.issues }}){% endif %}
+
+          {% endfor %}
+
+          MANAGERS:
+          {% for mgr in all_health_data.managers %}
+          - {{ mgr.host }}: {{ mgr.status }} {% if mgr.issues != 'None' %}({{ mgr.issues }}){% endif %}
+
+          {% endfor %}
+
+          DASHBOARDS:
+          {% for dash in all_health_data.dashboards %}
+          - {{ dash.host }}: {{ dash.status }} {% if dash.issues != 'None' %}({{ dash.issues }}){% endif %}
+
+          {% endfor %}
+      when: should_alert
+
+    - name: Display health summary
+      ansible.builtin.debug:
+        msg: |
+          ══════════════════════════════════════════════════════════════
+          WAZUH HEALTH CHECK - {{ alert_level }}
+          ══════════════════════════════════════════════════════════════
+          {{ alert_message | default('All systems operational') }}
+          ══════════════════════════════════════════════════════════════
+
+    # SLACK ALERTING
+    - name: Send Slack alert
+      ansible.builtin.uri:
+        url: "{{ health_alert_slack_webhook | default(wazuh_integrations | selectattr('name', 'equalto', 'slack') | map(attribute='hook_url') | first | default('')) }}"
+        method: POST
+        body_format: json
+        body:
+          text: "{{ alert_message }}"
+          attachments:
+            - color: "{{ 'danger' if alert_level == 'CRITICAL' else 'warning' }}"
+              title: "Wazuh Health Alert - {{ alert_level }}"
+              fields:
+                - title: "Timestamp"
+                  value: "{{ all_health_data.timestamp }}"
+                  short: true
+                - title: "Status"
+                  value: "{{ alert_level }}"
+                  short: true
+        status_code: [200]
+      when:
+        - should_alert
+        - alert_slack | bool
+        - health_alert_slack_webhook is defined or (wazuh_integrations | selectattr('name', 'equalto', 'slack') | list | length > 0)
+      failed_when: false
+
+    # WEBHOOK ALERTING
+    - name: Send webhook alert
+      ansible.builtin.uri:
+        url: "{{ health_alert_webhook_url }}"
+        method: POST
+        body_format: json
+        body:
+          alert_type: "wazuh_health_check"
+          level: "{{ alert_level }}"
+          timestamp: "{{ all_health_data.timestamp }}"
+          data: "{{ all_health_data }}"
+          message: "{{ alert_message }}"
+        status_code: [200, 201, 202, 204]
+      when:
+        - should_alert
+        - alert_webhook | bool
+        - health_alert_webhook_url is defined
+      failed_when: false
+
+    # FILE-BASED ALERTING (for monitoring systems)
+    - name: Write alert to file
+      ansible.builtin.copy:
+        content: |
+          {{ {
+            'timestamp': all_health_data.timestamp,
+            'level': alert_level,
+            'critical': has_critical,
+            'warning': has_warning,
+            'indexers': all_health_data.indexers,
+            'managers': all_health_data.managers,
+            'dashboards': all_health_data.dashboards
+          } | to_nice_json }}
+        dest: "{{ health_alert_file_path | default(playbook_dir + '/../logs/health-check-latest.json') }}"
+        mode: '0644'
+      when: alert_file | bool
+      delegate_to: localhost
+
+    # EMAIL ALERTING
+    - name: Send email alert
+      community.general.mail:
+        host: "{{ health_alert_smtp_server | default(wazuh_email_smtp_server | default('localhost')) }}"
+        port: "{{ health_alert_smtp_port | default(25) }}"
+        to: "{{ health_alert_email_to | default(wazuh_email_to | default('root@localhost')) }}"
+        from: "{{ health_alert_email_from | default(wazuh_email_from | default('wazuh-health@localhost')) }}"
+        subject: "[{{ alert_level }}] Wazuh Health Check Alert"
+        body: "{{ alert_message }}"
+      when:
+        - should_alert
+        - alert_email | bool
+        - health_alert_email_to is defined or wazuh_email_to is defined
+      failed_when: false
+
+    - name: Final status
+      ansible.builtin.debug:
+        msg: |
+          ══════════════════════════════════════════════════════════════
+          Health check complete.
+          Status: {{ alert_level }}
+          Alerts sent: {{ 'Yes' if should_alert else 'No (all OK)' }}
+          ══════════════════════════════════════════════════════════════

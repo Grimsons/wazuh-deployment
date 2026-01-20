@@ -15,6 +15,81 @@
 #   - Package manager access
 #   - Certificate validity (for upgrades)
 
+- name: Pre-Flight Checks - Control Node Validation
+  hosts: localhost
+  gather_facts: true
+  tags: [always, control]
+  vars:
+    min_ansible_version: "2.12.0"
+
+  tasks:
+    - name: Check Ansible version
+      ansible.builtin.assert:
+        that:
+          - ansible_version.full is version(min_ansible_version, '>=')
+        fail_msg: "Ansible {{ min_ansible_version }}+ required. Found: {{ ansible_version.full }}"
+        success_msg: "Ansible version {{ ansible_version.full }} OK"
+
+    - name: Check required files exist
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      loop:
+        - { path: "{{ playbook_dir }}/../inventory/hosts.yml", name: "Inventory" }
+        - { path: "{{ playbook_dir }}/../group_vars/all.yml", name: "Variables" }
+        - { path: "{{ playbook_dir }}/../ansible.cfg", name: "Ansible config" }
+      register: required_files
+
+    - name: Fail if required files missing
+      ansible.builtin.fail:
+        msg: "Missing required file: {{ item.item.name }} ({{ item.item.path }}). Run ./setup.sh first."
+      loop: "{{ required_files.results }}"
+      when: not item.stat.exists
+
+    - name: Check vault password file
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../.vault_password"
+      register: vault_password_file
+
+    - name: Warn if vault password missing
+      ansible.builtin.debug:
+        msg: "WARNING: Vault password file not found. Credentials may not be encrypted."
+      when: not vault_password_file.stat.exists
+
+    - name: Check certificates directory
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../files/certs/root-ca.pem"
+      register: root_ca_file
+
+    - name: Fail if certificates missing
+      ansible.builtin.fail:
+        msg: "SSL certificates not found! Run './generate-certs.sh' or provide certificates in files/certs/"
+      when: not root_ca_file.stat.exists
+
+    - name: Check certificate expiration
+      ansible.builtin.shell: |
+        openssl x509 -in "{{ playbook_dir }}/../files/certs/root-ca.pem" -noout -checkend 2592000
+      register: cert_expiry_check
+      failed_when: false
+      changed_when: false
+
+    - name: Warn if certificates expiring soon
+      ansible.builtin.debug:
+        msg: "WARNING: Root CA certificate expires within 30 days! Run certificate rotation."
+      when: cert_expiry_check.rc != 0
+
+    - name: Display control node validation
+      ansible.builtin.debug:
+        msg: |
+          ══════════════════════════════════════════════════════════
+          Control Node Validation: PASSED
+          ══════════════════════════════════════════════════════════
+          Ansible: {{ ansible_version.full }} ✓
+          Inventory: {{ '✓' if required_files.results[0].stat.exists else '✗' }}
+          Variables: {{ '✓' if required_files.results[1].stat.exists else '✗' }}
+          Certificates: {{ '✓' if root_ca_file.stat.exists else '✗' }}
+          Vault Password: {{ '✓' if vault_password_file.stat.exists else '⚠ (unencrypted)' }}
+          ══════════════════════════════════════════════════════════
+
 - name: Pre-Flight Checks - Gather Facts
   hosts: all
   gather_facts: true

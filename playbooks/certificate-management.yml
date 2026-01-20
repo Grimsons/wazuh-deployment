@@ -1,0 +1,429 @@
+---
+# Wazuh Certificate Management Playbook
+# Handles certificate validation, rotation, and renewal for both self-signed and external CAs
+#
+# Usage:
+#   Validate certificates:
+#     ansible-playbook playbooks/certificate-management.yml --tags validate
+#
+#   Rotate certificates (self-signed):
+#     ansible-playbook playbooks/certificate-management.yml --tags rotate
+#
+#   Rotate certificates (external CA - provide new certs in files/certs/):
+#     ansible-playbook playbooks/certificate-management.yml --tags rotate -e "external_ca=true"
+#
+#   Check certificate expiration:
+#     ansible-playbook playbooks/certificate-management.yml --tags check-expiry
+#
+#   Renew expiring certificates (within 30 days):
+#     ansible-playbook playbooks/certificate-management.yml --tags renew
+
+- name: Wazuh Certificate Management
+  hosts: localhost
+  gather_facts: true
+  vars:
+    cert_dir: "{{ playbook_dir }}/../files/certs"
+    backup_dir: "{{ playbook_dir }}/../files/certs/backup"
+    cert_validity_days: 3650
+    cert_renewal_threshold_days: 30
+    external_ca: false
+
+  tasks:
+    # ═══════════════════════════════════════════════════════════════
+    # CERTIFICATE VALIDATION
+    # ═══════════════════════════════════════════════════════════════
+
+    - name: Validate - Check certificate directory exists
+      ansible.builtin.stat:
+        path: "{{ cert_dir }}"
+      register: cert_dir_stat
+      tags: [validate, check-expiry, rotate, renew]
+
+    - name: Validate - Fail if certificate directory missing
+      ansible.builtin.fail:
+        msg: "Certificate directory not found: {{ cert_dir }}. Run ./generate-certs.sh first."
+      when: not cert_dir_stat.stat.exists
+      tags: [validate, check-expiry, rotate, renew]
+
+    - name: Validate - Check root CA exists
+      ansible.builtin.stat:
+        path: "{{ cert_dir }}/root-ca.pem"
+      register: root_ca_stat
+      tags: [validate, check-expiry]
+
+    - name: Validate - Check root CA key exists
+      ansible.builtin.stat:
+        path: "{{ cert_dir }}/root-ca-key.pem"
+      register: root_ca_key_stat
+      tags: [validate]
+
+    - name: Validate - Fail if root CA missing
+      ansible.builtin.fail:
+        msg: "Root CA certificate not found: {{ cert_dir }}/root-ca.pem"
+      when: not root_ca_stat.stat.exists
+      tags: [validate]
+
+    - name: Validate - Get root CA info
+      ansible.builtin.command:
+        cmd: openssl x509 -in "{{ cert_dir }}/root-ca.pem" -noout -subject -issuer -dates
+      register: root_ca_info
+      changed_when: false
+      tags: [validate, check-expiry]
+
+    - name: Validate - Display root CA info
+      ansible.builtin.debug:
+        msg: |
+          Root CA Certificate:
+          {{ root_ca_info.stdout }}
+      tags: [validate]
+
+    - name: Validate - Find all certificates
+      ansible.builtin.find:
+        paths: "{{ cert_dir }}"
+        patterns: "*.pem"
+        excludes:
+          - "*-key.pem"
+          - "root-ca.pem"
+      register: cert_files
+      tags: [validate, check-expiry]
+
+    - name: Validate - Check each certificate
+      ansible.builtin.shell: |
+        cert="{{ item.path }}"
+        key="${cert%-pem}-key.pem"
+        key="${cert%.pem}-key.pem"
+
+        echo "=== Certificate: $(basename $cert) ==="
+
+        # Check certificate info
+        openssl x509 -in "$cert" -noout -subject -dates 2>/dev/null || echo "ERROR: Invalid certificate"
+
+        # Check if certificate is signed by our CA
+        if openssl verify -CAfile "{{ cert_dir }}/root-ca.pem" "$cert" 2>/dev/null | grep -q "OK"; then
+          echo "Chain: Valid (signed by Root CA)"
+        else
+          echo "Chain: WARNING - Not signed by Root CA"
+        fi
+
+        # Check key matches certificate
+        if [ -f "$key" ]; then
+          cert_mod=$(openssl x509 -in "$cert" -noout -modulus 2>/dev/null | md5sum)
+          key_mod=$(openssl rsa -in "$key" -noout -modulus 2>/dev/null | md5sum)
+          if [ "$cert_mod" = "$key_mod" ]; then
+            echo "Key Match: Valid"
+          else
+            echo "Key Match: ERROR - Key does not match certificate!"
+          fi
+        else
+          echo "Key Match: WARNING - Key file not found"
+        fi
+        echo ""
+      loop: "{{ cert_files.files }}"
+      register: cert_validation
+      changed_when: false
+      tags: [validate]
+
+    - name: Validate - Display validation results
+      ansible.builtin.debug:
+        msg: "{{ item.stdout }}"
+      loop: "{{ cert_validation.results }}"
+      loop_control:
+        label: "{{ item.item.path | basename }}"
+      tags: [validate]
+
+    # ═══════════════════════════════════════════════════════════════
+    # CERTIFICATE EXPIRY CHECK
+    # ═══════════════════════════════════════════════════════════════
+
+    - name: Check Expiry - Get expiration dates for all certificates
+      ansible.builtin.shell: |
+        for cert in {{ cert_dir }}/*.pem; do
+          [ -f "$cert" ] || continue
+          [[ "$cert" == *"-key.pem" ]] && continue
+
+          name=$(basename "$cert")
+          expiry=$(openssl x509 -in "$cert" -noout -enddate 2>/dev/null | cut -d= -f2)
+          expiry_epoch=$(date -d "$expiry" +%s 2>/dev/null || echo "0")
+          now_epoch=$(date +%s)
+          days_left=$(( (expiry_epoch - now_epoch) / 86400 ))
+
+          if [ $days_left -lt 0 ]; then
+            status="EXPIRED"
+          elif [ $days_left -lt {{ cert_renewal_threshold_days }} ]; then
+            status="EXPIRING SOON"
+          else
+            status="OK"
+          fi
+
+          echo "$name|$expiry|$days_left|$status"
+        done
+      register: cert_expiry_raw
+      changed_when: false
+      tags: [check-expiry, renew]
+
+    - name: Check Expiry - Parse results
+      ansible.builtin.set_fact:
+        cert_expiry_info: "{{ cert_expiry_info | default([]) + [{'name': item.split('|')[0], 'expiry': item.split('|')[1], 'days_left': item.split('|')[2] | int, 'status': item.split('|')[3]}] }}"
+      loop: "{{ cert_expiry_raw.stdout_lines }}"
+      when: item | length > 0
+      tags: [check-expiry, renew]
+
+    - name: Check Expiry - Display certificate expiration status
+      ansible.builtin.debug:
+        msg: |
+          Certificate Expiration Status:
+          ══════════════════════════════════════════════════════════
+          {% for cert in cert_expiry_info | default([]) %}
+          {{ cert.name }}: {{ cert.status }} ({{ cert.days_left }} days remaining)
+            Expires: {{ cert.expiry }}
+          {% endfor %}
+          ══════════════════════════════════════════════════════════
+      tags: [check-expiry]
+
+    - name: Check Expiry - Warn about expiring certificates
+      ansible.builtin.debug:
+        msg: "WARNING: {{ item.name }} expires in {{ item.days_left }} days!"
+      loop: "{{ cert_expiry_info | default([]) }}"
+      when: item.days_left < cert_renewal_threshold_days
+      tags: [check-expiry]
+
+    # ═══════════════════════════════════════════════════════════════
+    # CERTIFICATE ROTATION/RENEWAL
+    # ═══════════════════════════════════════════════════════════════
+
+    - name: Rotate - Create backup directory
+      ansible.builtin.file:
+        path: "{{ backup_dir }}/{{ ansible_date_time.iso8601_basic_short }}"
+        state: directory
+        mode: '0700'
+      register: backup_created
+      tags: [rotate, renew]
+
+    - name: Rotate - Backup existing certificates
+      ansible.builtin.copy:
+        src: "{{ cert_dir }}/"
+        dest: "{{ backup_created.path }}/"
+        remote_src: true
+        mode: preserve
+      tags: [rotate, renew]
+
+    - name: Rotate - Display backup location
+      ansible.builtin.debug:
+        msg: "Certificates backed up to: {{ backup_created.path }}"
+      tags: [rotate, renew]
+
+    # Self-signed rotation
+    - name: Rotate (Self-Signed) - Regenerate certificates
+      ansible.builtin.command:
+        cmd: "{{ playbook_dir }}/../generate-certs.sh"
+        chdir: "{{ playbook_dir }}/.."
+      when: not external_ca | bool
+      register: cert_generation
+      tags: [rotate]
+
+    - name: Rotate (Self-Signed) - Display generation results
+      ansible.builtin.debug:
+        msg: "{{ cert_generation.stdout }}"
+      when: not external_ca | bool
+      tags: [rotate]
+
+    # External CA rotation
+    - name: Rotate (External CA) - Validate new certificates exist
+      ansible.builtin.stat:
+        path: "{{ cert_dir }}/{{ item }}"
+      loop:
+        - root-ca.pem
+        - admin.pem
+        - admin-key.pem
+      register: external_cert_check
+      when: external_ca | bool
+      tags: [rotate]
+
+    - name: Rotate (External CA) - Fail if certificates missing
+      ansible.builtin.fail:
+        msg: |
+          External CA mode requires you to place new certificates in {{ cert_dir }}/ before running rotation.
+          Missing: {{ item.item }}
+      loop: "{{ external_cert_check.results | default([]) }}"
+      when:
+        - external_ca | bool
+        - not item.stat.exists
+      tags: [rotate]
+
+    - name: Rotate (External CA) - Validate certificate chain
+      ansible.builtin.command:
+        cmd: openssl verify -CAfile "{{ cert_dir }}/root-ca.pem" "{{ cert_dir }}/{{ item }}"
+      loop:
+        - admin.pem
+      register: chain_validation
+      when: external_ca | bool
+      changed_when: false
+      failed_when: "'OK' not in chain_validation.stdout"
+      tags: [rotate]
+
+    # Renewal (only renew expiring certs)
+    - name: Renew - Identify certificates needing renewal
+      ansible.builtin.set_fact:
+        certs_to_renew: "{{ cert_expiry_info | default([]) | selectattr('days_left', 'lt', cert_renewal_threshold_days) | list }}"
+      tags: [renew]
+
+    - name: Renew - Display certificates to renew
+      ansible.builtin.debug:
+        msg: |
+          Certificates to renew:
+          {% for cert in certs_to_renew %}
+          - {{ cert.name }} (expires in {{ cert.days_left }} days)
+          {% endfor %}
+      when: certs_to_renew | length > 0
+      tags: [renew]
+
+    - name: Renew - No certificates need renewal
+      ansible.builtin.debug:
+        msg: "No certificates expire within {{ cert_renewal_threshold_days }} days. No renewal needed."
+      when: certs_to_renew | length == 0
+      tags: [renew]
+
+    - name: Renew - Regenerate expiring certificates
+      ansible.builtin.command:
+        cmd: "{{ playbook_dir }}/../generate-certs.sh"
+        chdir: "{{ playbook_dir }}/.."
+      when:
+        - certs_to_renew | length > 0
+        - not external_ca | bool
+      tags: [renew]
+
+# ═══════════════════════════════════════════════════════════════
+# DEPLOY ROTATED CERTIFICATES TO HOSTS
+# ═══════════════════════════════════════════════════════════════
+
+- name: Deploy Rotated Certificates to Indexers
+  hosts: wazuh_indexers
+  become: true
+  gather_facts: true
+  vars:
+    cert_dir: "{{ playbook_dir }}/../files/certs"
+  tags: [rotate, renew, deploy]
+
+  tasks:
+    - name: Deploy certs to indexer
+      ansible.builtin.include_role:
+        name: wazuh-indexer
+        tasks_from: certificates.yml
+
+    - name: Restart indexer to apply new certificates
+      ansible.builtin.systemd:
+        name: wazuh-indexer
+        state: restarted
+      register: indexer_restart
+
+    - name: Wait for indexer to be ready
+      ansible.builtin.wait_for:
+        port: "{{ wazuh_indexer_http_port | default(9200) }}"
+        host: "{{ ansible_default_ipv4.address }}"
+        delay: 10
+        timeout: 120
+
+- name: Deploy Rotated Certificates to Managers
+  hosts: wazuh_managers
+  become: true
+  gather_facts: true
+  vars:
+    cert_dir: "{{ playbook_dir }}/../files/certs"
+  tags: [rotate, renew, deploy]
+
+  tasks:
+    - name: Deploy certs to manager
+      ansible.builtin.include_role:
+        name: wazuh-manager
+        tasks_from: certificates.yml
+
+    - name: Restart manager to apply new certificates
+      ansible.builtin.systemd:
+        name: wazuh-manager
+        state: restarted
+      register: manager_restart
+
+    - name: Wait for manager to be ready
+      ansible.builtin.wait_for:
+        port: 1514
+        host: "{{ ansible_default_ipv4.address }}"
+        delay: 10
+        timeout: 120
+
+- name: Deploy Rotated Certificates to Dashboards
+  hosts: wazuh_dashboards
+  become: true
+  gather_facts: true
+  vars:
+    cert_dir: "{{ playbook_dir }}/../files/certs"
+  tags: [rotate, renew, deploy]
+
+  tasks:
+    - name: Deploy certs to dashboard
+      ansible.builtin.include_role:
+        name: wazuh-dashboard
+        tasks_from: certificates.yml
+
+    - name: Restart dashboard to apply new certificates
+      ansible.builtin.systemd:
+        name: wazuh-dashboard
+        state: restarted
+      register: dashboard_restart
+
+    - name: Wait for dashboard to be ready
+      ansible.builtin.wait_for:
+        port: "{{ wazuh_dashboard_port | default(443) }}"
+        host: "{{ ansible_default_ipv4.address }}"
+        delay: 10
+        timeout: 120
+
+# ═══════════════════════════════════════════════════════════════
+# POST-ROTATION VALIDATION
+# ═══════════════════════════════════════════════════════════════
+
+- name: Validate Certificate Rotation
+  hosts: localhost
+  gather_facts: false
+  tags: [rotate, renew, deploy]
+
+  tasks:
+    - name: Wait for services to stabilize
+      ansible.builtin.pause:
+        seconds: 15
+
+    - name: Validate indexer connectivity
+      ansible.builtin.uri:
+        url: "https://{{ hostvars[groups['wazuh_indexers'][0]]['ansible_host'] | default(groups['wazuh_indexers'][0]) }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health"
+        method: GET
+        user: "{{ wazuh_indexer_admin_user | default('admin') }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: false
+        status_code: [200]
+      register: indexer_health
+      ignore_errors: true
+
+    - name: Validate dashboard connectivity
+      ansible.builtin.uri:
+        url: "https://{{ hostvars[groups['wazuh_dashboards'][0]]['ansible_host'] | default(groups['wazuh_dashboards'][0]) }}:{{ wazuh_dashboard_port | default(443) }}/api/status"
+        method: GET
+        validate_certs: false
+        status_code: [200, 401]
+      register: dashboard_health
+      ignore_errors: true
+
+    - name: Display rotation results
+      ansible.builtin.debug:
+        msg: |
+          ══════════════════════════════════════════════════════════
+          Certificate Rotation Complete
+          ══════════════════════════════════════════════════════════
+          Indexer Status: {{ 'OK' if indexer_health.status | default(0) == 200 else 'Check manually' }}
+          Dashboard Status: {{ 'OK' if dashboard_health.status | default(0) in [200, 401] else 'Check manually' }}
+
+          Backup Location: {{ playbook_dir }}/../files/certs/backup/
+
+          If services are not responding:
+          1. Check service logs
+          2. Restore from backup: cp -r backup/TIMESTAMP/* ../files/certs/
+          3. Re-run deployment: ansible-playbook site.yml
+          ══════════════════════════════════════════════════════════

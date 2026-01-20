@@ -4,15 +4,43 @@ This document covers security features and best practices specific to this Wazuh
 
 ## Credential Management
 
+### Ansible Vault (Default)
+
+All credentials are encrypted using Ansible Vault by default:
+
+| File | Purpose |
+|------|---------|
+| `.vault_password` | Encryption key for Ansible Vault (KEEP SECURE!) |
+| `group_vars/vault.yml` | Encrypted credentials storage |
+| `credentials/*.txt` | Plaintext copies (delete after noting) |
+
+### Vault Management Commands
+
+```bash
+# View current credentials
+./scripts/manage-vault.sh view
+
+# Edit credentials
+./scripts/manage-vault.sh edit
+
+# Rotate all credentials
+./scripts/manage-vault.sh rotate
+
+# Change vault encryption password
+./scripts/manage-vault.sh rekey
+```
+
 ### Auto-Generated Credentials
 
-All passwords are automatically generated during deployment with the following characteristics:
-- 22+ characters length
+All passwords are automatically generated with the following characteristics:
+- 24+ characters length
 - Mix of uppercase, lowercase, numbers, and symbols
 - Compliant with Wazuh's password requirements
-- Stored in `credentials/` directory with mode 0600
+- Stored encrypted in Ansible Vault
 
-### Credential Files
+### Credential Files (Plaintext Copies)
+
+For convenience, plaintext copies are saved during setup:
 
 | File | Purpose |
 |------|---------|
@@ -20,12 +48,64 @@ All passwords are automatically generated during deployment with the following c
 | `credentials/api_password.txt` | Wazuh API authentication |
 | `credentials/agent_enrollment_password.txt` | Agent enrollment authentication |
 
+**Security Note**: Delete these plaintext files after noting the passwords. The encrypted `group_vars/vault.yml` is the authoritative source.
+
 ### Best Practices
 
-1. **Secure storage**: Keep `credentials/` directory on encrypted storage
-2. **Access control**: Restrict access to deployment host
-3. **Rotation**: Rotate credentials periodically (requires redeployment)
-4. **Backup**: Include credentials in secure backups
+1. **Back up `.vault_password`**: Store this file securely offline - you cannot decrypt credentials without it
+2. **Delete plaintext credentials**: Remove `credentials/*.txt` after initial setup
+3. **Access control**: Restrict access to deployment host and vault password
+4. **Rotation**: Rotate credentials periodically using `./scripts/manage-vault.sh rotate`
+5. **Rekey periodically**: Change the vault encryption password with `./scripts/manage-vault.sh rekey`
+
+## Certificate Management
+
+### Self-Signed vs External CA
+
+The deployment supports two certificate modes:
+
+| Mode | Use Case | Configuration |
+|------|----------|---------------|
+| Self-Signed (default) | Development, testing, small deployments | Auto-generated during setup |
+| External CA | Production, enterprise environments | User-provided certificates |
+
+### Certificate Management Playbook
+
+```bash
+# Check certificate expiration
+ansible-playbook playbooks/certificate-management.yml --tags check-expiry
+
+# Validate certificates
+ansible-playbook playbooks/certificate-management.yml --tags validate
+
+# Rotate certificates (self-signed)
+ansible-playbook playbooks/certificate-management.yml --tags rotate
+
+# Rotate certificates (external CA)
+ansible-playbook playbooks/certificate-management.yml --tags rotate -e "external_ca=true"
+
+# Renew expiring certificates (within 30 days)
+ansible-playbook playbooks/certificate-management.yml --tags renew
+```
+
+### External CA Requirements
+
+When using external CA certificates, place them in `files/certs/`:
+
+| File | Purpose |
+|------|---------|
+| `root-ca.pem` | Root CA certificate |
+| `root-ca-key.pem` | Root CA private key (optional, needed for renewal) |
+| `admin.pem`, `admin-key.pem` | Admin certificate for indexer operations |
+| `indexer-N.pem`, `indexer-N-key.pem` | Indexer node certificates |
+| `manager-N.pem`, `manager-N-key.pem` | Manager node certificates |
+| `dashboard.pem`, `dashboard-key.pem` | Dashboard certificate |
+
+Certificates must include proper Subject Alternative Names (SANs) for all hostnames and IP addresses.
+
+### Certificate Backup
+
+Certificate backups are automatically created before rotation in `files/certs/backup/TIMESTAMP/`.
 
 ## Post-Deployment User Lockdown
 
@@ -225,6 +305,7 @@ Wazuh includes rules and dashboards for:
 ### Pre-Deployment
 
 - [ ] Secure control node with encryption and access controls
+- [ ] Back up `.vault_password` file securely (offline storage recommended)
 - [ ] Generate certificates (done automatically by setup.sh)
 - [ ] Review `group_vars/all.yml` security settings
 - [ ] Plan network segmentation
@@ -237,12 +318,15 @@ Wazuh includes rules and dashboards for:
 - [ ] Verify dashboard access with correct credentials
 - [ ] Check audit logging is active
 - [ ] Test backup and restore procedures
+- [ ] Delete plaintext `credentials/*.txt` files after noting passwords
 
 ### Ongoing
 
 - [ ] Monitor health check results
 - [ ] Review security alerts daily
-- [ ] Rotate credentials periodically
+- [ ] Rotate credentials periodically (`./scripts/manage-vault.sh rotate`)
+- [ ] Monitor certificate expiration (`ansible-playbook playbooks/certificate-management.yml --tags check-expiry`)
 - [ ] Keep Wazuh version updated
 - [ ] Review and update firewall rules
 - [ ] Test disaster recovery procedures
+- [ ] Periodically rekey vault password (`./scripts/manage-vault.sh rekey`)

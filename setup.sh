@@ -379,19 +379,48 @@ main() {
     INDEXER_ADMIN_USER="admin"
 
     # ═══════════════════════════════════════════════════════════════
+    # SECRETS MANAGEMENT (ANSIBLE VAULT)
+    # ═══════════════════════════════════════════════════════════════
+    print_section "Secrets Management (Ansible Vault)"
+
+    print_info "Ansible Vault encrypts sensitive data like passwords and keys."
+    print_info "This is the recommended secure approach for credential management."
+    echo
+
+    # Vault is enabled by default for security
+    USE_VAULT="true"
+    print_success "Ansible Vault will be used for credential encryption"
+    print_info "Vault password will be stored in: .vault_password"
+    print_info "Encrypted credentials will be in: group_vars/vault.yml"
+
+    # ═══════════════════════════════════════════════════════════════
     # SSL/TLS CONFIGURATION
     # ═══════════════════════════════════════════════════════════════
     print_section "SSL/TLS Configuration"
 
-    print_info "Certificates are stored locally in ./files/certs/ and deployed to targets"
+    print_info "Wazuh requires TLS certificates for secure communication."
+    print_info "You can use self-signed certificates or your own CA certificates."
     echo
 
-    prompt_yes_no "Generate self-signed certificates?" "yes" "GENERATE_CERTS"
+    prompt_yes_no "Use self-signed certificates? (No = provide your own)" "yes" "USE_SELF_SIGNED_CERTS"
 
-    if [ "$GENERATE_CERTS" = "false" ]; then
-        print_info "You will need to provide your own certificates in ./files/certs/"
-        print_info "Required files: root-ca.pem, root-ca-key.pem, admin.pem, admin-key.pem"
-        print_info "Plus certificates for each node (indexer.pem, manager.pem, dashboard.pem, etc.)"
+    if [ "$USE_SELF_SIGNED_CERTS" = "true" ]; then
+        GENERATE_CERTS="true"
+        EXTERNAL_CA="false"
+        print_info "Self-signed certificates will be generated automatically"
+    else
+        GENERATE_CERTS="false"
+        EXTERNAL_CA="true"
+        echo
+        print_info "External CA mode: You must provide certificates in ./files/certs/"
+        print_info "Required files:"
+        print_info "  - root-ca.pem, root-ca-key.pem (Root CA)"
+        print_info "  - admin.pem, admin-key.pem (Admin certificate)"
+        print_info "  - indexer-N.pem, indexer-N-key.pem (Indexer nodes)"
+        print_info "  - manager-N.pem, manager-N-key.pem (Manager nodes)"
+        print_info "  - dashboard.pem, dashboard-key.pem (Dashboard)"
+        echo
+        print_warning "Ensure your certificates include proper SANs for all hostnames/IPs"
     fi
 
     # ═══════════════════════════════════════════════════════════════
@@ -776,6 +805,9 @@ EOF
 # SSL/TLS Configuration
 # ═══════════════════════════════════════════════════════════════
 
+# Certificate type: self-signed or external CA
+wazuh_use_external_ca: ${EXTERNAL_CA:-false}
+
 # Local path where certificates are stored (source for Ansible copy)
 wazuh_certs_path: "files/certs"
 
@@ -783,6 +815,10 @@ wazuh_certs_path: "files/certs"
 wazuh_indexer_certs_path: /etc/wazuh-indexer/certs
 wazuh_manager_certs_path: /var/ossec/etc/certs
 wazuh_dashboard_certs_path: /etc/wazuh-dashboard/certs
+
+# SSL certificate verification (set to false for self-signed certs)
+# For external CA with proper chain, set to true
+wazuh_ssl_verify_certificates: ${EXTERNAL_CA:-false}
 
 # ═══════════════════════════════════════════════════════════════
 # Security Feature Toggles
@@ -927,6 +963,7 @@ gathering = smart
 fact_caching = jsonfile
 fact_caching_connection = /tmp/ansible_facts_cache
 fact_caching_timeout = 3600
+vault_password_file = .vault_password
 
 [privilege_escalation]
 become = ${USE_BECOME}
@@ -1104,30 +1141,82 @@ SELFEXTRACT_EOF
     fi
 
     # ═══════════════════════════════════════════════════════════════
+    # ANSIBLE VAULT INITIALIZATION
+    # ═══════════════════════════════════════════════════════════════
+    print_section "Initializing Ansible Vault"
+
+    if [ -f "${SCRIPT_DIR}/scripts/manage-vault.sh" ]; then
+        chmod +x "${SCRIPT_DIR}/scripts/manage-vault.sh"
+
+        # Initialize vault (creates vault password)
+        if [ -f "${SCRIPT_DIR}/.vault_password" ]; then
+            print_info "Vault password file already exists"
+        else
+            print_info "Generating vault password..."
+            bash "${SCRIPT_DIR}/scripts/manage-vault.sh" init
+            print_success "Vault password created: .vault_password"
+        fi
+
+        # Create encrypted vault with credentials
+        print_info "Creating encrypted vault with credentials..."
+        bash "${SCRIPT_DIR}/scripts/manage-vault.sh" create
+        print_success "Encrypted credentials stored in: group_vars/vault.yml"
+
+        print_warning "IMPORTANT: Back up .vault_password securely!"
+        print_warning "Without it, you cannot decrypt your credentials."
+    else
+        print_warning "Vault management script not found, using plaintext credentials"
+        print_info "Run: ./scripts/manage-vault.sh create - after setup to encrypt credentials"
+    fi
+
+    # ═══════════════════════════════════════════════════════════════
     # CERTIFICATE GENERATION
     # ═══════════════════════════════════════════════════════════════
-    print_section "Generating SSL/TLS Certificates"
+    print_section "SSL/TLS Certificates"
 
-    if [ -f "${SCRIPT_DIR}/generate-certs.sh" ]; then
-        # Check if certs already exist
+    if [ "$EXTERNAL_CA" = "true" ]; then
+        print_info "External CA mode enabled"
+        mkdir -p "${SCRIPT_DIR}/files/certs"
+
+        # Check if external certs exist
         if [ -f "${SCRIPT_DIR}/files/certs/root-ca.pem" ]; then
-            print_warning "Certificates already exist in files/certs/"
-            prompt_yes_no "Regenerate certificates?" "no" "REGEN_CERTS"
-            if [ "$REGEN_CERTS" = "true" ]; then
-                print_info "Regenerating certificates..."
-                bash "${SCRIPT_DIR}/generate-certs.sh"
-                print_success "Certificates regenerated"
-            else
-                print_info "Using existing certificates"
+            print_success "Found root-ca.pem"
+            # Validate the certificate
+            if [ -f "${SCRIPT_DIR}/playbooks/certificate-management.yml" ]; then
+                print_info "Validating certificates..."
+                ansible-playbook "${SCRIPT_DIR}/playbooks/certificate-management.yml" --tags validate 2>/dev/null || {
+                    print_warning "Certificate validation requires ansible. Run manually after setup:"
+                    print_info "  ansible-playbook playbooks/certificate-management.yml --tags validate"
+                }
             fi
         else
-            print_info "Generating SSL/TLS certificates for all nodes..."
-            bash "${SCRIPT_DIR}/generate-certs.sh"
-            print_success "Certificates generated in files/certs/"
+            print_warning "External CA certificates not found in files/certs/"
+            print_info "Please place your certificates before running deployment"
+            print_info "Required: root-ca.pem, admin.pem, admin-key.pem, and node certificates"
         fi
     else
-        print_error "Certificate generation script not found: generate-certs.sh"
-        print_info "You will need to generate certificates manually"
+        # Self-signed certificate generation
+        if [ -f "${SCRIPT_DIR}/generate-certs.sh" ]; then
+            # Check if certs already exist
+            if [ -f "${SCRIPT_DIR}/files/certs/root-ca.pem" ]; then
+                print_warning "Certificates already exist in files/certs/"
+                prompt_yes_no "Regenerate certificates?" "no" "REGEN_CERTS"
+                if [ "$REGEN_CERTS" = "true" ]; then
+                    print_info "Regenerating certificates..."
+                    bash "${SCRIPT_DIR}/generate-certs.sh"
+                    print_success "Certificates regenerated"
+                else
+                    print_info "Using existing certificates"
+                fi
+            else
+                print_info "Generating self-signed SSL/TLS certificates..."
+                bash "${SCRIPT_DIR}/generate-certs.sh"
+                print_success "Certificates generated in files/certs/"
+            fi
+        else
+            print_error "Certificate generation script not found: generate-certs.sh"
+            print_info "You will need to generate certificates manually"
+        fi
     fi
 
     # ═══════════════════════════════════════════════════════════════
@@ -1163,11 +1252,18 @@ SELFEXTRACT_EOF
 
     echo
     echo -e "${CYAN}Security:${NC}"
-    if [ "$CUSTOM_PASSWORDS" = "true" ]; then
-        echo "  - Using custom passwords"
+    echo "  - Ansible Vault: Enabled (encrypted credentials)"
+    echo "  - Vault password: .vault_password"
+    echo "  - Encrypted vault: group_vars/vault.yml"
+    if [ "$EXTERNAL_CA" = "true" ]; then
+        echo "  - Certificates: External CA (user-provided)"
     else
-        echo "  - Passwords auto-generated during deployment"
-        echo "  - Credentials saved to: ./credentials/"
+        echo "  - Certificates: Self-signed (auto-generated)"
+    fi
+    if [ "$CUSTOM_PASSWORDS" = "true" ]; then
+        echo "  - Passwords: Custom (user-provided)"
+    else
+        echo "  - Passwords: Auto-generated"
     fi
 
     echo
@@ -1202,9 +1298,11 @@ SELFEXTRACT_EOF
     print_header "Next Steps"
 
     echo -e "1. Review the generated configuration files:"
-    echo -e "   ${CYAN}inventory/hosts.yml${NC} - Inventory file"
-    echo -e "   ${CYAN}group_vars/all.yml${NC}  - Variables file"
-    echo -e "   ${CYAN}ansible.cfg${NC}         - Ansible configuration"
+    echo -e "   ${CYAN}inventory/hosts.yml${NC}    - Inventory file"
+    echo -e "   ${CYAN}group_vars/all.yml${NC}     - Variables file"
+    echo -e "   ${CYAN}group_vars/vault.yml${NC}   - Encrypted credentials"
+    echo -e "   ${CYAN}ansible.cfg${NC}            - Ansible configuration"
+    echo -e "   ${CYAN}.vault_password${NC}        - Vault encryption key (KEEP SECURE!)"
     echo
 
     if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
@@ -1243,16 +1341,23 @@ SELFEXTRACT_EOF
     echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-agents.yml${NC}"
     echo
 
-    if [ "$CUSTOM_PASSWORDS" != "true" ]; then
-        if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
-            echo -e "5. After deployment, find your credentials:"
-        else
-            echo -e "4. After deployment, find your credentials:"
-        fi
-        echo -e "   ${CYAN}./credentials/indexer_admin_password.txt${NC} - Indexer/Dashboard admin"
-        echo -e "   ${CYAN}./credentials/api_password.txt${NC}          - Wazuh API password"
-        echo
+    if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
+        echo -e "5. After deployment, view your credentials:"
+    else
+        echo -e "4. After deployment, view your credentials:"
     fi
+    echo -e "   ${YELLOW}./scripts/manage-vault.sh view${NC}"
+    echo -e "   Or see plaintext copies in: ${CYAN}./credentials/${NC}"
+    echo
+
+    if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
+        echo -e "6. Certificate management:"
+    else
+        echo -e "5. Certificate management:"
+    fi
+    echo -e "   ${YELLOW}ansible-playbook playbooks/certificate-management.yml --tags check-expiry${NC}"
+    echo -e "   ${YELLOW}ansible-playbook playbooks/certificate-management.yml --tags rotate${NC}"
+    echo
 
     if [ "$GENERATE_SSH_KEY" = "true" ]; then
         print_header "SSH Key Information"
@@ -1263,6 +1368,20 @@ SELFEXTRACT_EOF
         echo -e "${YELLOW}Keep the private key secure! It provides access to all managed hosts.${NC}"
         echo
     fi
+
+    print_header "Credential Management"
+    echo -e "Manage encrypted credentials with:"
+    echo -e "  ${YELLOW}./scripts/manage-vault.sh view${NC}    - View current credentials"
+    echo -e "  ${YELLOW}./scripts/manage-vault.sh edit${NC}    - Edit credentials"
+    echo -e "  ${YELLOW}./scripts/manage-vault.sh rotate${NC}  - Rotate all credentials"
+    echo -e "  ${YELLOW}./scripts/manage-vault.sh rekey${NC}   - Change vault password"
+    echo
+
+    print_warning "SECURITY REMINDERS:"
+    echo -e "  - Back up ${CYAN}.vault_password${NC} securely (required to decrypt credentials)"
+    echo -e "  - Keep ${CYAN}keys/wazuh_ansible_key${NC} private (provides host access)"
+    echo -e "  - Delete ${CYAN}credentials/*.txt${NC} after noting passwords (plaintext copies)"
+    echo
 
     print_success "Setup complete!"
 }
