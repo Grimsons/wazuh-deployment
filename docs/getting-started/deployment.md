@@ -4,17 +4,23 @@ Automated deployment of Wazuh SIEM/XDR stack using Ansible with interactive conf
 
 ## Components
 
-- **Wazuh Indexer**: Stores and indexes security alerts and events
+- **Wazuh Indexer**: Stores and indexes security alerts and events (OpenSearch-based)
 - **Wazuh Manager**: Central component that analyzes data from agents
 - **Wazuh Dashboard**: Web interface for visualization and management
 - **Wazuh Agent**: Collects security data from monitored endpoints
+- **Filebeat**: Forwards alerts from Manager to Indexer
 
 ## Prerequisites
 
+### Control Node
 - Ansible 2.12+
 - Python 3.8+
-- SSH access to target hosts
-- Target systems: Ubuntu 20.04+, Debian 10+, RHEL/CentOS 8+
+- Bash shell
+
+### Target Hosts
+- Ubuntu 20.04+, Debian 10+, RHEL/CentOS 8+, Rocky Linux 8+, Arch Linux
+- SSH access (root or sudo user)
+- Minimum RAM: 4GB (indexer/manager), 2GB (dashboard), 512MB (agents)
 
 ### Required Ansible Collections
 
@@ -31,18 +37,28 @@ ansible-galaxy collection install community.general
 ./setup.sh
 ```
 
-This will prompt you for:
-- Wazuh version
-- Indexer, Manager, and Dashboard node addresses
+The wizard guides you through:
+- Wazuh version selection (default: 4.14.1)
+- Node IP addresses (indexer, manager, dashboard)
 - Agent hosts (optional)
-- Security credentials
-- SSL/TLS configuration
-- Feature toggles
+- Security features (vulnerability detection, FIM, SCA, etc.)
+- Email alerts configuration
+- Syslog output configuration
+- Integrations (Slack, VirusTotal)
+- **Automatic certificate generation**
 
-### 2. Prepare Target Machines (Optional but Recommended)
+Generated files:
+- `inventory/hosts.yml` - Ansible inventory
+- `group_vars/all.yml` - Configuration variables
+- `ansible.cfg` - Ansible settings
+- `keys/` - SSH keypair for deployment
+- `files/certs/` - SSL/TLS certificates
+- `client-prep/` - Host preparation package
+
+### 2. Prepare Target Machines
 
 The setup script creates a client preparation package that:
-- Detects the OS (Ubuntu, Debian, RHEL, Rocky, Fedora, etc.)
+- Detects the OS (Ubuntu, Debian, RHEL, Rocky, Fedora, SUSE, Arch Linux)
 - Removes unnecessary packages (desktop environments, office suites, games)
 - Installs required packages (Python, SSH, etc.)
 - Creates an Ansible deployment user with sudo access
@@ -76,19 +92,13 @@ ssh root@TARGET_HOST 'sudo bash /tmp/wazuh-client-prep.sh'
 ssh root@TARGET_HOST 'sudo bash /tmp/wazuh-client-prep.sh --minimal'
 ```
 
-### 3. Generate Certificates
-
-```bash
-./generate-certs.sh
-```
-
-### 4. Test Connectivity
+### 3. Test Connectivity
 
 ```bash
 ansible all -m ping
 ```
 
-### 5. Deploy Wazuh Stack
+### 4. Deploy Wazuh Stack
 
 ```bash
 # Deploy everything
@@ -101,43 +111,42 @@ ansible-playbook playbooks/wazuh-dashboard.yml
 ansible-playbook playbooks/wazuh-agents.yml
 ```
 
-## Directory Structure
+### 5. Access the Dashboard
 
+After deployment, credentials are saved to `credentials/`:
+- `credentials/indexer_admin_password.txt` - Dashboard/Indexer admin
+- `credentials/api_password.txt` - Wazuh API
+- `credentials/agent_enrollment_password.txt` - Agent enrollment
+
+Access the dashboard at `https://<dashboard-ip>:443`
+
+## Post-Deployment Security
+
+### Deployment User Lockdown
+
+After deployment completes, the deployment user (`wazuh-deploy`) is **automatically locked down** on all hosts for security. This restricts sudo access to only:
+- The unlock script
+- Ansible fact gathering
+- Wazuh status checks
+
+### Running Future Deployments
+
+Before running any new deployment or update:
+
+```bash
+# Step 1: Unlock deployment user on all hosts
+ansible-playbook unlock-deploy-user.yml
+
+# Step 2: Run your deployment
+ansible-playbook site.yml
+# User is automatically re-locked at completion
 ```
-wazuh-ansible/
-├── ansible.cfg                  # Ansible configuration
-├── setup.sh                     # Interactive setup script
-├── generate-certs.sh            # Certificate generation script
-├── site.yml                     # Main deployment playbook
-├── wazuh-client-prep.sh         # Self-extracting client prep (generated)
-├── wazuh-client-prep.tar.gz     # Client prep tarball (generated)
-├── inventory/
-│   └── hosts.yml                # Inventory file
-├── group_vars/
-│   └── all.yml                  # Global variables
-├── keys/
-│   ├── wazuh_ansible_key        # Private SSH key (generated)
-│   └── wazuh_ansible_key.pub    # Public SSH key (generated)
-├── client-prep/                 # Client preparation package (generated)
-│   ├── prepare-client.sh        # OS detection & cleanup script
-│   ├── ansible_key.pub          # Public key for deployment
-│   ├── install.sh               # Quick install wrapper
-│   └── README.txt               # Instructions
-├── scripts/
-│   ├── prepare-client.sh        # Client preparation script
-│   └── deploy-prep.sh           # Multi-host deployment script
-├── playbooks/
-│   ├── wazuh-indexer.yml        # Indexer deployment
-│   ├── wazuh-manager.yml        # Manager deployment
-│   ├── wazuh-dashboard.yml      # Dashboard deployment
-│   └── wazuh-agents.yml         # Agent deployment
-├── roles/
-│   ├── wazuh-indexer/           # Indexer role
-│   ├── wazuh-manager/           # Manager role
-│   ├── wazuh-dashboard/         # Dashboard role
-│   └── wazuh-agent/             # Agent role
-└── files/
-    └── certs/                   # Generated certificates
+
+### Disabling Lockdown
+
+To disable automatic lockdown, set in `group_vars/all.yml`:
+```yaml
+wazuh_lockdown_deploy_user: false
 ```
 
 ## Configuration
@@ -170,11 +179,13 @@ all:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `wazuh_version` | Wazuh version to install | 4.9.0 |
+| `wazuh_version` | Wazuh version to install | 4.14.1 |
 | `wazuh_indexer_http_port` | Indexer HTTP port | 9200 |
 | `wazuh_manager_api_port` | Manager API port | 55000 |
 | `wazuh_dashboard_port` | Dashboard HTTPS port | 443 |
 | `wazuh_manager_cluster_enabled` | Enable manager cluster | false |
+| `wazuh_authd_use_password` | Require password for agent enrollment | true |
+| `wazuh_lockdown_deploy_user` | Lock down deploy user after completion | true |
 
 ### Feature Toggles
 
@@ -183,8 +194,23 @@ all:
 | `wazuh_vulnerability_detection_enabled` | Vulnerability detection | true |
 | `wazuh_fim_enabled` | File integrity monitoring | true |
 | `wazuh_rootkit_detection_enabled` | Rootkit detection | true |
+| `wazuh_sca_enabled` | Security Configuration Assessment | true |
+| `wazuh_syscollector_enabled` | System inventory collection | true |
 | `wazuh_log_collection_enabled` | Log collection | true |
 | `wazuh_active_response_enabled` | Active response | true |
+
+### Integrations
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `wazuh_email_notification_enabled` | Email alerts | false |
+| `wazuh_syslog_output_enabled` | Syslog forwarding | false |
+| `wazuh_docker_listener_enabled` | Docker monitoring | false |
+| `wazuh_office365_enabled` | Office 365 audit logs | false |
+| `wazuh_github_enabled` | GitHub audit logs | false |
+| `wazuh_aws_enabled` | AWS CloudTrail/GuardDuty | false |
+| `wazuh_azure_enabled` | Azure Log Analytics | false |
+| `wazuh_gcp_enabled` | GCP Pub/Sub | false |
 
 ## Multi-Node Deployment
 
@@ -234,15 +260,10 @@ ansible-playbook site.yml --tags dashboard
 
 # Deploy only agents
 ansible-playbook site.yml --tags agent
+
+# Skip lockdown
+ansible-playbook site.yml --skip-tags lockdown
 ```
-
-## Accessing Wazuh
-
-After deployment:
-
-1. Open browser: `https://<dashboard-ip>:443`
-2. Login with configured credentials (default: admin/admin)
-3. Change default passwords immediately
 
 ## Troubleshooting
 
@@ -254,6 +275,7 @@ systemctl status wazuh-indexer
 
 # On manager
 systemctl status wazuh-manager
+systemctl status filebeat
 
 # On dashboard
 systemctl status wazuh-dashboard
@@ -273,22 +295,41 @@ tail -f /var/ossec/logs/ossec.log
 
 # Dashboard logs
 tail -f /var/log/wazuh-dashboard/opensearch-dashboards.log
+
+# Filebeat logs
+tail -f /var/log/filebeat/filebeat
 ```
 
 ### API Health Check
 
 ```bash
-# Indexer health
-curl -k -u admin:admin https://localhost:9200/_cluster/health?pretty
+# Indexer health (use password from credentials/indexer_admin_password.txt)
+curl -k -u admin:PASSWORD https://localhost:9200/_cluster/health?pretty
 
-# Manager API
-curl -k -u wazuh:wazuh https://localhost:55000/
+# Manager API (use password from credentials/api_password.txt)
+curl -k -u wazuh:PASSWORD https://localhost:55000/
 ```
+
+### Agent Not Connecting
+
+1. Verify manager IP and port 1514 accessibility
+2. Check enrollment password matches on both sides
+3. Verify `/var/ossec/etc/authd.pass` exists on agent
+4. Check `/var/ossec/logs/ossec.log` on agent for errors
+
+### MITRE ATT&CK Fields Not Working
+
+If MITRE technique aggregations fail in the dashboard:
+1. Verify Filebeat is running and forwarding alerts
+2. New indices (created after deployment) will have correct mappings
+3. For existing indices, reindex may be required
 
 ## Security Considerations
 
-1. Change all default passwords immediately after deployment
-2. Use strong, unique passwords for all components
-3. Consider using external certificate authority for production
-4. Restrict network access to management ports
-5. Enable firewall rules (handled by playbooks if `wazuh_configure_firewall: true`)
+1. Keep `credentials/` directory secure with restricted access (mode 0600)
+2. Use external CA certificates for production environments
+3. Restrict network access to management ports
+4. Enable firewall rules (`wazuh_configure_firewall: true`)
+5. Keep deployment user locked down between deployments
+6. Rotate credentials regularly
+7. Enable audit logging for compliance

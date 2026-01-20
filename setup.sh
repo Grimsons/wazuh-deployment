@@ -1016,6 +1016,12 @@ Quick Start:
 Or run with options:
   sudo ./prepare-client.sh -k ansible_key.pub --minimal
 
+Supported Operating Systems:
+- Ubuntu 20.04+, Debian 10+
+- RHEL/CentOS 8+, Rocky Linux 8+, Fedora
+- SUSE Linux Enterprise, openSUSE
+- Arch Linux
+
 Options:
   -u, --user NAME     Ansible user to create (default: wazuh-deploy)
   -p, --port PORT     SSH port (default: 22)
@@ -1025,13 +1031,33 @@ Options:
   -h, --help          Show help
 
 What this script does:
-- Detects your OS (Ubuntu, Debian, RHEL, Rocky, Fedora, etc.)
+- Detects your OS automatically
 - Removes unnecessary packages (desktop, games, office suites, etc.)
-- Installs required packages (Python, SSH, etc.)
-- Creates an Ansible deployment user
+- Installs required packages (Python, SSH, sudo, etc.)
+- Creates an Ansible deployment user with sudo access
 - Deploys the SSH public key for passwordless access
-- Configures firewall for Wazuh ports
+- Configures firewall for Wazuh ports (UFW, firewalld, iptables, or nftables)
 - Optimizes system settings
+- Installs unlock script for post-deployment reactivation
+
+Firewall Ports Configured:
+- 1514/tcp  - Agent communication
+- 1515/tcp  - Agent enrollment
+- 1516/tcp  - Manager cluster
+- 9200/tcp  - Indexer API
+- 9300/tcp  - Indexer cluster
+- 443/tcp   - Dashboard HTTPS
+- 55000/tcp - Manager API
+
+Post-Deployment:
+After Wazuh deployment, the ansible user is automatically locked down
+for security. To run future deployments:
+
+  # From your Ansible control node:
+  ansible-playbook unlock-deploy-user.yml
+
+  # Or manually on each host:
+  sudo /usr/local/bin/wazuh-unlock-deploy
 
 SSH User: ${ANSIBLE_USER}
 README_EOF

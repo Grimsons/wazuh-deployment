@@ -8,12 +8,14 @@ This project provides an enterprise-grade deployment solution for Wazuh with:
 
 - **Secure by Default** - Auto-generated credentials, API rate limiting, TLS 1.2+, secure cookies
 - **Interactive Setup** - Configure your deployment through a guided CLI wizard
-- **Client Preparation** - Automated target host preparation with OS detection
+- **Client Preparation** - Cross-platform target host preparation (Ubuntu, Debian, RHEL, Arch Linux)
 - **Multiple Deployment Modes** - All-in-One or Distributed multi-node cluster
-- **Certificate Management** - Automated SSL/TLS certificate generation
+- **Certificate Management** - Automatic SSL/TLS certificate generation during setup
+- **Post-Deployment Security** - Automatic lockdown of deployment user after completion
 - **Operational Tooling** - Backup/restore, health checks, and log rotation
 - **Extensible** - Custom rules, decoders, agent groups, and integrations
 - **Cross-Platform Agents** - Linux, Windows, and macOS support
+- **Cloud Integrations** - AWS, Azure, GCP, Office 365, GitHub audit logs
 
 ## Components
 
@@ -33,7 +35,7 @@ This project provides an enterprise-grade deployment solution for Wazuh with:
 - Bash shell
 
 ### Target Hosts
-- Ubuntu 20.04+, Debian 10+, RHEL/CentOS 8+, Rocky Linux 8+
+- Ubuntu 20.04+, Debian 10+, RHEL/CentOS 8+, Rocky Linux 8+, Arch Linux
 - SSH access (root or sudo user)
 - Minimum RAM: 4GB (indexer/manager), 2GB (dashboard), 512MB (agents)
 
@@ -55,7 +57,9 @@ The wizard configures:
 - Wazuh version selection (default: 4.14.1)
 - Node IP addresses (indexer, manager, dashboard)
 - Agent hosts (optional)
-- Feature toggles (vulnerability detection, FIM, etc.)
+- Feature toggles (vulnerability detection, FIM, SCA, etc.)
+- Email alerts, syslog output, and integrations (Slack, VirusTotal)
+- **Automatic certificate generation** (no separate step needed)
 
 Generated files:
 - `inventory/hosts.yml` - Ansible inventory
@@ -63,6 +67,7 @@ Generated files:
 - `ansible.cfg` - Ansible settings
 - `keys/` - SSH keypair for deployment
 - `client-prep/` - Host preparation package
+- `files/certs/` - SSL/TLS certificates
 
 ### 2. Prepare Target Hosts
 
@@ -75,19 +80,15 @@ ssh root@TARGET 'bash /tmp/client-prep/install.sh'
 ./scripts/deploy-prep.sh 192.168.1.10 192.168.1.11 192.168.1.12
 ```
 
-### 3. Generate Certificates
+Supports: Ubuntu, Debian, RHEL/CentOS, Rocky Linux, Fedora, SUSE, and **Arch Linux**.
 
-```bash
-./generate-certs.sh
-```
-
-### 4. Test Connectivity
+### 3. Test Connectivity
 
 ```bash
 ansible all -m ping
 ```
 
-### 5. Deploy
+### 4. Deploy
 
 ```bash
 # Full stack deployment
@@ -100,13 +101,28 @@ ansible-playbook playbooks/wazuh-dashboard.yml
 ansible-playbook playbooks/wazuh-agents.yml
 ```
 
-### 6. Access Dashboard
+### 5. Access Dashboard
 
 After deployment, credentials are saved to `credentials/`:
-- `credentials/indexer_admin_password.txt` - Indexer admin credentials
+- `credentials/indexer_admin_password.txt` - Indexer/Dashboard admin credentials
 - `credentials/api_password.txt` - Wazuh API credentials
+- `credentials/agent_enrollment_password.txt` - Agent enrollment password
 
 Access the dashboard at `https://<dashboard-ip>:443`
+
+### 6. Redeployment (Future Updates)
+
+The deployment user is **automatically locked down** after deployment for security. Before running another deployment:
+
+```bash
+# Unlock deployment user on all hosts
+ansible-playbook unlock-deploy-user.yml
+
+# Run your deployment
+ansible-playbook site.yml
+
+# User is automatically re-locked at the end
+```
 
 ## Project Structure
 
@@ -127,7 +143,10 @@ wazuh-deployment/
 │
 ├── credentials/                 # Auto-generated credentials (created at deploy)
 │   ├── indexer_admin_password.txt
-│   └── api_password.txt
+│   ├── api_password.txt
+│   └── agent_enrollment_password.txt
+│
+├── unlock-deploy-user.yml       # Unlock deployment user for redeployment
 │
 ├── playbooks/
 │   ├── wazuh-indexer.yml       # Indexer deployment
@@ -274,28 +293,29 @@ ansible-playbook playbooks/health-check.yml -e "check_indices=true"
 
 ## Integrations
 
-All integrations are pre-configured in `group_vars/all.yml` (commented out). Uncomment to enable:
+All integrations are configurable via `setup.sh` or `group_vars/all.yml`:
 
 ### Cloud Security
 - **AWS**: CloudTrail, GuardDuty, VPC Flow Logs, WAF, ALB/NLB, S3, Config
-- **Azure**: Activity Logs, Sign-in Logs, Log Analytics
-- **GCP**: Pub/Sub integration
+- **Azure**: Activity Logs, Sign-in Logs, Log Analytics, Graph API
+- **GCP**: Pub/Sub, Cloud Storage buckets
 
 ### Alerting
-- **Slack**: Webhook notifications
+- **Slack**: Webhook notifications (configurable in setup.sh)
 - **PagerDuty**: Incident management
-- **Email**: SMTP alerts
-- **Syslog**: SIEM forwarding (CEF/JSON)
+- **Email**: SMTP alerts (configurable in setup.sh)
+- **Syslog**: SIEM forwarding (default/JSON/CEF formats)
 
 ### Threat Intelligence
-- **VirusTotal**: File hash lookups
+- **VirusTotal**: File hash lookups (configurable in setup.sh)
 - **CDB Lists**: Custom IP/domain blocklists
 
 ### Container Security
-- **Docker**: Container event monitoring
+- **Docker**: Container event monitoring via docker-listener wodle
 
-### Microsoft
-- **Office 365**: Audit logs (Exchange, SharePoint, Azure AD)
+### Microsoft & GitHub
+- **Office 365**: Azure AD, Exchange, SharePoint, DLP audit logs
+- **GitHub**: Enterprise audit logs for organizations
 
 ## Custom Rules and Decoders
 
@@ -443,6 +463,43 @@ ansible-playbook site.yml
 2. Create a backup: `ansible-playbook playbooks/backup.yml`
 3. Run deployment: `ansible-playbook site.yml`
 
+## Post-Deployment Security Lockdown
+
+After deployment completes, the Ansible deployment user (`wazuh-deploy`) is automatically locked down on all hosts:
+
+- SSH access remains enabled (for future deployments)
+- Sudo access is restricted to only:
+  - Unlock script (`/usr/local/bin/wazuh-unlock-deploy`)
+  - Ansible fact gathering
+  - Wazuh status checks
+
+### Re-enabling for Updates
+
+Before running any new deployment or update:
+
+```bash
+# Unlock all hosts
+ansible-playbook unlock-deploy-user.yml
+
+# Run your deployment
+ansible-playbook site.yml
+# User is automatically re-locked at completion
+```
+
+### Manual Unlock (if needed)
+
+```bash
+# SSH to host and run unlock script
+ssh wazuh-deploy@HOST 'sudo /usr/local/bin/wazuh-unlock-deploy'
+```
+
+### Disabling Lockdown
+
+To disable automatic lockdown, set in `group_vars/all.yml`:
+```yaml
+wazuh_lockdown_deploy_user: false
+```
+
 ## Security Recommendations
 
 - Store `credentials/` directory securely and restrict access
@@ -452,6 +509,7 @@ ansible-playbook site.yml
 - Regularly review and rotate credentials
 - Monitor health check results
 - Maintain regular backups
+- Keep deployment user locked down between deployments
 
 ## License
 
