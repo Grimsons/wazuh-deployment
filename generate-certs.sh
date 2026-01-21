@@ -15,7 +15,7 @@ NC='\033[0m'
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CERTS_DIR="${SCRIPT_DIR}/files/certs"
-CONFIG_FILE="${SCRIPT_DIR}/group_vars/all.yml"
+CONFIG_FILE="${SCRIPT_DIR}/group_vars/all/main.yml"
 
 print_header() {
     echo -e "\n${CYAN}═══════════════════════════════════════════════════════════════${NC}"

@@ -49,8 +49,7 @@
   gather_facts: true
   become: false
   tags: [always, check]
-  vars_files:
-    - ../group_vars/all.yml
+  # Note: group_vars/all/ is auto-loaded by Ansible
   vars:
     backup_before_upgrade: true
     validate_after_upgrade: true
@@ -263,8 +262,7 @@
   gather_facts: false
   become: false
   tags: [backup, indexer, manager, dashboard]
-  vars_files:
-    - ../group_vars/all.yml
+  # Note: group_vars/all/ is auto-loaded by Ansible
   vars:
     backup_before_upgrade: true
     upgrade_timestamp: "{{ hostvars['localhost']['upgrade_timestamp'] }}"
@@ -886,8 +884,7 @@
   gather_facts: false
   become: false
   tags: [validate, always]
-  vars_files:
-    - ../group_vars/all.yml
+  # Note: group_vars/all/ is auto-loaded by Ansible
   vars:
     validate_after_upgrade: true
     target_version: "{{ upgrade_target_version }}"

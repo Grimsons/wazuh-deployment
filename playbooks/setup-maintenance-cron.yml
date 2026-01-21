@@ -20,11 +20,11 @@
   connection: local
   become: false
   gather_facts: true
-  vars_files:
-    - ../group_vars/all.yml
+  # Note: group_vars/all/ is auto-loaded by Ansible, no vars_files needed
 
   vars:
-    project_dir: "{{ inventory_dir }}/.."
+    # Use playbook_dir which is always defined, unlike inventory_dir
+    project_dir: "{{ playbook_dir | dirname }}"
     scripts_dir: "{{ project_dir }}/scripts"
     logs_dir: "{{ project_dir }}/logs"
     backups_dir: "{{ project_dir }}/backups"
