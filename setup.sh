@@ -711,11 +711,10 @@ EOF
         ${node}:
           indexer_node_name: ${node_name}
 EOF
-        # Add per-host SSH user if different from default
+        # Add per-host SSH credentials from vault
         if [ -n "${HOST_SSH_USER[$node]:-}" ]; then
-            echo "          ansible_user: ${HOST_SSH_USER[$node]}" >> "$SCRIPT_DIR/inventory/hosts.yml"
+            echo "          ansible_user: \"{{ vault_ssh_user_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/hosts.yml"
         fi
-        # Add per-host SSH password if set
         if [ -n "${HOST_SSH_PASS[$node]:-}" ]; then
             echo "          ansible_ssh_pass: \"{{ vault_ssh_pass_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/hosts.yml"
         fi
@@ -738,11 +737,10 @@ EOF
         ${node}:
           manager_node_name: ${node_name}
 EOF
-        # Add per-host SSH user if different from default
+        # Add per-host SSH credentials from vault
         if [ -n "${HOST_SSH_USER[$node]:-}" ]; then
-            echo "          ansible_user: ${HOST_SSH_USER[$node]}" >> "$SCRIPT_DIR/inventory/hosts.yml"
+            echo "          ansible_user: \"{{ vault_ssh_user_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/hosts.yml"
         fi
-        # Add per-host SSH password if set
         if [ -n "${HOST_SSH_PASS[$node]:-}" ]; then
             echo "          ansible_ssh_pass: \"{{ vault_ssh_pass_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/hosts.yml"
         fi
@@ -764,11 +762,10 @@ EOF
     # Add dashboard hosts with per-host SSH credentials
     for node in "${DASHBOARD_NODES_ARRAY[@]}"; do
         echo "        ${node}:" >> "$SCRIPT_DIR/inventory/hosts.yml"
-        # Add per-host SSH user if different from default
+        # Add per-host SSH credentials from vault
         if [ -n "${HOST_SSH_USER[$node]:-}" ]; then
-            echo "          ansible_user: ${HOST_SSH_USER[$node]}" >> "$SCRIPT_DIR/inventory/hosts.yml"
+            echo "          ansible_user: \"{{ vault_ssh_user_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/hosts.yml"
         fi
-        # Add per-host SSH password if set
         if [ -n "${HOST_SSH_PASS[$node]:-}" ]; then
             echo "          ansible_ssh_pass: \"{{ vault_ssh_pass_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/hosts.yml"
         fi
