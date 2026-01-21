@@ -21,8 +21,9 @@
   become: false
   gather_facts: true
   # Note: group_vars/all/ is auto-loaded by Ansible, no vars_files needed
-
+  # Override ansible_user for localhost since it shouldn't use vault credentials
   vars:
+    ansible_user: "{{ lookup('env', 'USER') }}"
     # Use playbook_dir which is always defined, unlike inventory_dir
     project_dir: "{{ playbook_dir | dirname }}"
     scripts_dir: "{{ project_dir }}/scripts"

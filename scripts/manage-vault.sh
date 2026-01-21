@@ -84,6 +84,11 @@ init_vault() {
 }
 
 # Create or update vault file with credentials
+# Accepts environment variables for credentials:
+#   VAULT_INDEXER_PASSWORD, VAULT_API_PASSWORD, VAULT_ENROLLMENT_PASSWORD
+#   VAULT_ANSIBLE_USER, VAULT_CONNECTION_PASSWORD, VAULT_BECOME_PASSWORD
+#   VAULT_HOST_CREDENTIALS (format: "host1:user1:pass1,host2:user2:pass2")
+#   VAULT_CLUSTER_KEY
 create_vault() {
     print_header "Creating Encrypted Vault"
 
@@ -92,36 +97,51 @@ create_vault() {
         exit 1
     fi
 
-    mkdir -p "$CREDENTIALS_DIR"
     mkdir -p "$VAULT_DIR"
 
-    # Generate credentials if they don't exist
-    local indexer_password=""
-    local api_password=""
-    local enrollment_password=""
+    # Use environment variables if set, otherwise generate new passwords
+    local indexer_password="${VAULT_INDEXER_PASSWORD:-}"
+    local api_password="${VAULT_API_PASSWORD:-}"
+    local enrollment_password="${VAULT_ENROLLMENT_PASSWORD:-}"
+    local connection_password="${VAULT_CONNECTION_PASSWORD:-}"
+    local become_password="${VAULT_BECOME_PASSWORD:-}"
+    local ansible_user="${VAULT_ANSIBLE_USER:-wazuh-deploy}"
+    local cluster_key="${VAULT_CLUSTER_KEY:-}"
 
-    if [ -f "$CREDENTIALS_DIR/indexer_admin_password.txt" ]; then
-        indexer_password=$(grep -oP 'Password:\s*\K.*' "$CREDENTIALS_DIR/indexer_admin_password.txt" 2>/dev/null || cat "$CREDENTIALS_DIR/indexer_admin_password.txt")
-    fi
+    # Generate passwords if not provided
     if [ -z "$indexer_password" ]; then
         indexer_password=$(generate_password 24)
         print_info "Generated new indexer admin password"
     fi
 
-    if [ -f "$CREDENTIALS_DIR/api_password.txt" ]; then
-        api_password=$(grep -oP 'Password:\s*\K.*' "$CREDENTIALS_DIR/api_password.txt" 2>/dev/null || cat "$CREDENTIALS_DIR/api_password.txt")
-    fi
     if [ -z "$api_password" ]; then
         api_password=$(generate_password 24)
         print_info "Generated new API password"
     fi
 
-    if [ -f "$CREDENTIALS_DIR/agent_enrollment_password.txt" ]; then
-        enrollment_password=$(grep -oP 'Password:\s*\K.*' "$CREDENTIALS_DIR/agent_enrollment_password.txt" 2>/dev/null || cat "$CREDENTIALS_DIR/agent_enrollment_password.txt")
-    fi
     if [ -z "$enrollment_password" ]; then
         enrollment_password=$(generate_password 24)
         print_info "Generated new agent enrollment password"
+    fi
+
+    if [ -z "$cluster_key" ]; then
+        cluster_key=$(generate_password 32)
+    fi
+
+    # Build per-host SSH credentials content
+    local host_creds_content=""
+    if [ -n "${VAULT_HOST_CREDENTIALS:-}" ]; then
+        print_info "Processing per-host SSH credentials"
+        IFS=',' read -ra HOST_ENTRIES <<< "$VAULT_HOST_CREDENTIALS"
+        for entry in "${HOST_ENTRIES[@]}"; do
+            IFS=':' read -r host user pass <<< "$entry"
+            if [ -n "$host" ] && [ -n "$pass" ]; then
+                local safe_host="${host//./_}"
+                host_creds_content+="
+# SSH password for host: ${host}
+vault_ssh_pass_${safe_host}: \"${pass}\""
+            fi
+        done
     fi
 
     # Create vault content
@@ -129,6 +149,16 @@ create_vault() {
 # Wazuh Deployment - Encrypted Credentials
 # Generated: $(date -Iseconds)
 # DO NOT COMMIT THIS FILE UNENCRYPTED!
+
+# Ansible SSH user for deployment
+vault_ansible_user: \"${ansible_user}\"
+
+# Ansible connection password (SSH/WinRM) - default for all hosts
+vault_ansible_connection_password: \"${connection_password}\"
+
+# Ansible become (sudo) password
+vault_ansible_become_password: \"${become_password}\"
+${host_creds_content}
 
 # Indexer/Dashboard admin credentials
 vault_wazuh_indexer_admin_password: \"${indexer_password}\"
@@ -140,74 +170,16 @@ vault_wazuh_api_password: \"${api_password}\"
 vault_wazuh_agent_enrollment_password: \"${enrollment_password}\"
 
 # Manager cluster key (for multi-node deployments)
-vault_wazuh_manager_cluster_key: \"$(generate_password 32)\"
+vault_wazuh_manager_cluster_key: \"${cluster_key}\"
 "
 
     # Write and encrypt
     echo "$vault_content" > "${VAULT_FILE}.tmp"
-    ansible-vault encrypt "${VAULT_FILE}.tmp" --vault-password-file "$VAULT_PASSWORD_FILE" --output "$VAULT_FILE"
+    ansible-vault encrypt "${VAULT_FILE}.tmp" --vault-password-file "$VAULT_PASSWORD_FILE" --encrypt-vault-id default --output "$VAULT_FILE"
     rm -f "${VAULT_FILE}.tmp"
     chmod 600 "$VAULT_FILE"
 
     print_success "Encrypted vault created: $VAULT_FILE"
-
-    # Also save plain text credentials for reference (with warning)
-    save_credential_files "$indexer_password" "$api_password" "$enrollment_password"
-}
-
-# Save credential files for reference
-save_credential_files() {
-    local indexer_password="$1"
-    local api_password="$2"
-    local enrollment_password="$3"
-
-    mkdir -p "$CREDENTIALS_DIR"
-    chmod 700 "$CREDENTIALS_DIR"
-
-    cat > "$CREDENTIALS_DIR/indexer_admin_password.txt" << EOF
-# Wazuh Indexer Admin Credentials
-# Generated: $(date -Iseconds)
-# WARNING: These credentials are also stored encrypted in group_vars/vault.yml
-
-Username: admin
-Password: ${indexer_password}
-
-Dashboard URL: https://<dashboard-ip>:443
-
-# SECURITY: Delete this file after noting the password!
-# The encrypted vault.yml is the authoritative source.
-EOF
-    chmod 600 "$CREDENTIALS_DIR/indexer_admin_password.txt"
-
-    cat > "$CREDENTIALS_DIR/api_password.txt" << EOF
-# Wazuh API Credentials
-# Generated: $(date -Iseconds)
-# WARNING: These credentials are also stored encrypted in group_vars/vault.yml
-
-Username: wazuh
-Password: ${api_password}
-
-API URL: https://<manager-ip>:55000
-
-# SECURITY: Delete this file after noting the password!
-# The encrypted vault.yml is the authoritative source.
-EOF
-    chmod 600 "$CREDENTIALS_DIR/api_password.txt"
-
-    cat > "$CREDENTIALS_DIR/agent_enrollment_password.txt" << EOF
-# Wazuh Agent Enrollment Credentials
-# Generated: $(date -Iseconds)
-# WARNING: These credentials are also stored encrypted in group_vars/vault.yml
-
-Password: ${enrollment_password}
-
-# SECURITY: Delete this file after noting the password!
-# The encrypted vault.yml is the authoritative source.
-EOF
-    chmod 600 "$CREDENTIALS_DIR/agent_enrollment_password.txt"
-
-    print_info "Credential reference files saved to: $CREDENTIALS_DIR/"
-    print_warning "These files are for reference only. The encrypted vault.yml is authoritative."
 }
 
 # View vault contents (decrypted)

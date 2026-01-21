@@ -38,7 +38,7 @@ ansible-galaxy collection install community.general
 ```
 
 The wizard guides you through:
-- Wazuh version selection (default: 4.14.1)
+- Wazuh version selection (default: 4.14.2)
 - Node IP addresses (indexer, manager, dashboard)
 - Agent hosts (optional)
 - Security features (vulnerability detection, FIM, SCA, etc.)
@@ -49,7 +49,9 @@ The wizard guides you through:
 
 Generated files:
 - `inventory/hosts.yml` - Ansible inventory
-- `group_vars/all.yml` - Configuration variables
+- `group_vars/all/main.yml` - Configuration variables
+- `group_vars/all/vault.yml` - Encrypted credentials (Ansible Vault)
+- `.vault_password` - Vault encryption key (keep secure!)
 - `ansible.cfg` - Ansible settings
 - `keys/` - SSH keypair for deployment
 - `files/certs/` - SSL/TLS certificates
@@ -113,12 +115,13 @@ ansible-playbook playbooks/wazuh-agents.yml
 
 ### 5. Access the Dashboard
 
-After deployment, credentials are saved to `credentials/`:
-- `credentials/indexer_admin_password.txt` - Dashboard/Indexer admin
-- `credentials/api_password.txt` - Wazuh API
-- `credentials/agent_enrollment_password.txt` - Agent enrollment
+After setup completes, credentials are displayed on screen and stored encrypted in Ansible Vault. To view them later:
 
-Access the dashboard at `https://<dashboard-ip>:443`
+```bash
+./scripts/manage-vault.sh view
+```
+
+Access the dashboard at `https://<dashboard-ip>:443` using the `admin` user.
 
 ## Post-Deployment Security
 
@@ -175,11 +178,11 @@ all:
         192.168.1.101:
 ```
 
-### Key Variables (group_vars/all.yml)
+### Key Variables (group_vars/all/main.yml)
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `wazuh_version` | Wazuh version to install | 4.14.1 |
+| `wazuh_version` | Wazuh version to install | 4.14.2 |
 | `wazuh_indexer_http_port` | Indexer HTTP port | 9200 |
 | `wazuh_manager_api_port` | Manager API port | 55000 |
 | `wazuh_dashboard_port` | Dashboard HTTPS port | 443 |
@@ -303,10 +306,12 @@ tail -f /var/log/filebeat/filebeat
 ### API Health Check
 
 ```bash
-# Indexer health (use password from credentials/indexer_admin_password.txt)
+# View credentials (run ./scripts/manage-vault.sh view to get passwords)
+
+# Indexer health
 curl -k -u admin:PASSWORD https://localhost:9200/_cluster/health?pretty
 
-# Manager API (use password from credentials/api_password.txt)
+# Manager API
 curl -k -u wazuh:PASSWORD https://localhost:55000/
 ```
 
@@ -326,10 +331,10 @@ If MITRE technique aggregations fail in the dashboard:
 
 ## Security Considerations
 
-1. Keep `credentials/` directory secure with restricted access (mode 0600)
+1. Back up `.vault_password` securely - required to decrypt credentials
 2. Use external CA certificates for production environments
 3. Restrict network access to management ports
 4. Enable firewall rules (`wazuh_configure_firewall: true`)
 5. Keep deployment user locked down between deployments
-6. Rotate credentials regularly
+6. Rotate credentials regularly (`./scripts/manage-vault.sh rotate`)
 7. Enable audit logging for compliance

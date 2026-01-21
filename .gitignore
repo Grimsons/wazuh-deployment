@@ -23,6 +23,9 @@ group_vars/all/main.yml
 group_vars/all/vault.yml
 ansible.cfg
 
+# Generated maintenance scripts
+scripts/run-scheduled-backup.sh
+
 # Generated certificates (keep directory structure, ignore cert files)
 files/certs/*.pem
 files/certs/*.crt
