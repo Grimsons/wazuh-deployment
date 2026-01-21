@@ -11,8 +11,9 @@ All credentials are encrypted using Ansible Vault by default:
 | File | Purpose |
 |------|---------|
 | `.vault_password` | Encryption key for Ansible Vault (KEEP SECURE!) |
-| `group_vars/vault.yml` | Encrypted credentials storage |
-| `credentials/*.txt` | Plaintext copies (delete after noting) |
+| `group_vars/all/vault.yml` | Encrypted credentials storage |
+
+Credentials are displayed at the end of `setup.sh` and stored only in the encrypted vault.
 
 ### Vault Management Commands
 
@@ -38,25 +39,12 @@ All passwords are automatically generated with the following characteristics:
 - Compliant with Wazuh's password requirements
 - Stored encrypted in Ansible Vault
 
-### Credential Files (Plaintext Copies)
-
-For convenience, plaintext copies are saved during setup:
-
-| File | Purpose |
-|------|---------|
-| `credentials/indexer_admin_password.txt` | Dashboard and Indexer admin login |
-| `credentials/api_password.txt` | Wazuh API authentication |
-| `credentials/agent_enrollment_password.txt` | Agent enrollment authentication |
-
-**Security Note**: Delete these plaintext files after noting the passwords. The encrypted `group_vars/vault.yml` is the authoritative source.
-
 ### Best Practices
 
 1. **Back up `.vault_password`**: Store this file securely offline - you cannot decrypt credentials without it
-2. **Delete plaintext credentials**: Remove `credentials/*.txt` after initial setup
-3. **Access control**: Restrict access to deployment host and vault password
-4. **Rotation**: Rotate credentials periodically using `./scripts/manage-vault.sh rotate`
-5. **Rekey periodically**: Change the vault encryption password with `./scripts/manage-vault.sh rekey`
+2. **Access control**: Restrict access to deployment host and vault password
+3. **Rotation**: Rotate credentials periodically using `./scripts/manage-vault.sh rotate`
+4. **Rekey periodically**: Change the vault encryption password with `./scripts/manage-vault.sh rekey`
 
 ## Certificate Management
 
@@ -156,8 +144,8 @@ wazuh_authd_use_password: true
 ```
 
 The enrollment password is:
-- Auto-generated during manager deployment
-- Stored in `credentials/agent_enrollment_password.txt`
+- Auto-generated during setup
+- Stored encrypted in `group_vars/all/vault.yml`
 - Deployed to `/var/ossec/etc/authd.pass` on the manager
 - Deployed to agents during agent role execution
 
@@ -318,7 +306,7 @@ Wazuh includes rules and dashboards for:
 - [ ] Verify dashboard access with correct credentials
 - [ ] Check audit logging is active
 - [ ] Test backup and restore procedures
-- [ ] Delete plaintext `credentials/*.txt` files after noting passwords
+- [ ] Back up `.vault_password` file securely
 
 ### Ongoing
 

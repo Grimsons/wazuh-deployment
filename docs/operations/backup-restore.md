@@ -59,9 +59,8 @@ ansible-playbook playbooks/backup.yml -e "include_indices=true"
 - `/etc/wazuh-dashboard/certs/` - SSL certificates
 
 ### Credentials
-- `./credentials/indexer_admin_password.txt`
-- `./credentials/api_password.txt`
-- `./credentials/manager_cluster_key.txt` (if clustered)
+- `./group_vars/all/vault.yml` - Encrypted credentials (Ansible Vault)
+- `./.vault_password` - Vault encryption key (back up securely!)
 
 ## Backup Storage
 
@@ -73,7 +72,7 @@ Backups are stored in timestamped directories:
 │   ├── indexer/
 │   ├── manager/
 │   ├── dashboard/
-│   └── credentials/
+│   └── vault/
 ├── 20240116_020000/
 └── checksums.sha256
 ```

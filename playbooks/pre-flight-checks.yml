@@ -35,7 +35,7 @@
         path: "{{ item.path }}"
       loop:
         - { path: "{{ playbook_dir }}/../inventory/hosts.yml", name: "Inventory" }
-        - { path: "{{ playbook_dir }}/../group_vars/all.yml", name: "Variables" }
+        - { path: "{{ playbook_dir }}/../group_vars/all/main.yml", name: "Variables" }
         - { path: "{{ playbook_dir }}/../ansible.cfg", name: "Ansible config" }
       register: required_files
 

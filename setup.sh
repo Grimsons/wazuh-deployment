@@ -123,14 +123,15 @@ prompt_with_default() {
     local default="$2"
     local var_name="$3"
     local is_password="${4:-false}"
+    local value=""
 
     if [ "$is_password" = "true" ]; then
-        echo -en "${CYAN}$prompt ${NC}[${YELLOW}hidden${NC}]: "
-        read -s value
+        # For passwords, -s hides input, no -e needed since no editing visible
+        read -rsp "$(echo -e "${CYAN}$prompt ${NC}[${YELLOW}hidden${NC}]: ")" value
         echo
     else
-        echo -en "${CYAN}$prompt ${NC}[${YELLOW}$default${NC}]: "
-        read value
+        # Use -erp with prompt passed through echo -e for color support
+        read -erp "$(echo -e "${CYAN}$prompt ${NC}[${YELLOW}$default${NC}]: ")" value
     fi
 
     if [ -z "$value" ]; then
@@ -145,10 +146,10 @@ prompt_yes_no() {
     local prompt="$1"
     local default="$2"
     local var_name="$3"
+    local value=""
 
     while true; do
-        echo -en "${CYAN}$prompt ${NC}[${YELLOW}$default${NC}]: "
-        read value
+        read -erp "$(echo -e "${CYAN}$prompt ${NC}[${YELLOW}$default${NC}]: ")" value
 
         if [ -z "$value" ]; then
             value="$default"
@@ -173,8 +174,7 @@ prompt_hosts() {
 
     local count=1
     while true; do
-        echo -en "  Host $count: "
-        read host
+        read -erp "  Host $count: " host
         if [ -z "$host" ]; then
             break
         fi
@@ -199,34 +199,36 @@ generate_password() {
     local symbols='!@#$%^&*'
 
     # Generate base password with mixed characters
+    local base_len=$((length - 4))
+
     if command -v openssl &>/dev/null; then
-        # Generate alphanumeric base, leaving room for guaranteed special chars
-        local base_len=$((length - 4))
-        password=$(openssl rand -base64 48 2>/dev/null | tr -d '/+=' | head -c "$base_len")
+        # Generate more than needed and take what we need
+        password=$(openssl rand -base64 100 2>/dev/null | tr -d '/+=\n' | head -c "$base_len")
     fi
 
-    # Fallback to /dev/urandom
-    if [ -z "$password" ] || [ ${#password} -lt $((length - 4)) ]; then
-        password=$(head -c 100 /dev/urandom 2>/dev/null | LC_ALL=C tr -dc 'a-zA-Z0-9' | head -c $((length - 4)))
-    fi
+    # Fallback to /dev/urandom if openssl failed or didn't generate enough
+    while [ ${#password} -lt "$base_len" ]; do
+        password="${password}$(head -c 200 /dev/urandom 2>/dev/null | LC_ALL=C tr -dc 'a-zA-Z0-9' | head -c $((base_len - ${#password})))"
+    done
 
-    # Ensure password meets Wazuh requirements by appending guaranteed characters
-    # Add: 1 uppercase, 1 lowercase, 1 number, 1 symbol
-    local upper=$(head -c 10 /dev/urandom | LC_ALL=C tr -dc 'A-Z' | head -c 1)
-    local lower=$(head -c 10 /dev/urandom | LC_ALL=C tr -dc 'a-z' | head -c 1)
-    local number=$(head -c 10 /dev/urandom | LC_ALL=C tr -dc '0-9' | head -c 1)
+    # Ensure we have exactly base_len characters
+    password="${password:0:$base_len}"
+
+    # Generate guaranteed characters (use more bytes to ensure we get one)
+    local upper=$(head -c 100 /dev/urandom | LC_ALL=C tr -dc 'A-Z' | head -c 1)
+    local lower=$(head -c 100 /dev/urandom | LC_ALL=C tr -dc 'a-z' | head -c 1)
+    local number=$(head -c 100 /dev/urandom | LC_ALL=C tr -dc '0-9' | head -c 1)
     local symbol="${symbols:$((RANDOM % ${#symbols})):1}"
+
+    # Fallback if any character generation failed
+    [ -z "$upper" ] && upper="A"
+    [ -z "$lower" ] && lower="z"
+    [ -z "$number" ] && number="7"
 
     password="${password}${upper}${lower}${number}${symbol}"
 
     # Shuffle the password to distribute special chars
     password=$(echo "$password" | fold -w1 | shuf | tr -d '\n')
-
-    # Ensure password meets minimum length
-    if [ ${#password} -lt "$length" ]; then
-        print_error "Failed to generate secure password"
-        exit 1
-    fi
 
     echo "$password"
 }
@@ -355,11 +357,7 @@ main() {
     print_section "Security Configuration"
 
     print_info "All passwords are auto-generated during deployment for security."
-    print_info "Credentials are saved to ./credentials/ directory."
-    echo
-    print_info "Generated credentials files:"
-    print_info "  - ./credentials/indexer_admin_password.txt"
-    print_info "  - ./credentials/api_password.txt"
+    print_info "Credentials will be encrypted in Ansible Vault and displayed at the end."
     echo
 
     prompt_yes_no "Provide custom passwords instead of auto-generating?" "no" "CUSTOM_PASSWORDS"
@@ -391,7 +389,7 @@ main() {
     USE_VAULT="true"
     print_success "Ansible Vault will be used for credential encryption"
     print_info "Vault password will be stored in: .vault_password"
-    print_info "Encrypted credentials will be in: group_vars/vault.yml"
+    print_info "Encrypted credentials will be in: group_vars/all/vault.yml"
 
     # ═══════════════════════════════════════════════════════════════
     # SSL/TLS CONFIGURATION
@@ -428,22 +426,100 @@ main() {
     # ═══════════════════════════════════════════════════════════════
     print_section "SSH Configuration"
 
+    print_info "Configure SSH access to your Wazuh servers"
+    print_info "(indexers, managers, dashboard hosts, and agents)"
+    echo
+
+    # Collect all hosts for per-host credential prompts (including agents if configured)
+    ALL_INFRA_HOSTS=()
+    for h in "${INDEXER_NODES_ARRAY[@]}" "${MANAGER_NODES_ARRAY[@]}" "${DASHBOARD_NODES_ARRAY[@]}" "${AGENT_NODES_ARRAY[@]}"; do
+        # Add only unique hosts
+        local found=0
+        if [ ${#ALL_INFRA_HOSTS[@]} -gt 0 ]; then
+            for existing in "${ALL_INFRA_HOSTS[@]}"; do
+                if [ "$existing" = "$h" ]; then
+                    found=1
+                    break
+                fi
+            done
+        fi
+        [ $found -eq 0 ] && ALL_INFRA_HOSTS+=("$h")
+    done
+
     prompt_yes_no "Generate new SSH key pair for Ansible?" "yes" "GENERATE_SSH_KEY"
 
     if [ "$GENERATE_SSH_KEY" = "true" ]; then
         ANSIBLE_SSH_KEY="${SCRIPT_DIR}/keys/wazuh_ansible_key"
         print_info "SSH key will be generated at: ${ANSIBLE_SSH_KEY}"
-        prompt_with_default "SSH user for Ansible (to create on targets)" "wazuh-deploy" "ANSIBLE_USER"
+        echo
+        print_info "Ansible user: A dedicated user to create for Ansible deployments"
+        prompt_with_default "Ansible deployment user (will be created)" "wazuh-deploy" "ANSIBLE_USER"
     else
-        prompt_with_default "SSH user for Ansible" "root" "ANSIBLE_USER"
         prompt_with_default "SSH private key path" "~/.ssh/id_rsa" "ANSIBLE_SSH_KEY"
+        prompt_with_default "Default SSH user for Ansible" "root" "ANSIBLE_USER"
     fi
 
-    prompt_with_default "SSH port" "22" "ANSIBLE_SSH_PORT"
+    prompt_with_default "Default SSH port" "22" "ANSIBLE_SSH_PORT"
     prompt_yes_no "Use sudo for privilege escalation?" "yes" "USE_BECOME"
 
+    # Per-host SSH credentials
+    echo
+    print_info "You can configure SSH credentials per host, or use the same for all."
+    prompt_yes_no "Do all hosts use the same initial SSH user/password?" "yes" "SAME_SSH_CREDS"
+
+    # Declare associative arrays for per-host credentials
+    declare -gA HOST_SSH_USER
+    declare -gA HOST_SSH_PASS
+
+    if [ "$SAME_SSH_CREDS" = "true" ]; then
+        echo
+        print_info "Initial SSH user: The existing user on your servers to connect with"
+        prompt_with_default "Initial SSH user for all hosts" "root" "INITIAL_SSH_USER"
+        echo
+        print_info "SSH password is used if not using key-based authentication."
+        print_info "Leave empty if using SSH keys only."
+        prompt_with_default "SSH password for all hosts" "" "DEFAULT_SSH_PASS" "true"
+
+        # Set same credentials for all hosts
+        for host in "${ALL_INFRA_HOSTS[@]}"; do
+            HOST_SSH_USER["$host"]="$INITIAL_SSH_USER"
+            HOST_SSH_PASS["$host"]="$DEFAULT_SSH_PASS"
+        done
+    else
+        echo
+        print_info "Enter SSH credentials for each infrastructure host:"
+        echo
+        for host in "${ALL_INFRA_HOSTS[@]}"; do
+            echo -e "${CYAN}Host: ${host}${NC}"
+            local user_var=""
+            local pass_var=""
+            prompt_with_default "  SSH user" "root" "user_var"
+            prompt_with_default "  SSH password (empty for key auth)" "" "pass_var" "true"
+            HOST_SSH_USER["$host"]="$user_var"
+            HOST_SSH_PASS["$host"]="$pass_var"
+            echo
+        done
+        INITIAL_SSH_USER="root"  # Default fallback
+    fi
+
+    # Sudo/become password configuration
     if [ "$USE_BECOME" = "true" ]; then
-        prompt_yes_no "Require sudo password?" "no" "BECOME_ASK_PASS"
+        echo
+        print_info "Sudo password configuration for privilege escalation."
+
+        # Check if we have an SSH password to potentially reuse
+        if [ -n "${DEFAULT_SSH_PASS:-}" ]; then
+            prompt_yes_no "Is the sudo password the same as the SSH password?" "yes" "SUDO_SAME_AS_SSH"
+            if [ "$SUDO_SAME_AS_SSH" = "true" ]; then
+                BECOME_PASS="$DEFAULT_SSH_PASS"
+                print_info "Using SSH password for sudo"
+            else
+                prompt_with_default "Sudo password" "" "BECOME_PASS" "true"
+            fi
+        else
+            # No SSH password was provided, ask for sudo password
+            prompt_with_default "Sudo password (required for privilege escalation)" "" "BECOME_PASS" "true"
+        fi
     fi
 
     prompt_yes_no "Create client preparation package?" "yes" "CREATE_PREP_PACKAGE"
@@ -547,7 +623,7 @@ main() {
     echo "  2) Weekly"
     echo "  3) Disabled (manual backups only)"
     echo
-    read -rp "$(echo -e "${YELLOW}Select backup schedule [1]: ${NC}")" BACKUP_SCHEDULE_CHOICE
+    read -erp "$(echo -e "${YELLOW}Select backup schedule [1]: ${NC}")" BACKUP_SCHEDULE_CHOICE
     BACKUP_SCHEDULE_CHOICE=${BACKUP_SCHEDULE_CHOICE:-1}
 
     case $BACKUP_SCHEDULE_CHOICE in
@@ -585,7 +661,7 @@ main() {
         echo "  1) Daily (recommended)"
         echo "  2) Weekly"
         echo
-        read -rp "$(echo -e "${YELLOW}Select log cleanup schedule [1]: ${NC}")" LOG_CLEANUP_SCHEDULE_CHOICE
+        read -erp "$(echo -e "${YELLOW}Select log cleanup schedule [1]: ${NC}")" LOG_CLEANUP_SCHEDULE_CHOICE
         LOG_CLEANUP_SCHEDULE_CHOICE=${LOG_CLEANUP_SCHEDULE_CHOICE:-1}
 
         case $LOG_CLEANUP_SCHEDULE_CHOICE in
@@ -603,18 +679,21 @@ main() {
     # Create inventory file
     print_info "Creating inventory file..."
 
-    cat > "$SCRIPT_DIR/inventory/hosts.yml" << EOF
+    cat > "$SCRIPT_DIR/inventory/hosts.yml" << 'EOF'
 ---
 all:
   vars:
-    ansible_user: ${ANSIBLE_USER}
+    ansible_user: "{{ vault_ansible_user }}"
+EOF
+    cat >> "$SCRIPT_DIR/inventory/hosts.yml" << EOF
     ansible_ssh_private_key_file: ${ANSIBLE_SSH_KEY}
     ansible_port: ${ANSIBLE_SSH_PORT}
     ansible_become: ${USE_BECOME}
 EOF
 
-    if [ "$BECOME_ASK_PASS" = "true" ]; then
-        echo "    ansible_become_ask_pass: true" >> "$SCRIPT_DIR/inventory/hosts.yml"
+    # Add become password if sudo is enabled and password is set
+    if [ "$USE_BECOME" = "true" ] && [ -n "${BECOME_PASS:-}" ]; then
+        echo '    ansible_become_pass: "{{ vault_ansible_become_password }}"' >> "$SCRIPT_DIR/inventory/hosts.yml"
     fi
 
     cat >> "$SCRIPT_DIR/inventory/hosts.yml" << EOF
@@ -624,7 +703,7 @@ EOF
       hosts:
 EOF
 
-    # Add indexer hosts
+    # Add indexer hosts with per-host SSH credentials
     for i in "${!INDEXER_NODES_ARRAY[@]}"; do
         node="${INDEXER_NODES_ARRAY[$i]}"
         node_name="indexer-$((i+1))"
@@ -632,6 +711,14 @@ EOF
         ${node}:
           indexer_node_name: ${node_name}
 EOF
+        # Add per-host SSH user if different from default
+        if [ -n "${HOST_SSH_USER[$node]:-}" ]; then
+            echo "          ansible_user: ${HOST_SSH_USER[$node]}" >> "$SCRIPT_DIR/inventory/hosts.yml"
+        fi
+        # Add per-host SSH password if set
+        if [ -n "${HOST_SSH_PASS[$node]:-}" ]; then
+            echo "          ansible_ssh_pass: \"{{ vault_ssh_pass_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/hosts.yml"
+        fi
         if [ $i -eq 0 ]; then
             echo "          indexer_cluster_initial_master: true" >> "$SCRIPT_DIR/inventory/hosts.yml"
         fi
@@ -643,7 +730,7 @@ EOF
       hosts:
 EOF
 
-    # Add manager hosts
+    # Add manager hosts with per-host SSH credentials
     for i in "${!MANAGER_NODES_ARRAY[@]}"; do
         node="${MANAGER_NODES_ARRAY[$i]}"
         node_name="manager-$((i+1))"
@@ -651,6 +738,14 @@ EOF
         ${node}:
           manager_node_name: ${node_name}
 EOF
+        # Add per-host SSH user if different from default
+        if [ -n "${HOST_SSH_USER[$node]:-}" ]; then
+            echo "          ansible_user: ${HOST_SSH_USER[$node]}" >> "$SCRIPT_DIR/inventory/hosts.yml"
+        fi
+        # Add per-host SSH password if set
+        if [ -n "${HOST_SSH_PASS[$node]:-}" ]; then
+            echo "          ansible_ssh_pass: \"{{ vault_ssh_pass_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/hosts.yml"
+        fi
         if [ $MANAGER_COUNT -gt 1 ]; then
             if [ $i -eq 0 ]; then
                 echo "          manager_node_type: master" >> "$SCRIPT_DIR/inventory/hosts.yml"
@@ -666,9 +761,17 @@ EOF
       hosts:
 EOF
 
-    # Add dashboard hosts
+    # Add dashboard hosts with per-host SSH credentials
     for node in "${DASHBOARD_NODES_ARRAY[@]}"; do
         echo "        ${node}:" >> "$SCRIPT_DIR/inventory/hosts.yml"
+        # Add per-host SSH user if different from default
+        if [ -n "${HOST_SSH_USER[$node]:-}" ]; then
+            echo "          ansible_user: ${HOST_SSH_USER[$node]}" >> "$SCRIPT_DIR/inventory/hosts.yml"
+        fi
+        # Add per-host SSH password if set
+        if [ -n "${HOST_SSH_PASS[$node]:-}" ]; then
+            echo "          ansible_ssh_pass: \"{{ vault_ssh_pass_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/hosts.yml"
+        fi
     done
 
     if [ "$DEPLOY_AGENTS" = "true" ] && [ -n "$AGENT_NODES" ]; then
@@ -677,10 +780,33 @@ EOF
     wazuh_agents:
       hosts:
 EOF
+        # Add agent hosts with per-host SSH credentials
         for node in "${AGENT_NODES_ARRAY[@]}"; do
             echo "        ${node}:" >> "$SCRIPT_DIR/inventory/hosts.yml"
+            # Add per-host SSH user if different from default
+            if [ -n "${HOST_SSH_USER[$node]:-}" ]; then
+                echo "          ansible_user: ${HOST_SSH_USER[$node]}" >> "$SCRIPT_DIR/inventory/hosts.yml"
+            fi
+            # Add per-host SSH password if set
+            if [ -n "${HOST_SSH_PASS[$node]:-}" ]; then
+                echo "          ansible_ssh_pass: \"{{ vault_ssh_pass_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/hosts.yml"
+            fi
         done
     fi
+
+    # Add localhost with local connection (doesn't use vault credentials)
+    cat >> "$SCRIPT_DIR/inventory/hosts.yml" << 'EOF'
+
+    # Local deployment host (for running maintenance tasks)
+    local:
+      hosts:
+        localhost:
+          ansible_connection: local
+          ansible_user: "{{ lookup('env', 'USER') }}"
+          ansible_become: false
+          ansible_become_pass: ""
+          ansible_ssh_pass: ""
+EOF
 
     print_success "Inventory file created: inventory/hosts.yml"
 
@@ -711,38 +837,14 @@ wazuh_indexer_heap_size: "${INDEXER_HEAP_SIZE}"
 wazuh_indexer_admin_user: "${INDEXER_ADMIN_USER}"
 EOF
 
-    # Create credentials directory with secure permissions
-    mkdir -p "$SCRIPT_DIR/credentials"
-    chmod 700 "$SCRIPT_DIR/credentials"
-
-    # Store or generate indexer admin password securely
-    local indexer_pass_file="$SCRIPT_DIR/credentials/indexer_admin_password.txt"
-    if [ -n "$INDEXER_ADMIN_PASSWORD" ]; then
-        cat > "$indexer_pass_file" << PASSEOF
-# Wazuh Indexer Admin Credentials
-# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-
-Username: ${INDEXER_ADMIN_USER}
-Password: ${INDEXER_ADMIN_PASSWORD}
-
-# IMPORTANT: Keep this file secure and delete after noting the password!
-PASSEOF
-        print_info "Custom indexer password saved to credentials file"
-    elif [ ! -f "$indexer_pass_file" ]; then
-        local gen_pass
-        gen_pass=$(generate_password 24)
-        cat > "$indexer_pass_file" << PASSEOF
-# Wazuh Indexer Admin Credentials
-# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-
-Username: ${INDEXER_ADMIN_USER}
-Password: ${gen_pass}
-
-# IMPORTANT: Keep this file secure and delete after noting the password!
-PASSEOF
-        print_info "Generated indexer password saved to credentials file"
+    # Generate or use provided indexer admin password
+    if [ -n "${INDEXER_ADMIN_PASSWORD:-}" ]; then
+        GENERATED_INDEXER_PASSWORD="${INDEXER_ADMIN_PASSWORD}"
+        print_info "Using custom indexer password"
+    else
+        GENERATED_INDEXER_PASSWORD=$(generate_password 24)
+        print_info "Generated indexer admin password"
     fi
-    chmod 600 "$indexer_pass_file"
 
     # Reference password via Ansible Vault
     cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << 'EOF'
@@ -774,34 +876,14 @@ wazuh_manager_agent_port: ${AGENT_PORT}
 wazuh_api_user: "${API_USER}"
 EOF
 
-    # Store or generate API password securely
-    local api_pass_file="$SCRIPT_DIR/credentials/api_password.txt"
-    if [ -n "$API_PASSWORD" ]; then
-        cat > "$api_pass_file" << PASSEOF
-# Wazuh API Credentials
-# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-
-Username: ${API_USER}
-Password: ${API_PASSWORD}
-
-# IMPORTANT: Keep this file secure and delete after noting the password!
-PASSEOF
-        print_info "Custom API password saved to credentials file"
-    elif [ ! -f "$api_pass_file" ]; then
-        local gen_api_pass
-        gen_api_pass=$(generate_password 24)
-        cat > "$api_pass_file" << PASSEOF
-# Wazuh API Credentials
-# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-
-Username: ${API_USER}
-Password: ${gen_api_pass}
-
-# IMPORTANT: Keep this file secure and delete after noting the password!
-PASSEOF
-        print_info "Generated API password saved to credentials file"
+    # Generate or use provided API password
+    if [ -n "${API_PASSWORD:-}" ]; then
+        GENERATED_API_PASSWORD="${API_PASSWORD}"
+        print_info "Using custom API password"
+    else
+        GENERATED_API_PASSWORD=$(generate_password 24)
+        print_info "Generated API password"
     fi
-    chmod 600 "$api_pass_file"
 
     # Reference password via Ansible Vault
     cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << 'EOF'
@@ -810,12 +892,24 @@ PASSEOF
 wazuh_api_password: "{{ vault_wazuh_api_password }}"
 EOF
 
-    if [ $MANAGER_COUNT -gt 1 ]; then
-        # Store cluster key securely
-        local cluster_key_file="$SCRIPT_DIR/credentials/manager_cluster_key.txt"
-        echo "$MANAGER_CLUSTER_KEY" > "$cluster_key_file"
-        chmod 600 "$cluster_key_file"
+    # Build per-host SSH credentials string for vault (format: host1:user1:pass1,host2:user2:pass2)
+    HOST_CREDENTIALS_STRING=""
+    for host in "${ALL_INFRA_HOSTS[@]}"; do
+        local user="${HOST_SSH_USER[$host]:-${INITIAL_SSH_USER:-root}}"
+        local pass="${HOST_SSH_PASS[$host]:-${DEFAULT_SSH_PASS:-}}"
+        if [ -n "$pass" ]; then
+            if [ -n "$HOST_CREDENTIALS_STRING" ]; then
+                HOST_CREDENTIALS_STRING="${HOST_CREDENTIALS_STRING},"
+            fi
+            HOST_CREDENTIALS_STRING="${HOST_CREDENTIALS_STRING}${host}:${user}:${pass}"
+        fi
+    done
 
+    # Generate enrollment password
+    GENERATED_ENROLLMENT_PASSWORD=$(generate_password 24)
+    print_info "Generated agent enrollment password"
+
+    if [ $MANAGER_COUNT -gt 1 ]; then
         cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << EOF
 
 # Manager cluster settings
@@ -1231,10 +1325,18 @@ SELFEXTRACT_EOF
             print_success "Vault password created: .vault_password"
         fi
 
-        # Create encrypted vault with credentials
+        # Create encrypted vault with credentials via environment variables
         print_info "Creating encrypted vault with credentials..."
+        VAULT_INDEXER_PASSWORD="$GENERATED_INDEXER_PASSWORD" \
+        VAULT_API_PASSWORD="$GENERATED_API_PASSWORD" \
+        VAULT_ENROLLMENT_PASSWORD="$GENERATED_ENROLLMENT_PASSWORD" \
+        VAULT_ANSIBLE_USER="$ANSIBLE_USER" \
+        VAULT_CONNECTION_PASSWORD="${DEFAULT_SSH_PASS:-}" \
+        VAULT_BECOME_PASSWORD="${BECOME_PASS:-}" \
+        VAULT_HOST_CREDENTIALS="$HOST_CREDENTIALS_STRING" \
+        VAULT_CLUSTER_KEY="${MANAGER_CLUSTER_KEY:-}" \
         bash "${SCRIPT_DIR}/scripts/manage-vault.sh" create
-        print_success "Encrypted credentials stored in: group_vars/vault.yml"
+        print_success "Encrypted credentials stored in: group_vars/all/vault.yml"
 
         print_warning "IMPORTANT: Back up .vault_password securely!"
         print_warning "Without it, you cannot decrypt your credentials."
@@ -1325,10 +1427,22 @@ SELFEXTRACT_EOF
     fi
 
     echo
+    echo -e "${CYAN}SSH Configuration:${NC}"
+    if [ "$GENERATE_SSH_KEY" = "true" ]; then
+        echo "  - Initial SSH user: ${INITIAL_SSH_USER}"
+        echo "  - Ansible deployment user: ${ANSIBLE_USER} (will be created)"
+        echo "  - SSH key: ${ANSIBLE_SSH_KEY} (will be generated)"
+    else
+        echo "  - SSH user: ${ANSIBLE_USER}"
+        echo "  - SSH key: ${ANSIBLE_SSH_KEY}"
+    fi
+    echo "  - SSH port: ${ANSIBLE_SSH_PORT}"
+
+    echo
     echo -e "${CYAN}Security:${NC}"
     echo "  - Ansible Vault: Enabled (encrypted credentials)"
     echo "  - Vault password: .vault_password"
-    echo "  - Encrypted vault: group_vars/vault.yml"
+    echo "  - Encrypted vault: group_vars/all/vault.yml"
     if [ "$EXTERNAL_CA" = "true" ]; then
         echo "  - Certificates: External CA (user-provided)"
     else
@@ -1394,7 +1508,7 @@ SELFEXTRACT_EOF
     echo -e "1. Review the generated configuration files:"
     echo -e "   ${CYAN}inventory/hosts.yml${NC}    - Inventory file"
     echo -e "   ${CYAN}group_vars/all/main.yml${NC}     - Variables file"
-    echo -e "   ${CYAN}group_vars/vault.yml${NC}   - Encrypted credentials"
+    echo -e "   ${CYAN}group_vars/all/vault.yml${NC} - Encrypted credentials"
     echo -e "   ${CYAN}ansible.cfg${NC}            - Ansible configuration"
     echo -e "   ${CYAN}.vault_password${NC}        - Vault encryption key (KEEP SECURE!)"
     echo
@@ -1441,7 +1555,6 @@ SELFEXTRACT_EOF
         echo -e "4. After deployment, view your credentials:"
     fi
     echo -e "   ${YELLOW}./scripts/manage-vault.sh view${NC}"
-    echo -e "   Or see plaintext copies in: ${CYAN}./credentials/${NC}"
     echo
 
     if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
@@ -1474,7 +1587,6 @@ SELFEXTRACT_EOF
     print_warning "SECURITY REMINDERS:"
     echo -e "  - Back up ${CYAN}.vault_password${NC} securely (required to decrypt credentials)"
     echo -e "  - Keep ${CYAN}keys/wazuh_ansible_key${NC} private (provides host access)"
-    echo -e "  - Delete ${CYAN}credentials/*.txt${NC} after noting passwords (plaintext copies)"
     echo
 
     # Display vault password prominently
@@ -1497,6 +1609,29 @@ SELFEXTRACT_EOF
         echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
         echo
     fi
+
+    # Display admin credentials
+    print_header "WAZUH ADMIN CREDENTIALS"
+    echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}  SAVE THESE CREDENTIALS - THEY ARE STORED IN THE VAULT${NC}"
+    echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
+    echo
+    echo -e "  ${CYAN}Wazuh Dashboard / Indexer Admin:${NC}"
+    echo -e "    Username: ${YELLOW}${INDEXER_ADMIN_USER}${NC}"
+    echo -e "    Password: ${YELLOW}${GENERATED_INDEXER_PASSWORD}${NC}"
+    echo
+    echo -e "  ${CYAN}Wazuh API:${NC}"
+    echo -e "    Username: ${YELLOW}${API_USER}${NC}"
+    echo -e "    Password: ${YELLOW}${GENERATED_API_PASSWORD}${NC}"
+    echo
+    echo -e "  ${CYAN}Dashboard URL:${NC} https://${DASHBOARD_NODES_ARRAY[0]}:${DASHBOARD_PORT}"
+    echo -e "  ${CYAN}API URL:${NC} https://${MANAGER_NODES_ARRAY[0]}:${MANAGER_API_PORT}"
+    echo
+    echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${YELLOW}⚠ These credentials are encrypted in the vault.${NC}"
+    echo -e "${YELLOW}⚠ Use './scripts/manage-vault.sh view' to see them later.${NC}"
+    echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
+    echo
 
     print_success "Setup complete!"
 }

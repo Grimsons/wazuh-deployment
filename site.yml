@@ -113,7 +113,7 @@
 
 # Post-deployment Summary
 - name: Wazuh Deployment - Summary
-  hosts: localhost
+  hosts: all
   gather_facts: false
   tasks:
     - name: Display deployment summary

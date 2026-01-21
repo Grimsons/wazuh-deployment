@@ -55,7 +55,7 @@ ansible-galaxy install -r requirements.yml
 ```
 
 The wizard configures:
-- Wazuh version selection (default: 4.14.1)
+- Wazuh version selection (default: 4.14.2)
 - Node IP addresses (indexer, manager, dashboard)
 - Agent hosts (optional)
 - Feature toggles (vulnerability detection, FIM, SCA, etc.)
@@ -64,14 +64,13 @@ The wizard configures:
 
 Generated files:
 - `inventory/hosts.yml` - Ansible inventory
-- `group_vars/all.yml` - Configuration variables
-- `group_vars/vault.yml` - Encrypted credentials (Ansible Vault)
+- `group_vars/all/main.yml` - Configuration variables
+- `group_vars/all/vault.yml` - Encrypted credentials (Ansible Vault)
 - `.vault_password` - Vault encryption key (keep secure!)
 - `ansible.cfg` - Ansible settings
 - `keys/` - SSH keypair for deployment
 - `client-prep/` - Host preparation package
 - `files/certs/` - SSL/TLS certificates
-- `credentials/` - Plaintext credential copies (delete after noting)
 
 ### 2. Prepare Target Hosts
 
@@ -107,12 +106,13 @@ ansible-playbook playbooks/wazuh-agents.yml
 
 ### 5. Access Dashboard
 
-After deployment, credentials are saved to `credentials/`:
-- `credentials/indexer_admin_password.txt` - Indexer/Dashboard admin credentials
-- `credentials/api_password.txt` - Wazuh API credentials
-- `credentials/agent_enrollment_password.txt` - Agent enrollment password
+After setup completes, credentials are displayed on screen and stored encrypted in Ansible Vault. To view them later:
 
-Access the dashboard at `https://<dashboard-ip>:443`
+```bash
+./scripts/manage-vault.sh view
+```
+
+Access the dashboard at `https://<dashboard-ip>:443` using the `admin` user.
 
 ### 6. Redeployment (Future Updates)
 
@@ -144,13 +144,9 @@ wazuh-deployment/
 │   └── hosts.yml               # Generated inventory
 │
 ├── group_vars/
-│   ├── all.yml                 # Configuration variables
-│   └── vault.yml               # Encrypted credentials (Ansible Vault)
-│
-├── credentials/                 # Plaintext credential copies (delete after setup)
-│   ├── indexer_admin_password.txt
-│   ├── api_password.txt
-│   └── agent_enrollment_password.txt
+│   └── all/
+│       ├── main.yml            # Configuration variables
+│       └── vault.yml           # Encrypted credentials (Ansible Vault)
 │
 ├── scripts/
 │   ├── manage-vault.sh         # Vault credential management
@@ -352,11 +348,11 @@ ansible-playbook playbooks/health-check-alerts.yml -e "alert_slack=true" -e "ale
 
 ## Configuration
 
-### Key Variables (group_vars/all.yml)
+### Key Variables (group_vars/all/main.yml)
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `wazuh_version` | Wazuh version | 4.14.1 |
+| `wazuh_version` | Wazuh version | 4.14.2 |
 | `wazuh_indexer_http_port` | Indexer HTTP port | 9200 |
 | `wazuh_manager_api_port` | Manager API port | 55000 |
 | `wazuh_dashboard_port` | Dashboard HTTPS port | 443 |
@@ -528,7 +524,7 @@ curl -k -u admin:<password> https://localhost:9200/_cluster/health?pretty
 | Connection refused | Check firewall rules, verify service status |
 | Certificate errors | Regenerate with `./generate-certs.sh` |
 | Agent not connecting | Verify manager IP and port 1514 accessibility |
-| Dashboard 401 errors | Check credentials in `credentials/` directory |
+| Dashboard 401 errors | Run `./scripts/manage-vault.sh view` to verify credentials |
 | No alerts in dashboard | Verify Filebeat is running on manager |
 
 ### View Logs
@@ -681,7 +677,6 @@ wazuh_lockdown_deploy_user: false
 ## Security Recommendations
 
 - **Back up `.vault_password`** - Required to decrypt credentials; store securely offline
-- Delete plaintext `credentials/` files after noting passwords
 - Use external CA certificates for production environments
 - Restrict network access to management ports
 - Enable audit logging on all nodes

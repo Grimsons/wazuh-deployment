@@ -13,6 +13,22 @@
 # when running playbooks with --vault-password-file .vault_password
 
 # ═══════════════════════════════════════════════════════════════
+# Ansible SSH User
+# ═══════════════════════════════════════════════════════════════
+# Used for:
+# - SSH connection to managed hosts
+# - User created on targets for deployment
+vault_ansible_user: "wazuh-deploy"
+
+# ═══════════════════════════════════════════════════════════════
+# Ansible Connection Password (SSH/WinRM)
+# ═══════════════════════════════════════════════════════════════
+# Used for:
+# - SSH password authentication (if not using keys)
+# - WinRM connection to Windows hosts
+vault_ansible_connection_password: ""
+
+# ═══════════════════════════════════════════════════════════════
 # Indexer/Dashboard Admin Credentials
 # ═══════════════════════════════════════════════════════════════
 # Used for:

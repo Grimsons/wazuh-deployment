@@ -194,9 +194,9 @@ curl -k -u admin:PASSWORD https://INDEXER_IP:9200/_cluster/health?pretty
 
 **Solutions:**
 
-1. **Verify password in credentials file:**
+1. **Verify password from vault:**
    ```bash
-   cat credentials/indexer_admin_password.txt
+   ./scripts/manage-vault.sh view
    ```
 
 2. **Re-apply security configuration:**
@@ -270,9 +270,10 @@ curl -k -u admin:PASSWORD https://INDEXER_IP:9200/_cluster/health?pretty
 
 2. **Check enrollment password:**
    ```bash
+   # On the manager
    sudo cat /var/ossec/etc/authd.pass
-   cat credentials/agent_enrollment_password.txt
-   # These should match
+   # Compare with vault value
+   ./scripts/manage-vault.sh view | grep enrollment
    ```
 
 3. **Check firewall allows port 1515:**
@@ -390,9 +391,9 @@ curl -k -u admin:PASSWORD https://INDEXER_IP:9200/_cluster/health?pretty
    curl -k -u wazuh:API_PASSWORD https://MANAGER_IP:55000/
    ```
 
-3. **Check API credentials match:**
+3. **Check API credentials from vault:**
    ```bash
-   cat credentials/api_password.txt
+   ./scripts/manage-vault.sh view | grep api
    ```
 
 ---
@@ -562,6 +563,11 @@ ansible-playbook playbooks/restore.yml -e "restore_from=BACKUP_TIMESTAMP"
 ### Reset Admin Password
 
 ```bash
+# Option 1: Use the vault rotation (recommended)
+./scripts/manage-vault.sh rotate
+ansible-playbook site.yml  # Redeploy with new credentials
+
+# Option 2: Manual reset
 # Generate new password hash
 sudo /usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p "NEW_PASSWORD"
 
@@ -571,8 +577,8 @@ sudo vi /etc/wazuh-indexer/opensearch-security/internal_users.yml
 # Apply changes
 sudo /usr/share/wazuh-indexer/bin/indexer-security-init.sh
 
-# Update credentials file
-echo "Password: NEW_PASSWORD" > credentials/indexer_admin_password.txt
+# Update the vault with the new password
+./scripts/manage-vault.sh edit
 ```
 
 ### Full Stack Restart
