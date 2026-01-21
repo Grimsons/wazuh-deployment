@@ -14,7 +14,9 @@ NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-VAULT_FILE="$PROJECT_DIR/group_vars/vault.yml"
+# Use group_vars/all/ directory structure for proper Ansible auto-loading
+VAULT_DIR="$PROJECT_DIR/group_vars/all"
+VAULT_FILE="$VAULT_DIR/vault.yml"
 VAULT_PASSWORD_FILE="$PROJECT_DIR/.vault_password"
 CREDENTIALS_DIR="$PROJECT_DIR/credentials"
 
@@ -91,6 +93,7 @@ create_vault() {
     fi
 
     mkdir -p "$CREDENTIALS_DIR"
+    mkdir -p "$VAULT_DIR"
 
     # Generate credentials if they don't exist
     local indexer_password=""

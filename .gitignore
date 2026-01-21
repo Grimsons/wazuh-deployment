@@ -19,6 +19,8 @@ wazuh-client-prep.sh
 inventory/hosts.yml
 group_vars/all.yml
 group_vars/vault.yml
+group_vars/all/main.yml
+group_vars/all/vault.yml
 ansible.cfg
 
 # Generated certificates (keep directory structure, ignore cert files)

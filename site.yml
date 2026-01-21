@@ -103,6 +103,14 @@
         msg: "Deployment user '{{ ansible_user }}' has been locked down on {{ inventory_hostname }}"
       when: do_lockdown | bool
 
+# Post-deployment: Setup automated maintenance (backup & log cleanup cron jobs)
+- name: Wazuh Deployment - Maintenance Cron Setup
+  import_playbook: playbooks/setup-maintenance-cron.yml
+  tags:
+    - maintenance
+    - cron
+    - backup
+
 # Post-deployment Summary
 - name: Wazuh Deployment - Summary
   hosts: localhost
@@ -137,6 +145,17 @@
           {% endfor %}
 
           ══════════════════════════════════════════════════════════════
+          MAINTENANCE:
+          - Automated backups: {{ wazuh_backup_schedule | default('daily') }}
+          {% if wazuh_backup_schedule | default('daily') != 'disabled' %}
+          - Backup retention: {{ wazuh_backup_retention | default(7) }} backups
+          {% endif %}
+          - Log cleanup: {{ 'enabled' if wazuh_log_cleanup_enabled | default(true) else 'disabled' }}
+          {% if wazuh_log_cleanup_enabled | default(true) %}
+          - Log retention: {{ wazuh_log_retention_days | default(30) }} days
+          {% endif %}
+          - Logs: ./logs/backup-cron.log, ./logs/log-cleanup-cron.log
+
           SECURITY NOTES:
           - Passwords are stored in ./credentials/ (mode 0600)
           - Deployment user has been LOCKED DOWN on all hosts

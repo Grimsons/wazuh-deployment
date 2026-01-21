@@ -8,12 +8,21 @@
 # - Input validation for all hosts
 # - Secure temporary file handling
 # - Timeout controls for remote operations
+#
+# Authentication modes:
+# - Key-based (default): Uses SSH keys from keys/ directory
+# - Interactive (--ask-pass): Prompts for SSH credentials
+# - Mixed: Prompts for sudo password when not using root (--ask-become-pass)
 
 set -euo pipefail
 
 # Cleanup trap
 cleanup() {
     local exit_code=$?
+    # Clear sensitive data from environment
+    unset SSH_PASSWORD 2>/dev/null || true
+    unset BECOME_PASSWORD 2>/dev/null || true
+    unset SSHPASS 2>/dev/null || true
     # Clean up any sensitive temp files
     rm -rf "${TEMP_DIR:-}" 2>/dev/null || true
     exit $exit_code
@@ -45,6 +54,12 @@ PARALLEL_JOBS=5
 SSH_TIMEOUT="${SSH_TIMEOUT:-300}"  # 5 minutes default
 INSECURE_SSH=false  # Disable host key checking (NOT recommended for production)
 KNOWN_HOSTS_FILE="${PARENT_DIR}/.known_hosts"  # Project-local known_hosts
+
+# Authentication settings
+ASK_PASS=false          # Prompt for SSH password
+ASK_BECOME_PASS=false   # Prompt for sudo password
+SSH_PASSWORD=""         # SSH password (set interactively)
+BECOME_PASSWORD=""      # Sudo password (set interactively)
 
 # Input validation functions
 validate_ip() {
@@ -109,10 +124,14 @@ OPTIONS:
     -j, --jobs N            Parallel jobs (default: 5)
     -t, --tarball FILE      Use existing tarball instead of creating new
     --timeout SECONDS       SSH connection timeout (default: 300)
-    --password              Use password authentication instead of key
     --minimal               Use minimal mode (don't remove packages)
     --insecure              Disable SSH host key verification (NOT recommended)
     -h, --help              Show this help message
+
+AUTHENTICATION OPTIONS:
+    -P, --ask-pass          Prompt for SSH password (interactive mode)
+    -K, --ask-become-pass   Prompt for sudo/become password
+    --password              Same as --ask-pass (deprecated, use -P)
 
 SECURITY:
     By default, SSH host keys are verified using a project-local known_hosts file.
@@ -120,14 +139,17 @@ SECURITY:
     Use --insecure only for testing or when you have other means of verification.
 
 EXAMPLES:
-    # Deploy to specific hosts
+    # Deploy to specific hosts using SSH keys (default)
     $0 192.168.1.10 192.168.1.11 192.168.1.12
 
     # Deploy using a hosts file
     $0 -f hosts.txt
 
-    # Deploy with password authentication
-    $0 --password -u root 192.168.1.10
+    # Deploy with interactive password prompts (fresh servers)
+    $0 --ask-pass 192.168.1.10 192.168.1.11
+
+    # Deploy as non-root user with sudo password
+    $0 -u admin --ask-pass --ask-become-pass 192.168.1.10
 
     # Deploy with custom SSH key
     $0 -k ~/.ssh/id_rsa 192.168.1.10
@@ -180,7 +202,18 @@ parse_args() {
                 SSH_TIMEOUT="$2"
                 shift 2
                 ;;
+            -P|--ask-pass)
+                ASK_PASS=true
+                USE_PASSWORD=true
+                shift
+                ;;
+            -K|--ask-become-pass)
+                ASK_BECOME_PASS=true
+                shift
+                ;;
             --password)
+                # Deprecated but still supported
+                ASK_PASS=true
                 USE_PASSWORD=true
                 shift
                 ;;
@@ -225,6 +258,66 @@ load_hosts_from_file() {
     fi
 }
 
+# Prompt for credentials interactively
+prompt_credentials() {
+    print_section "Authentication Setup"
+
+    # Prompt for SSH user if using interactive mode
+    if [ "$ASK_PASS" = "true" ]; then
+        echo -e "${CYAN}Enter SSH credentials for initial connection:${NC}"
+        echo ""
+
+        # Prompt for username
+        read -rp "$(echo -e "${YELLOW}SSH Username [${REMOTE_USER}]: ${NC}")" input_user
+        if [ -n "$input_user" ]; then
+            REMOTE_USER="$input_user"
+        fi
+
+        # Prompt for password
+        echo -e "${YELLOW}SSH Password: ${NC}"
+        read -rs SSH_PASSWORD
+        echo ""
+
+        if [ -z "$SSH_PASSWORD" ]; then
+            print_error "Password cannot be empty"
+            exit 1
+        fi
+    fi
+
+    # Prompt for sudo password if needed
+    if [ "$ASK_BECOME_PASS" = "true" ]; then
+        echo ""
+        echo -e "${CYAN}Enter sudo/become password:${NC}"
+        echo -e "${YELLOW}Sudo Password: ${NC}"
+        read -rs BECOME_PASSWORD
+        echo ""
+
+        if [ -z "$BECOME_PASSWORD" ]; then
+            print_warning "Sudo password is empty - assuming passwordless sudo"
+        fi
+    elif [ "$REMOTE_USER" != "root" ] && [ "$ASK_PASS" = "true" ]; then
+        # If not root and using password auth, ask if sudo password is needed
+        echo ""
+        read -rp "$(echo -e "${YELLOW}User '$REMOTE_USER' is not root. Need sudo password? [Y/n]: ${NC}")" need_sudo
+        if [[ ! "$need_sudo" =~ ^[Nn]$ ]]; then
+            echo -e "${YELLOW}Sudo Password (Enter for same as SSH): ${NC}"
+            read -rs BECOME_PASSWORD
+            echo ""
+
+            # Use SSH password if sudo password is empty
+            if [ -z "$BECOME_PASSWORD" ]; then
+                BECOME_PASSWORD="$SSH_PASSWORD"
+                print_info "Using SSH password for sudo"
+            fi
+            ASK_BECOME_PASS=true
+        fi
+    fi
+
+    # Export for use in subshells
+    export SSH_PASSWORD
+    export BECOME_PASSWORD
+}
+
 # Check prerequisites
 check_prerequisites() {
     print_section "Checking Prerequisites"
@@ -240,9 +333,11 @@ check_prerequisites() {
         SSH_KEY="$CUSTOM_KEY"
     fi
 
+    # Determine authentication mode
     if [ "$USE_PASSWORD" != "true" ] && [ ! -f "$SSH_KEY" ]; then
         print_warning "SSH key not found: $SSH_KEY"
-        print_info "Will attempt password authentication"
+        print_info "Switching to interactive password mode"
+        ASK_PASS=true
         USE_PASSWORD=true
     fi
 
@@ -254,8 +349,16 @@ check_prerequisites() {
     fi
 
     # Check for sshpass if using password auth
-    if [ "$USE_PASSWORD" = "true" ] && ! command -v sshpass &> /dev/null; then
-        print_warning "sshpass not found - will prompt for password on each connection"
+    if [ "$USE_PASSWORD" = "true" ]; then
+        if ! command -v sshpass &> /dev/null; then
+            print_error "sshpass is required for password authentication"
+            print_info "Install it with:"
+            echo "  Ubuntu/Debian: sudo apt install sshpass"
+            echo "  RHEL/CentOS:   sudo yum install sshpass"
+            echo "  Arch Linux:    sudo pacman -S sshpass"
+            exit 1
+        fi
+        print_success "sshpass found"
     fi
 
     print_success "Prerequisites check passed"
@@ -303,6 +406,35 @@ build_ssh_opts() {
     echo "$opts"
 }
 
+# Run SSH command with appropriate authentication
+run_ssh() {
+    local host="$1"
+    shift
+    local ssh_opts
+    ssh_opts=$(build_ssh_opts)
+
+    if [ "$USE_PASSWORD" = "true" ] && [ -n "$SSH_PASSWORD" ]; then
+        SSHPASS="$SSH_PASSWORD" sshpass -e ssh $ssh_opts "${REMOTE_USER}@${host}" "$@"
+    else
+        ssh $ssh_opts "${REMOTE_USER}@${host}" "$@"
+    fi
+}
+
+# Run SCP command with appropriate authentication
+run_scp() {
+    local src="$1"
+    local host="$2"
+    local dest="$3"
+    local scp_opts
+    scp_opts=$(build_ssh_opts | sed 's/-p /-P /')  # scp uses -P for port
+
+    if [ "$USE_PASSWORD" = "true" ] && [ -n "$SSH_PASSWORD" ]; then
+        SSHPASS="$SSH_PASSWORD" sshpass -e scp $scp_opts "$src" "${REMOTE_USER}@${host}:${dest}"
+    else
+        scp $scp_opts "$src" "${REMOTE_USER}@${host}:${dest}"
+    fi
+}
+
 # Deploy to a single host
 deploy_to_host() {
     local host="$1"
@@ -313,11 +445,8 @@ deploy_to_host() {
 
     print_info "Deploying to: $host"
 
-    local ssh_opts
-    ssh_opts=$(build_ssh_opts)
-
     # Test connectivity with timeout
-    if ! timeout "$SSH_TIMEOUT" ssh $ssh_opts "${REMOTE_USER}@${host}" "echo 'Connection successful'" &>/dev/null; then
+    if ! timeout "$SSH_TIMEOUT" run_ssh "$host" "echo 'Connection successful'" &>/dev/null; then
         print_error "Cannot connect to $host"
         echo "FAILED: Cannot connect" > "$result_file"
         return 1
@@ -325,10 +454,8 @@ deploy_to_host() {
 
     # Copy tarball with timeout
     print_info "[$host] Copying preparation files..."
-    local scp_opts
-    scp_opts=$(build_ssh_opts | sed 's/-p /-P /')  # scp uses -P for port
 
-    if ! timeout "$SSH_TIMEOUT" scp $scp_opts "$PREP_TARBALL" "${REMOTE_USER}@${host}:/tmp/" &>/dev/null; then
+    if ! timeout "$SSH_TIMEOUT" run_scp "$PREP_TARBALL" "$host" "/tmp/" &>/dev/null; then
         print_error "[$host] Failed to copy tarball"
         echo "FAILED: Copy failed" > "$result_file"
         return 1
@@ -354,7 +481,20 @@ deploy_to_host() {
 
     prep_cmd="$prep_cmd && rm -rf /tmp/wazuh-prep /tmp/wazuh-client-prep.tar.gz"
 
-    if timeout "$SSH_TIMEOUT" ssh $ssh_opts "${REMOTE_USER}@${host}" "sudo bash -c '$prep_cmd'" 2>&1; then
+    # Build the sudo command based on authentication mode
+    local exec_cmd
+    if [ "$REMOTE_USER" = "root" ]; then
+        # Running as root, no sudo needed
+        exec_cmd="bash -c '$prep_cmd'"
+    elif [ "$ASK_BECOME_PASS" = "true" ] && [ -n "$BECOME_PASSWORD" ]; then
+        # Use sudo with password from stdin
+        exec_cmd="echo '$BECOME_PASSWORD' | sudo -S bash -c '$prep_cmd'"
+    else
+        # Use sudo without password (assumes NOPASSWD or already root)
+        exec_cmd="sudo bash -c '$prep_cmd'"
+    fi
+
+    if timeout "$SSH_TIMEOUT" run_ssh "$host" "$exec_cmd" 2>&1; then
         print_success "[$host] Preparation complete"
         echo "SUCCESS" > "$result_file"
         return 0
@@ -490,6 +630,11 @@ main() {
 
     check_prerequisites
 
+    # Prompt for credentials if using interactive mode
+    if [ "$ASK_PASS" = "true" ] || [ "$ASK_BECOME_PASS" = "true" ]; then
+        prompt_credentials
+    fi
+
     # Create or verify tarball
     if [ ! -f "$PREP_TARBALL" ]; then
         create_tarball
@@ -497,8 +642,23 @@ main() {
         print_info "Using existing tarball: $PREP_TARBALL"
     fi
 
-    # Confirm before proceeding
+    # Show authentication mode
+    print_section "Authentication Mode"
+    if [ "$USE_PASSWORD" = "true" ]; then
+        echo "  SSH: Password authentication (user: $REMOTE_USER)"
+    else
+        echo "  SSH: Key-based authentication (key: $SSH_KEY)"
+    fi
+    if [ "$REMOTE_USER" = "root" ]; then
+        echo "  Privilege: Running as root (no sudo needed)"
+    elif [ "$ASK_BECOME_PASS" = "true" ]; then
+        echo "  Privilege: Using sudo with password"
+    else
+        echo "  Privilege: Using sudo (passwordless)"
+    fi
     echo ""
+
+    # Confirm before proceeding
     read -p "Proceed with deployment? [y/N] " -n 1 -r
     echo ""
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then

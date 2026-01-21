@@ -51,6 +51,7 @@
     name: "wazuh-agent={{ wazuh_version }}-*"
     state: present
     update_cache: true
+    allow_downgrades: true
   become: true
   environment:
     WAZUH_MANAGER: "{{ wazuh_manager_address }}"
