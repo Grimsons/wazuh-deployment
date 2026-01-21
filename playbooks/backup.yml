@@ -50,7 +50,7 @@
     backup_base_path: "{{ hostvars['localhost']['backup_base_path'] }}"
   tasks:
     - name: Backup indexer configuration
-      when: backup_indexer | default(false) | bool
+      when: backup_indexer | default(true) | bool
       block:
         - name: Create local backup directory for indexer
           ansible.builtin.file:
@@ -122,7 +122,7 @@
     backup_base_path: "{{ hostvars['localhost']['backup_base_path'] }}"
   tasks:
     - name: Backup manager configuration
-      when: backup_manager | default(false) | bool
+      when: backup_manager | default(true) | bool
       block:
         - name: Create local backup directory for manager
           ansible.builtin.file:
@@ -205,7 +205,7 @@
     backup_base_path: "{{ hostvars['localhost']['backup_base_path'] }}"
   tasks:
     - name: Backup dashboard configuration
-      when: backup_dashboard | default(false) | bool
+      when: backup_dashboard | default(true) | bool
       block:
         - name: Create local backup directory for dashboard
           ansible.builtin.file:

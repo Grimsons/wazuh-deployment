@@ -78,21 +78,12 @@
   become: true
 
 - name: Update admin user password in internal_users.yml
-  ansible.builtin.replace:
-    path: /etc/wazuh-indexer/opensearch-security/internal_users.yml
-    regexp: '^(\s*admin:\s*\n\s*hash:\s*)"[^"]*"'
-    replace: '\1"{{ admin_password_hash }}"'
+  ansible.builtin.shell: |
+    # Update only the admin user's hash (the line immediately after "^admin:")
+    sed -i '/^admin:/,/^[a-zA-Z]/{s|^\(  hash: \)"[^"]*"|\1"{{ admin_password_hash }}"|;}' \
+      /etc/wazuh-indexer/opensearch-security/internal_users.yml
   become: true
-  no_log: true
-
-- name: Alternative - Update admin password using lineinfile if replace didn't work
-  ansible.builtin.lineinfile:
-    path: /etc/wazuh-indexer/opensearch-security/internal_users.yml
-    regexp: '^\s*hash:\s*"\$2[aby]\$.*"'
-    line: '  hash: "{{ admin_password_hash }}"'
-    insertafter: '^admin:'
-  become: true
-  no_log: true
+  changed_when: true
 
 - name: Apply security configuration with new password
   ansible.builtin.shell: |

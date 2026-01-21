@@ -91,7 +91,36 @@ backup_remote_location: "s3://bucket/wazuh-backups"
 
 ## Scheduled Backups
 
-Add to crontab for automated daily backups:
+Use the provided script to set up automated backups with retention management:
+
+```bash
+# Daily backup at 2 AM, keep 7 days of backups (default)
+./scripts/setup-backup-cron.sh --daily
+
+# Daily backup at 3 AM, keep 14 days
+./scripts/setup-backup-cron.sh --daily --hour 3 --keep 14
+
+# Weekly backup on Sunday, keep 4 weeks
+./scripts/setup-backup-cron.sh --weekly --keep 4
+
+# Every 6 hours, keep 28 backups (7 days)
+./scripts/setup-backup-cron.sh --hourly 6 --keep 28
+
+# Skip specific components
+./scripts/setup-backup-cron.sh --daily --no-indexer
+
+# Remove the cron job
+./scripts/setup-backup-cron.sh --remove
+```
+
+The backup script automatically:
+- Creates timestamped backups in `./backups/`
+- Removes backups older than the retention limit
+- Logs to `./logs/backup-cron.log`
+
+### Manual Crontab Entry
+
+If you prefer manual cron setup:
 
 ```bash
 # Daily backup at 2 AM
@@ -246,6 +275,61 @@ ansible-playbook playbooks/dr-validate.yml -e "dr_test_mode=true"
 2. Try previous backup
 3. If all backups corrupted, redeploy and reconfigure
 
+## Log Cleanup
+
+The Wazuh Manager accumulates logs over time in `/var/ossec/logs/`. To prevent disk space exhaustion, use the log cleanup playbook:
+
+### Manual Cleanup
+
+```bash
+# Preview what would be deleted (dry run)
+ansible-playbook playbooks/log-cleanup.yml -e dry_run=true
+
+# Clean logs older than 30 days (default)
+ansible-playbook playbooks/log-cleanup.yml
+
+# Keep only 14 days of logs
+ansible-playbook playbooks/log-cleanup.yml -e log_retention_days=14
+
+# Skip specific log types
+ansible-playbook playbooks/log-cleanup.yml -e cleanup_archives=false
+```
+
+### Log Directories Cleaned
+
+| Directory | Description |
+|-----------|-------------|
+| `/var/ossec/logs/archives/` | Archived raw events |
+| `/var/ossec/logs/alerts/` | Alert log files |
+| `/var/ossec/logs/*.log-*` | Rotated ossec.log files |
+| `/var/ossec/logs/firewall/` | Firewall logs |
+
+### Automated Log Cleanup
+
+Use the provided script to schedule automatic cleanup:
+
+```bash
+# Daily cleanup at 3:30 AM, keep 30 days (default)
+./scripts/setup-log-cleanup-cron.sh
+
+# Keep only 14 days of logs
+./scripts/setup-log-cleanup-cron.sh --days 14
+
+# Weekly cleanup on Sunday
+./scripts/setup-log-cleanup-cron.sh --weekly --days 7
+
+# Remove the cron job
+./scripts/setup-log-cleanup-cron.sh --remove
+```
+
+### Log Retention Configuration
+
+Set the default retention in `group_vars/all.yml`:
+
+```yaml
+wazuh_log_retention_days: 30
+```
+
 ## Best Practices
 
 1. **Test restores regularly** - Monthly DR tests recommended
@@ -253,3 +337,4 @@ ansible-playbook playbooks/dr-validate.yml -e "dr_test_mode=true"
 3. **Monitor backup jobs** - Alert on failed backups
 4. **Document custom configurations** - Keep runbooks updated
 5. **Version control** - Store playbooks and configs in git
+6. **Schedule log cleanup** - Prevent disk space issues on managers

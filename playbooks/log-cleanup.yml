@@ -1,0 +1,259 @@
+---
+# Wazuh Log Cleanup Playbook
+# Removes old log files from Wazuh Manager to prevent disk space issues
+#
+# Usage:
+#   ansible-playbook playbooks/log-cleanup.yml
+#
+# Optional variables:
+#   -e "log_retention_days=30"     - Keep logs for N days (default: 30)
+#   -e "cleanup_archives=true"     - Clean archive logs (default: true)
+#   -e "cleanup_alerts=true"       - Clean old alerts.log files (default: true)
+#   -e "cleanup_ossec_logs=true"   - Clean old ossec.log files (default: true)
+#   -e "dry_run=true"              - Show what would be deleted without deleting
+#
+# Log directories cleaned:
+#   /var/ossec/logs/archives/      - Archived raw logs
+#   /var/ossec/logs/alerts/        - Alert logs (daily rotations)
+#   /var/ossec/logs/firewall/      - Firewall logs
+#   /var/ossec/logs/ossec/         - Internal ossec logs
+
+- name: Wazuh Manager Log Cleanup
+  hosts: wazuh_managers
+  become: true
+  vars:
+    log_retention_days: "{{ wazuh_log_retention_days | default(30) }}"
+    cleanup_archives: true
+    cleanup_alerts: true
+    cleanup_ossec_logs: true
+    cleanup_firewall_logs: true
+    dry_run: false
+    ossec_log_path: /var/ossec/logs
+
+  tasks:
+    - name: Display cleanup configuration
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════════════════════
+          LOG CLEANUP CONFIGURATION
+          ═══════════════════════════════════════════════════════════════
+          Host: {{ inventory_hostname }}
+          Retention: {{ log_retention_days }} days
+          Dry run: {{ dry_run }}
+
+          Cleanup targets:
+            - Archives: {{ cleanup_archives }}
+            - Alerts: {{ cleanup_alerts }}
+            - Ossec logs: {{ cleanup_ossec_logs }}
+            - Firewall logs: {{ cleanup_firewall_logs }}
+          ═══════════════════════════════════════════════════════════════
+
+    # Get disk usage before cleanup
+    - name: Get disk usage before cleanup
+      ansible.builtin.shell: |
+        du -sh {{ ossec_log_path }} 2>/dev/null | cut -f1
+      register: disk_before
+      changed_when: false
+
+    - name: Display disk usage before cleanup
+      ansible.builtin.debug:
+        msg: "Current log directory size: {{ disk_before.stdout }}"
+
+    # Archive logs cleanup (/var/ossec/logs/archives/)
+    - name: Clean old archive logs
+      when: cleanup_archives | bool
+      block:
+        - name: Find old archive log files
+          ansible.builtin.find:
+            paths: "{{ ossec_log_path }}/archives"
+            patterns:
+              - "*.log"
+              - "*.log.gz"
+              - "*.json"
+              - "*.json.gz"
+            age: "{{ log_retention_days }}d"
+            recurse: true
+          register: old_archive_files
+
+        - name: Display archive files to be removed
+          ansible.builtin.debug:
+            msg: "Found {{ old_archive_files.files | length }} archive files older than {{ log_retention_days }} days"
+
+        - name: List archive files to be removed (dry run)
+          ansible.builtin.debug:
+            msg: "Would remove: {{ item.path }}"
+          loop: "{{ old_archive_files.files }}"
+          loop_control:
+            label: "{{ item.path }}"
+          when: dry_run | bool and old_archive_files.files | length > 0
+
+        - name: Remove old archive files
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+          loop: "{{ old_archive_files.files }}"
+          loop_control:
+            label: "{{ item.path }}"
+          when: not (dry_run | bool)
+
+        - name: Find empty archive subdirectories
+          ansible.builtin.find:
+            paths: "{{ ossec_log_path }}/archives"
+            file_type: directory
+            recurse: true
+          register: archive_dirs
+          when: not (dry_run | bool)
+
+        - name: Remove empty archive subdirectories
+          ansible.builtin.shell: |
+            find {{ ossec_log_path }}/archives -type d -empty -delete 2>/dev/null || true
+          when: not (dry_run | bool)
+          changed_when: false
+
+    # Alert logs cleanup (/var/ossec/logs/alerts/)
+    - name: Clean old alert logs
+      when: cleanup_alerts | bool
+      block:
+        - name: Find old alert log files
+          ansible.builtin.find:
+            paths: "{{ ossec_log_path }}/alerts"
+            patterns:
+              - "*.log"
+              - "*.log.gz"
+              - "*.json"
+              - "*.json.gz"
+            age: "{{ log_retention_days }}d"
+            recurse: true
+          register: old_alert_files
+
+        - name: Display alert files to be removed
+          ansible.builtin.debug:
+            msg: "Found {{ old_alert_files.files | length }} alert files older than {{ log_retention_days }} days"
+
+        - name: List alert files to be removed (dry run)
+          ansible.builtin.debug:
+            msg: "Would remove: {{ item.path }}"
+          loop: "{{ old_alert_files.files }}"
+          loop_control:
+            label: "{{ item.path }}"
+          when: dry_run | bool and old_alert_files.files | length > 0
+
+        - name: Remove old alert files
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+          loop: "{{ old_alert_files.files }}"
+          loop_control:
+            label: "{{ item.path }}"
+          when: not (dry_run | bool)
+
+        - name: Remove empty alert subdirectories
+          ansible.builtin.shell: |
+            find {{ ossec_log_path }}/alerts -type d -empty -delete 2>/dev/null || true
+          when: not (dry_run | bool)
+          changed_when: false
+
+    # Ossec internal logs cleanup (/var/ossec/logs/*.log-* rotated files)
+    - name: Clean old rotated ossec log files
+      when: cleanup_ossec_logs | bool
+      block:
+        - name: Find old rotated ossec.log files
+          ansible.builtin.find:
+            paths: "{{ ossec_log_path }}"
+            patterns:
+              - "ossec.log-*"
+              - "ossec.log.*.gz"
+              - "api.log-*"
+              - "api.log.*.gz"
+              - "cluster.log-*"
+              - "cluster.log.*.gz"
+            age: "{{ log_retention_days }}d"
+            recurse: false
+          register: old_ossec_files
+
+        - name: Display ossec log files to be removed
+          ansible.builtin.debug:
+            msg: "Found {{ old_ossec_files.files | length }} rotated ossec log files older than {{ log_retention_days }} days"
+
+        - name: List ossec log files to be removed (dry run)
+          ansible.builtin.debug:
+            msg: "Would remove: {{ item.path }}"
+          loop: "{{ old_ossec_files.files }}"
+          loop_control:
+            label: "{{ item.path }}"
+          when: dry_run | bool and old_ossec_files.files | length > 0
+
+        - name: Remove old rotated ossec log files
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+          loop: "{{ old_ossec_files.files }}"
+          loop_control:
+            label: "{{ item.path }}"
+          when: not (dry_run | bool)
+
+    # Firewall logs cleanup (/var/ossec/logs/firewall/)
+    - name: Clean old firewall logs
+      when: cleanup_firewall_logs | bool
+      block:
+        - name: Find old firewall log files
+          ansible.builtin.find:
+            paths: "{{ ossec_log_path }}/firewall"
+            patterns:
+              - "*.log"
+              - "*.log.gz"
+            age: "{{ log_retention_days }}d"
+            recurse: true
+          register: old_firewall_files
+          ignore_errors: true
+
+        - name: Display firewall files to be removed
+          ansible.builtin.debug:
+            msg: "Found {{ old_firewall_files.files | default([]) | length }} firewall files older than {{ log_retention_days }} days"
+          when: old_firewall_files.files is defined
+
+        - name: Remove old firewall files
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: absent
+          loop: "{{ old_firewall_files.files | default([]) }}"
+          loop_control:
+            label: "{{ item.path }}"
+          when: not (dry_run | bool) and old_firewall_files.files is defined
+
+    # Get disk usage after cleanup
+    - name: Get disk usage after cleanup
+      ansible.builtin.shell: |
+        du -sh {{ ossec_log_path }} 2>/dev/null | cut -f1
+      register: disk_after
+      changed_when: false
+      when: not (dry_run | bool)
+
+    # Summary
+    - name: Display cleanup summary
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════════════════════
+          LOG CLEANUP SUMMARY - {{ inventory_hostname }}
+          ═══════════════════════════════════════════════════════════════
+          {% if dry_run | bool %}
+          MODE: DRY RUN (no files were deleted)
+
+          Files that would be removed:
+            - Archive files: {{ old_archive_files.files | default([]) | length }}
+            - Alert files: {{ old_alert_files.files | default([]) | length }}
+            - Ossec log files: {{ old_ossec_files.files | default([]) | length }}
+            - Firewall files: {{ old_firewall_files.files | default([]) | length }}
+
+          To actually delete these files, run without --dry_run
+          {% else %}
+          Disk usage before: {{ disk_before.stdout }}
+          Disk usage after: {{ disk_after.stdout }}
+
+          Removed files:
+            - Archive files: {{ old_archive_files.files | default([]) | length }}
+            - Alert files: {{ old_alert_files.files | default([]) | length }}
+            - Ossec log files: {{ old_ossec_files.files | default([]) | length }}
+            - Firewall files: {{ old_firewall_files.files | default([]) | length }}
+          {% endif %}
+          ═══════════════════════════════════════════════════════════════

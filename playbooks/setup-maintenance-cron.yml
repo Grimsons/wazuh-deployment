@@ -1,0 +1,159 @@
+---
+# Setup Automated Backup and Log Cleanup Cron Jobs
+# This playbook configures scheduled maintenance tasks based on group_vars settings
+#
+# Usage:
+#   ansible-playbook playbooks/setup-maintenance-cron.yml
+#
+# This playbook is automatically included in site.yml post-deployment
+# Configuration is read from group_vars/all.yml:
+#   - wazuh_backup_schedule: daily, weekly, or disabled
+#   - wazuh_backup_hour: Hour to run backup (0-23)
+#   - wazuh_backup_day: Day for weekly backup (0=Sun, 6=Sat)
+#   - wazuh_backup_retention: Number of backups to keep
+#   - wazuh_log_cleanup_enabled: true/false
+#   - wazuh_log_retention_days: Days of logs to keep
+#   - wazuh_log_cleanup_schedule: daily or weekly
+
+- name: Setup Maintenance Cron Jobs
+  hosts: localhost
+  connection: local
+  become: false
+  gather_facts: true
+  vars_files:
+    - ../group_vars/all.yml
+
+  vars:
+    project_dir: "{{ inventory_dir }}/.."
+    scripts_dir: "{{ project_dir }}/scripts"
+    logs_dir: "{{ project_dir }}/logs"
+    backups_dir: "{{ project_dir }}/backups"
+    backup_cron_id: "wazuh-scheduled-backup"
+    log_cleanup_cron_id: "wazuh-log-cleanup"
+
+  tasks:
+    - name: Display maintenance configuration
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════════════════════
+          MAINTENANCE CRON SETUP
+          ═══════════════════════════════════════════════════════════════
+          Backup Schedule: {{ wazuh_backup_schedule | default('daily') }}
+          {% if wazuh_backup_schedule | default('daily') != 'disabled' %}
+          Backup Hour: {{ wazuh_backup_hour | default(2) }}:00
+          {% if wazuh_backup_schedule | default('daily') == 'weekly' %}
+          Backup Day: {{ wazuh_backup_day | default(0) }} (0=Sun, 6=Sat)
+          {% endif %}
+          Backup Retention: {{ wazuh_backup_retention | default(7) }} backups
+          {% endif %}
+
+          Log Cleanup Enabled: {{ wazuh_log_cleanup_enabled | default(true) }}
+          {% if wazuh_log_cleanup_enabled | default(true) %}
+          Log Retention: {{ wazuh_log_retention_days | default(30) }} days
+          Log Cleanup Schedule: {{ wazuh_log_cleanup_schedule | default('daily') }}
+          {% endif %}
+          ═══════════════════════════════════════════════════════════════
+
+    - name: Create logs directory
+      ansible.builtin.file:
+        path: "{{ logs_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create backups directory
+      ansible.builtin.file:
+        path: "{{ backups_dir }}"
+        state: directory
+        mode: '0700'
+
+    # ═══════════════════════════════════════════════════════════════
+    # BACKUP CRON SETUP
+    # ═══════════════════════════════════════════════════════════════
+
+    - name: Remove existing backup cron job
+      ansible.builtin.cron:
+        name: "{{ backup_cron_id }}"
+        state: absent
+
+    - name: Create backup wrapper script
+      when: wazuh_backup_schedule | default('daily') != 'disabled'
+      ansible.builtin.template:
+        src: maintenance/run-scheduled-backup.sh.j2
+        dest: "{{ scripts_dir }}/run-scheduled-backup.sh"
+        mode: '0755'
+
+    - name: Setup daily backup cron job
+      when: wazuh_backup_schedule | default('daily') == 'daily'
+      ansible.builtin.cron:
+        name: "{{ backup_cron_id }}"
+        minute: "0"
+        hour: "{{ wazuh_backup_hour | default(2) }}"
+        job: "{{ scripts_dir }}/run-scheduled-backup.sh"
+
+    - name: Setup weekly backup cron job
+      when: wazuh_backup_schedule | default('daily') == 'weekly'
+      ansible.builtin.cron:
+        name: "{{ backup_cron_id }}"
+        minute: "0"
+        hour: "{{ wazuh_backup_hour | default(2) }}"
+        weekday: "{{ wazuh_backup_day | default(0) }}"
+        job: "{{ scripts_dir }}/run-scheduled-backup.sh"
+
+    # ═══════════════════════════════════════════════════════════════
+    # LOG CLEANUP CRON SETUP
+    # ═══════════════════════════════════════════════════════════════
+
+    - name: Remove existing log cleanup cron job
+      ansible.builtin.cron:
+        name: "{{ log_cleanup_cron_id }}"
+        state: absent
+
+    - name: Setup daily log cleanup cron job
+      when:
+        - wazuh_log_cleanup_enabled | default(true) | bool
+        - wazuh_log_cleanup_schedule | default('daily') == 'daily'
+      ansible.builtin.cron:
+        name: "{{ log_cleanup_cron_id }}"
+        minute: "30"
+        hour: "3"
+        job: "cd {{ project_dir }} && ansible-playbook playbooks/log-cleanup.yml -e log_retention_days={{ wazuh_log_retention_days | default(30) }} >> {{ logs_dir }}/log-cleanup-cron.log 2>&1"
+
+    - name: Setup weekly log cleanup cron job
+      when:
+        - wazuh_log_cleanup_enabled | default(true) | bool
+        - wazuh_log_cleanup_schedule | default('daily') == 'weekly'
+      ansible.builtin.cron:
+        name: "{{ log_cleanup_cron_id }}"
+        minute: "30"
+        hour: "3"
+        weekday: "0"
+        job: "cd {{ project_dir }} && ansible-playbook playbooks/log-cleanup.yml -e log_retention_days={{ wazuh_log_retention_days | default(30) }} >> {{ logs_dir }}/log-cleanup-cron.log 2>&1"
+
+    # ═══════════════════════════════════════════════════════════════
+    # SUMMARY
+    # ═══════════════════════════════════════════════════════════════
+
+    - name: Display cron jobs
+      ansible.builtin.shell: |
+        crontab -l 2>/dev/null | grep -E "(wazuh-scheduled-backup|wazuh-log-cleanup)" || echo "No Wazuh maintenance cron jobs found"
+      register: cron_output
+      changed_when: false
+
+    - name: Show configured cron jobs
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════════════════════
+          MAINTENANCE CRON JOBS CONFIGURED
+          ═══════════════════════════════════════════════════════════════
+          {{ cron_output.stdout }}
+
+          Log files:
+            - Backup logs: {{ logs_dir }}/backup-cron.log
+            - Cleanup logs: {{ logs_dir }}/log-cleanup-cron.log
+
+          To modify settings, edit group_vars/all.yml and re-run:
+            ansible-playbook playbooks/setup-maintenance-cron.yml
+
+          To disable all maintenance cron jobs:
+            ansible-playbook playbooks/setup-maintenance-cron.yml -e wazuh_backup_schedule=disabled -e wazuh_log_cleanup_enabled=false
+          ═══════════════════════════════════════════════════════════════
