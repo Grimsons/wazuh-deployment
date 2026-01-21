@@ -391,7 +391,7 @@ main() {
     USE_VAULT="true"
     print_success "Ansible Vault will be used for credential encryption"
     print_info "Vault password will be stored in: .vault_password"
-    print_info "Encrypted credentials will be in: group_vars/vault.yml"
+    print_info "Encrypted credentials will be in: group_vars/all/vault.yml"
 
     # ═══════════════════════════════════════════════════════════════
     # SSL/TLS CONFIGURATION
@@ -1234,7 +1234,7 @@ SELFEXTRACT_EOF
         # Create encrypted vault with credentials
         print_info "Creating encrypted vault with credentials..."
         bash "${SCRIPT_DIR}/scripts/manage-vault.sh" create
-        print_success "Encrypted credentials stored in: group_vars/vault.yml"
+        print_success "Encrypted credentials stored in: group_vars/all/vault.yml"
 
         print_warning "IMPORTANT: Back up .vault_password securely!"
         print_warning "Without it, you cannot decrypt your credentials."
@@ -1328,7 +1328,7 @@ SELFEXTRACT_EOF
     echo -e "${CYAN}Security:${NC}"
     echo "  - Ansible Vault: Enabled (encrypted credentials)"
     echo "  - Vault password: .vault_password"
-    echo "  - Encrypted vault: group_vars/vault.yml"
+    echo "  - Encrypted vault: group_vars/all/vault.yml"
     if [ "$EXTERNAL_CA" = "true" ]; then
         echo "  - Certificates: External CA (user-provided)"
     else
@@ -1394,7 +1394,7 @@ SELFEXTRACT_EOF
     echo -e "1. Review the generated configuration files:"
     echo -e "   ${CYAN}inventory/hosts.yml${NC}    - Inventory file"
     echo -e "   ${CYAN}group_vars/all/main.yml${NC}     - Variables file"
-    echo -e "   ${CYAN}group_vars/vault.yml${NC}   - Encrypted credentials"
+    echo -e "   ${CYAN}group_vars/all/vault.yml${NC} - Encrypted credentials"
     echo -e "   ${CYAN}ansible.cfg${NC}            - Ansible configuration"
     echo -e "   ${CYAN}.vault_password${NC}        - Vault encryption key (KEEP SECURE!)"
     echo
