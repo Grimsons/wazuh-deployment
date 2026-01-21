@@ -135,11 +135,20 @@ create_vault() {
         IFS=',' read -ra HOST_ENTRIES <<< "$VAULT_HOST_CREDENTIALS"
         for entry in "${HOST_ENTRIES[@]}"; do
             IFS=':' read -r host user pass <<< "$entry"
-            if [ -n "$host" ] && [ -n "$pass" ]; then
+            if [ -n "$host" ]; then
                 local safe_host="${host//./_}"
-                host_creds_content+="
+                # Store username for this host
+                if [ -n "$user" ]; then
+                    host_creds_content+="
+# SSH user for host: ${host}
+vault_ssh_user_${safe_host}: \"${user}\""
+                fi
+                # Store password for this host
+                if [ -n "$pass" ]; then
+                    host_creds_content+="
 # SSH password for host: ${host}
 vault_ssh_pass_${safe_host}: \"${pass}\""
+                fi
             fi
         done
     fi
