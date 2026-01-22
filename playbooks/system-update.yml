@@ -533,6 +533,9 @@
   gather_facts: true
   serial: 1
   tags: [indexer, update]
+  vars_files:
+    - ../group_vars/all/vault.yml
+    - ../group_vars/all/main.yml
   vars:
     security_only: "{{ hostvars['localhost']['update_security_only'] | default(false) }}"
     allow_reboot: "{{ hostvars['localhost']['update_allow_reboot'] | default(true) }}"
