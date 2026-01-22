@@ -34,6 +34,21 @@ wazuh_indexer_nodes:
   # - name: indexer-3
   #   ip: 192.168.1.12
 
+# Indexer Firewall - Dynamic IP-based access control
+# By default, firewall rules are automatically generated from:
+#   - wazuh_indexer_nodes (port 9200 + 9300)
+#   - wazuh_manager_nodes (port 9200 only)
+#   - wazuh_dashboard_nodes (port 9200 only)
+#
+# To allow additional IPs (e.g., monitoring systems, backup servers):
+# wazuh_indexer_additional_allowed_ips:
+#   - "10.0.0.100"    # Monitoring server
+#   - "10.0.0.101"    # Backup server
+#
+# To allow additional IPs for transport port (9300) - rarely needed:
+# wazuh_indexer_additional_transport_ips:
+#   - "10.0.0.102"    # Special indexer node
+
 # ═══════════════════════════════════════════════════════════════
 # Wazuh Manager Settings
 # ═══════════════════════════════════════════════════════════════
@@ -264,8 +279,13 @@ wazuh_log_rotation_compress: true
 # Firewall configuration (installs and enables UFW/firewalld if needed)
 wazuh_configure_firewall: true
 
+# Allow agents from any network (recommended for flexibility)
+# When true, firewall allows agent connections (1514, 1515) from anywhere
+# When false, only allows from auto-detected or explicitly configured subnets
+wazuh_allow_agents_from_any: true
+
 # Network subnets are auto-detected from the host's default interface.
-# Uncomment below to override with specific subnets:
+# These settings only apply when wazuh_allow_agents_from_any is false:
 # wazuh_allowed_agent_networks:
 #   - "10.0.0.0/24"
 #   - "192.168.1.0/24"
