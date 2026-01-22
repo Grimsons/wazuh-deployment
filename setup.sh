@@ -676,48 +676,36 @@ main() {
     # ═══════════════════════════════════════════════════════════════
     print_section "Generating Configuration Files"
 
-    # Create inventory file
-    print_info "Creating inventory file..."
+    # Create inventory files
+    print_info "Creating inventory files..."
 
-    cat > "$SCRIPT_DIR/inventory/hosts.yml" << 'EOF'
+    # ========================================
+    # Main inventory (hosts.yml) - Uses wazuh-deploy user with SSH key
+    # Used for all operations AFTER bootstrap
+    # ========================================
+    cat > "$SCRIPT_DIR/inventory/hosts.yml" << EOF
 ---
+# Main Inventory - For use after bootstrap
+# Uses wazuh-deploy user with SSH key authentication
 all:
   vars:
-    ansible_user: "{{ vault_ansible_user }}"
-EOF
-    cat >> "$SCRIPT_DIR/inventory/hosts.yml" << EOF
+    ansible_user: wazuh-deploy
     ansible_ssh_private_key_file: ${ANSIBLE_SSH_KEY}
     ansible_port: ${ANSIBLE_SSH_PORT}
     ansible_become: ${USE_BECOME}
-EOF
-
-    # Add become password if sudo is enabled and password is set
-    if [ "$USE_BECOME" = "true" ] && [ -n "${BECOME_PASS:-}" ]; then
-        echo '    ansible_become_pass: "{{ vault_ansible_become_password }}"' >> "$SCRIPT_DIR/inventory/hosts.yml"
-    fi
-
-    cat >> "$SCRIPT_DIR/inventory/hosts.yml" << EOF
+    # No passwords needed - SSH key auth and passwordless sudo
 
   children:
     wazuh_indexers:
       hosts:
 EOF
 
-    # Add indexer hosts with per-host SSH credentials
+    # Add indexer hosts (simplified - no per-host credentials)
     for i in "${!INDEXER_NODES_ARRAY[@]}"; do
         node="${INDEXER_NODES_ARRAY[$i]}"
         node_name="indexer-$((i+1))"
-        cat >> "$SCRIPT_DIR/inventory/hosts.yml" << EOF
-        ${node}:
-          indexer_node_name: ${node_name}
-EOF
-        # Add per-host SSH credentials from vault
-        if [ -n "${HOST_SSH_USER[$node]:-}" ]; then
-            echo "          ansible_user: \"{{ vault_ssh_user_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/hosts.yml"
-        fi
-        if [ -n "${HOST_SSH_PASS[$node]:-}" ]; then
-            echo "          ansible_ssh_pass: \"{{ vault_ssh_pass_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/hosts.yml"
-        fi
+        echo "        ${node}:" >> "$SCRIPT_DIR/inventory/hosts.yml"
+        echo "          indexer_node_name: ${node_name}" >> "$SCRIPT_DIR/inventory/hosts.yml"
         if [ $i -eq 0 ]; then
             echo "          indexer_cluster_initial_master: true" >> "$SCRIPT_DIR/inventory/hosts.yml"
         fi
@@ -729,21 +717,12 @@ EOF
       hosts:
 EOF
 
-    # Add manager hosts with per-host SSH credentials
+    # Add manager hosts (simplified)
     for i in "${!MANAGER_NODES_ARRAY[@]}"; do
         node="${MANAGER_NODES_ARRAY[$i]}"
         node_name="manager-$((i+1))"
-        cat >> "$SCRIPT_DIR/inventory/hosts.yml" << EOF
-        ${node}:
-          manager_node_name: ${node_name}
-EOF
-        # Add per-host SSH credentials from vault
-        if [ -n "${HOST_SSH_USER[$node]:-}" ]; then
-            echo "          ansible_user: \"{{ vault_ssh_user_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/hosts.yml"
-        fi
-        if [ -n "${HOST_SSH_PASS[$node]:-}" ]; then
-            echo "          ansible_ssh_pass: \"{{ vault_ssh_pass_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/hosts.yml"
-        fi
+        echo "        ${node}:" >> "$SCRIPT_DIR/inventory/hosts.yml"
+        echo "          manager_node_name: ${node_name}" >> "$SCRIPT_DIR/inventory/hosts.yml"
         if [ $MANAGER_COUNT -gt 1 ]; then
             if [ $i -eq 0 ]; then
                 echo "          manager_node_type: master" >> "$SCRIPT_DIR/inventory/hosts.yml"
@@ -759,16 +738,9 @@ EOF
       hosts:
 EOF
 
-    # Add dashboard hosts with per-host SSH credentials
+    # Add dashboard hosts (simplified)
     for node in "${DASHBOARD_NODES_ARRAY[@]}"; do
         echo "        ${node}:" >> "$SCRIPT_DIR/inventory/hosts.yml"
-        # Add per-host SSH credentials from vault
-        if [ -n "${HOST_SSH_USER[$node]:-}" ]; then
-            echo "          ansible_user: \"{{ vault_ssh_user_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/hosts.yml"
-        fi
-        if [ -n "${HOST_SSH_PASS[$node]:-}" ]; then
-            echo "          ansible_ssh_pass: \"{{ vault_ssh_pass_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/hosts.yml"
-        fi
     done
 
     if [ "$DEPLOY_AGENTS" = "true" ] && [ -n "$AGENT_NODES" ]; then
@@ -777,35 +749,143 @@ EOF
     wazuh_agents:
       hosts:
 EOF
-        # Add agent hosts with per-host SSH credentials
         for node in "${AGENT_NODES_ARRAY[@]}"; do
             echo "        ${node}:" >> "$SCRIPT_DIR/inventory/hosts.yml"
-            # Add per-host SSH user if different from default
-            if [ -n "${HOST_SSH_USER[$node]:-}" ]; then
-                echo "          ansible_user: ${HOST_SSH_USER[$node]}" >> "$SCRIPT_DIR/inventory/hosts.yml"
-            fi
-            # Add per-host SSH password if set
-            if [ -n "${HOST_SSH_PASS[$node]:-}" ]; then
-                echo "          ansible_ssh_pass: \"{{ vault_ssh_pass_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/hosts.yml"
-            fi
         done
     fi
 
-    # Add localhost with local connection (doesn't use vault credentials)
+    # Add localhost
     cat >> "$SCRIPT_DIR/inventory/hosts.yml" << 'EOF'
 
-    # Local deployment host (for running maintenance tasks)
+    # Local deployment host
     local:
       hosts:
         localhost:
           ansible_connection: local
           ansible_user: "{{ lookup('env', 'USER') }}"
           ansible_become: false
-          ansible_become_pass: ""
-          ansible_ssh_pass: ""
 EOF
 
-    print_success "Inventory file created: inventory/hosts.yml"
+    print_success "Main inventory created: inventory/hosts.yml"
+
+    # ========================================
+    # Bootstrap inventory (bootstrap.yml) - Uses per-host credentials from vault
+    # Used ONLY for initial bootstrap to create ansible user
+    # ========================================
+    cat > "$SCRIPT_DIR/inventory/bootstrap.yml" << EOF
+---
+# Bootstrap Inventory - For initial setup ONLY
+# Uses per-host SSH credentials from vault
+# After bootstrap, use hosts.yml for all operations
+all:
+  vars:
+    ansible_port: ${ANSIBLE_SSH_PORT}
+    ansible_become: ${USE_BECOME}
+EOF
+
+    # Add become password if sudo requires password
+    if [ "$USE_BECOME" = "true" ] && [ -n "${BECOME_PASS:-}" ]; then
+        echo '    ansible_become_pass: "{{ vault_ansible_become_password }}"' >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+    fi
+
+    cat >> "$SCRIPT_DIR/inventory/bootstrap.yml" << EOF
+
+  children:
+    wazuh_indexers:
+      hosts:
+EOF
+
+    # Add indexer hosts with per-host SSH credentials
+    for i in "${!INDEXER_NODES_ARRAY[@]}"; do
+        node="${INDEXER_NODES_ARRAY[$i]}"
+        node_name="indexer-$((i+1))"
+        echo "        ${node}:" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+        echo "          indexer_node_name: ${node_name}" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+        if [ -n "${HOST_SSH_USER[$node]:-}" ]; then
+            echo "          ansible_user: \"{{ vault_ssh_user_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+        fi
+        if [ -n "${HOST_SSH_PASS[$node]:-}" ]; then
+            echo "          ansible_ssh_pass: \"{{ vault_ssh_pass_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+        fi
+        if [ $i -eq 0 ]; then
+            echo "          indexer_cluster_initial_master: true" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+        fi
+    done
+
+    cat >> "$SCRIPT_DIR/inventory/bootstrap.yml" << EOF
+
+    wazuh_managers:
+      hosts:
+EOF
+
+    # Add manager hosts with per-host SSH credentials
+    for i in "${!MANAGER_NODES_ARRAY[@]}"; do
+        node="${MANAGER_NODES_ARRAY[$i]}"
+        node_name="manager-$((i+1))"
+        echo "        ${node}:" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+        echo "          manager_node_name: ${node_name}" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+        if [ -n "${HOST_SSH_USER[$node]:-}" ]; then
+            echo "          ansible_user: \"{{ vault_ssh_user_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+        fi
+        if [ -n "${HOST_SSH_PASS[$node]:-}" ]; then
+            echo "          ansible_ssh_pass: \"{{ vault_ssh_pass_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+        fi
+        if [ $MANAGER_COUNT -gt 1 ]; then
+            if [ $i -eq 0 ]; then
+                echo "          manager_node_type: master" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+            else
+                echo "          manager_node_type: worker" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+            fi
+        fi
+    done
+
+    cat >> "$SCRIPT_DIR/inventory/bootstrap.yml" << EOF
+
+    wazuh_dashboards:
+      hosts:
+EOF
+
+    # Add dashboard hosts with per-host SSH credentials
+    for node in "${DASHBOARD_NODES_ARRAY[@]}"; do
+        echo "        ${node}:" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+        if [ -n "${HOST_SSH_USER[$node]:-}" ]; then
+            echo "          ansible_user: \"{{ vault_ssh_user_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+        fi
+        if [ -n "${HOST_SSH_PASS[$node]:-}" ]; then
+            echo "          ansible_ssh_pass: \"{{ vault_ssh_pass_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+        fi
+    done
+
+    if [ "$DEPLOY_AGENTS" = "true" ] && [ -n "$AGENT_NODES" ]; then
+        cat >> "$SCRIPT_DIR/inventory/bootstrap.yml" << EOF
+
+    wazuh_agents:
+      hosts:
+EOF
+        for node in "${AGENT_NODES_ARRAY[@]}"; do
+            echo "        ${node}:" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+            if [ -n "${HOST_SSH_USER[$node]:-}" ]; then
+                echo "          ansible_user: \"{{ vault_ssh_user_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+            fi
+            if [ -n "${HOST_SSH_PASS[$node]:-}" ]; then
+                echo "          ansible_ssh_pass: \"{{ vault_ssh_pass_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+            fi
+        done
+    fi
+
+    # Add localhost
+    cat >> "$SCRIPT_DIR/inventory/bootstrap.yml" << 'EOF'
+
+    # Local deployment host
+    local:
+      hosts:
+        localhost:
+          ansible_connection: local
+          ansible_user: "{{ lookup('env', 'USER') }}"
+          ansible_become: false
+EOF
+
+    print_success "Bootstrap inventory created: inventory/bootstrap.yml"
 
     # Create group_vars/all/main.yml
     print_info "Creating group variables..."
@@ -1503,9 +1583,10 @@ SELFEXTRACT_EOF
     print_header "Next Steps"
 
     echo -e "1. Review the generated configuration files:"
-    echo -e "   ${CYAN}inventory/hosts.yml${NC}    - Inventory file"
-    echo -e "   ${CYAN}group_vars/all/main.yml${NC}     - Variables file"
-    echo -e "   ${CYAN}group_vars/all/vault.yml${NC} - Encrypted credentials"
+    echo -e "   ${CYAN}inventory/hosts.yml${NC}       - Main inventory (SSH key auth)"
+    echo -e "   ${CYAN}inventory/bootstrap.yml${NC}   - Bootstrap inventory (password auth)"
+    echo -e "   ${CYAN}group_vars/all/main.yml${NC}   - Variables file"
+    echo -e "   ${CYAN}group_vars/all/vault.yml${NC}  - Encrypted credentials"
     echo -e "   ${CYAN}ansible.cfg${NC}            - Ansible configuration"
     echo -e "   ${CYAN}.vault_password${NC}        - Vault encryption key (KEEP SECURE!)"
     echo
@@ -1529,35 +1610,45 @@ SELFEXTRACT_EOF
     else
         echo -e "2. Test connectivity to your hosts:"
     fi
-    echo -e "   ${YELLOW}ansible all -m ping${NC}"
+    echo -e "   ${YELLOW}ansible all -m ping -i inventory/bootstrap.yml --vault-password-file .vault_password${NC}"
     echo
 
     if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
-        echo -e "4. Run the deployment:"
+        echo -e "4. Bootstrap hosts (create ansible user with SSH key):"
     else
-        echo -e "3. Run the deployment:"
+        echo -e "3. Bootstrap hosts (create ansible user with SSH key):"
     fi
-    echo -e "   ${YELLOW}ansible-playbook site.yml${NC}"
+    echo -e "   ${YELLOW}ansible-playbook playbooks/bootstrap-hosts.yml -i inventory/bootstrap.yml --vault-password-file .vault_password${NC}"
+    echo
+    echo -e "   This creates the '${CYAN}wazuh-deploy${NC}' user with SSH key auth and passwordless sudo."
+    echo
+
+    if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
+        echo -e "5. Run the deployment:"
+    else
+        echo -e "4. Run the deployment:"
+    fi
+    echo -e "   ${YELLOW}ansible-playbook site.yml --vault-password-file .vault_password${NC}"
     echo
     echo -e "   Or deploy components individually:"
-    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-indexer.yml${NC}"
-    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-manager.yml${NC}"
-    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-dashboard.yml${NC}"
-    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-agents.yml${NC}"
+    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-indexer.yml --vault-password-file .vault_password${NC}"
+    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-manager.yml --vault-password-file .vault_password${NC}"
+    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-dashboard.yml --vault-password-file .vault_password${NC}"
+    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-agents.yml --vault-password-file .vault_password${NC}"
     echo
 
     if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
-        echo -e "5. After deployment, view your credentials:"
+        echo -e "6. After deployment, view your credentials:"
     else
-        echo -e "4. After deployment, view your credentials:"
+        echo -e "5. After deployment, view your credentials:"
     fi
     echo -e "   ${YELLOW}./scripts/manage-vault.sh view${NC}"
     echo
 
     if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
-        echo -e "6. Certificate management:"
+        echo -e "7. Certificate management:"
     else
-        echo -e "5. Certificate management:"
+        echo -e "6. Certificate management:"
     fi
     echo -e "   ${YELLOW}ansible-playbook playbooks/certificate-management.yml --tags check-expiry${NC}"
     echo -e "   ${YELLOW}ansible-playbook playbooks/certificate-management.yml --tags rotate${NC}"

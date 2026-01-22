@@ -1,0 +1,134 @@
+---
+# Bootstrap Playbook - Prepare hosts for Ansible management
+#
+# This playbook creates the ansible user (wazuh-deploy) on target hosts
+# and configures SSH key authentication and passwordless sudo.
+#
+# Run this ONCE after initial setup.sh, before running site.yml
+#
+# Usage:
+#   ansible-playbook playbooks/bootstrap-hosts.yml -i inventory/bootstrap.yml --vault-password-file .vault_password
+#
+# Prerequisites:
+#   - SSH access to target hosts with your personal credentials
+#   - sudo privileges on target hosts
+#   - setup.sh has been run (generates SSH keys and vault)
+
+- name: Bootstrap - Create Ansible User
+  hosts: all:!local
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../group_vars/all/vault.yml
+    - ../group_vars/all/main.yml
+  vars:
+    ansible_user_name: "{{ wazuh_ansible_user | default('wazuh-deploy') }}"
+    ansible_user_comment: "Wazuh Ansible Deployment User"
+    ssh_public_key_file: "{{ playbook_dir }}/../keys/wazuh_ansible_key.pub"
+
+  tasks:
+    - name: Read SSH public key
+      ansible.builtin.set_fact:
+        ssh_public_key: "{{ lookup('file', ssh_public_key_file) }}"
+      delegate_to: localhost
+      run_once: true
+
+    - name: Create ansible user
+      ansible.builtin.user:
+        name: "{{ ansible_user_name }}"
+        comment: "{{ ansible_user_comment }}"
+        shell: /bin/bash
+        create_home: true
+        state: present
+
+    - name: Create .ssh directory
+      ansible.builtin.file:
+        path: "/home/{{ ansible_user_name }}/.ssh"
+        state: directory
+        owner: "{{ ansible_user_name }}"
+        group: "{{ ansible_user_name }}"
+        mode: '0700'
+
+    - name: Deploy SSH public key
+      ansible.builtin.authorized_key:
+        user: "{{ ansible_user_name }}"
+        key: "{{ ssh_public_key }}"
+        state: present
+        exclusive: false
+
+    - name: Configure passwordless sudo
+      ansible.builtin.copy:
+        content: |
+          # Ansible deployment user - passwordless sudo
+          {{ ansible_user_name }} ALL=(ALL) NOPASSWD: ALL
+        dest: "/etc/sudoers.d/{{ ansible_user_name }}"
+        owner: root
+        group: root
+        mode: '0440'
+        validate: 'visudo -cf %s'
+
+    - name: Verify sudo works
+      ansible.builtin.command: sudo -n true
+      become: true
+      become_user: "{{ ansible_user_name }}"
+      changed_when: false
+
+- name: Bootstrap - Verify SSH Key Access
+  hosts: all:!local
+  gather_facts: false
+  vars_files:
+    - ../group_vars/all/vault.yml
+    - ../group_vars/all/main.yml
+  vars:
+    ansible_user_name: "{{ wazuh_ansible_user | default('wazuh-deploy') }}"
+    ansible_ssh_private_key_file: "{{ playbook_dir }}/../keys/wazuh_ansible_key"
+    test_ansible_user: "{{ ansible_user_name }}"
+    test_ssh_key: "{{ ansible_ssh_private_key_file }}"
+
+  tasks:
+    - name: Test SSH key authentication
+      ansible.builtin.command:
+        cmd: >
+          ssh -i {{ test_ssh_key }}
+          -o StrictHostKeyChecking=no
+          -o UserKnownHostsFile=/dev/null
+          -o BatchMode=yes
+          {{ test_ansible_user }}@{{ inventory_hostname }}
+          'echo SSH_KEY_AUTH_SUCCESS'
+      delegate_to: localhost
+      register: ssh_test
+      changed_when: false
+      failed_when: "'SSH_KEY_AUTH_SUCCESS' not in ssh_test.stdout"
+
+    - name: Display success
+      ansible.builtin.debug:
+        msg: "SSH key authentication configured successfully for {{ ansible_user_name }}@{{ inventory_hostname }}"
+
+- name: Bootstrap - Summary
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+
+  tasks:
+    - name: Display completion message
+      ansible.builtin.debug:
+        msg: |
+
+          ══════════════════════════════════════════════════════════════
+                          BOOTSTRAP COMPLETE
+          ══════════════════════════════════════════════════════════════
+
+          The ansible user has been created on all target hosts with:
+            - SSH key authentication
+            - Passwordless sudo access
+
+          You can now run deployments using the main inventory:
+
+            ansible-playbook site.yml --vault-password-file .vault_password
+
+          Or run health checks:
+
+            ansible-playbook playbooks/health-check.yml --vault-password-file .vault_password
+
+          ══════════════════════════════════════════════════════════════

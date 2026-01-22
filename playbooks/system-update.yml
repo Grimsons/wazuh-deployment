@@ -1,0 +1,718 @@
+---
+# System Update Playbook
+# Performs OS-level security updates following best practices
+#
+# Features:
+#   - Rolling updates for cluster nodes (one at a time)
+#   - Pre-update backup of Wazuh configuration
+#   - Automatic reboot handling for kernel updates
+#   - Service validation after updates
+#   - Supports Debian/Ubuntu, RHEL/CentOS/Rocky, and SUSE
+#
+# Usage:
+#   # Check for available updates (no changes)
+#   ansible-playbook playbooks/system-update.yml --tags check
+#
+#   # Apply security updates only
+#   ansible-playbook playbooks/system-update.yml -e "security_only=true"
+#
+#   # Full system update (all packages)
+#   ansible-playbook playbooks/system-update.yml
+#
+#   # Update specific host group
+#   ansible-playbook playbooks/system-update.yml --limit wazuh_managers
+#
+#   # Skip reboot even if required
+#   ansible-playbook playbooks/system-update.yml -e "allow_reboot=false"
+#
+#   # Auto-reboot without confirmation
+#   ansible-playbook playbooks/system-update.yml -e "auto_reboot=true"
+#
+# Best Practices:
+#   - Run during maintenance window
+#   - Update in order: Agents → Dashboard → Managers → Indexers
+#   - Monitor services after each node update
+#   - Keep one node running during cluster updates
+
+- name: System Update - Pre-flight
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: false
+  tags: [always]
+  vars:
+    security_only: false
+    allow_reboot: true
+    auto_reboot: false
+    backup_before_update: true
+
+  tasks:
+    - name: Set update timestamp
+      ansible.builtin.set_fact:
+        update_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+        update_security_only: "{{ security_only | default(false) }}"
+        update_allow_reboot: "{{ allow_reboot | default(true) }}"
+        update_auto_reboot: "{{ auto_reboot | default(false) }}"
+        update_backup_first: "{{ backup_before_update | default(true) }}"
+
+    - name: Display update plan
+      ansible.builtin.debug:
+        msg: |
+
+          ══════════════════════════════════════════════════════════════
+                           SYSTEM UPDATE PLAN
+          ══════════════════════════════════════════════════════════════
+
+          Update Type: {{ 'Security updates only' if security_only else 'Full system update' }}
+          Allow Reboot: {{ allow_reboot }}
+          Auto Reboot: {{ auto_reboot }}
+          Backup First: {{ backup_before_update }}
+
+          Target Hosts:
+            Indexers: {{ groups.get('wazuh_indexers', []) | join(', ') or 'none' }}
+            Managers: {{ groups.get('wazuh_managers', []) | join(', ') or 'none' }}
+            Dashboards: {{ groups.get('wazuh_dashboards', []) | join(', ') or 'none' }}
+            Agents: {{ groups.get('wazuh_agents', []) | length }} hosts
+
+          Update Order (rolling):
+            1. Wazuh Agents (batch of 10)
+            2. Wazuh Dashboard
+            3. Wazuh Manager(s)
+            4. Wazuh Indexer(s)
+
+          ══════════════════════════════════════════════════════════════
+
+- name: System Update - Check Available Updates
+  hosts: all:!local
+  become: true
+  gather_facts: true
+  tags: [check]
+
+  tasks:
+    - name: Check for updates (Debian/Ubuntu)
+      when: ansible_os_family == 'Debian'
+      block:
+        - name: Update apt cache
+          ansible.builtin.apt:
+            update_cache: true
+            cache_valid_time: 3600
+
+        - name: Get list of upgradable packages
+          ansible.builtin.shell: apt list --upgradable 2>/dev/null | grep -v "^Listing" | wc -l
+          register: apt_updates
+          changed_when: false
+
+        - name: Get security updates count
+          ansible.builtin.shell: |
+            apt list --upgradable 2>/dev/null | grep -i security | wc -l
+          register: apt_security_updates
+          changed_when: false
+
+        - name: Display available updates
+          ansible.builtin.debug:
+            msg: |
+              {{ inventory_hostname }}:
+                Total updates available: {{ apt_updates.stdout }}
+                Security updates: {{ apt_security_updates.stdout }}
+
+    - name: Check for updates (RHEL/CentOS/Rocky)
+      when: ansible_os_family == 'RedHat'
+      block:
+        - name: Check for available updates
+          ansible.builtin.shell: yum check-update --quiet | wc -l || true
+          register: yum_updates
+          changed_when: false
+          failed_when: false
+
+        - name: Check for security updates
+          ansible.builtin.shell: yum updateinfo list security --quiet 2>/dev/null | wc -l || echo "0"
+          register: yum_security_updates
+          changed_when: false
+          failed_when: false
+
+        - name: Display available updates
+          ansible.builtin.debug:
+            msg: |
+              {{ inventory_hostname }}:
+                Total updates available: {{ yum_updates.stdout | default('0') }}
+                Security updates: {{ yum_security_updates.stdout | default('0') }}
+
+    - name: Check for updates (SUSE)
+      when: ansible_os_family == 'Suse'
+      block:
+        - name: Refresh repositories
+          community.general.zypper:
+            name: '*'
+            state: latest
+            update_cache: true
+          check_mode: true
+          register: zypper_updates
+
+        - name: Display available updates
+          ansible.builtin.debug:
+            msg: |
+              {{ inventory_hostname }}:
+                Updates available: {{ 'Yes' if zypper_updates.changed else 'No' }}
+
+- name: System Update - Create Backup
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tags: [backup, update]
+  vars:
+    update_backup_first: "{{ hostvars['localhost']['update_backup_first'] | default(true) }}"
+    update_timestamp: "{{ hostvars['localhost']['update_timestamp'] }}"
+
+  tasks:
+    - name: Create pre-update backup
+      when: update_backup_first | bool
+      block:
+        - name: Run backup playbook
+          ansible.builtin.command:
+            cmd: >
+              ansible-playbook {{ playbook_dir }}/backup.yml
+              -e "backup_timestamp=pre-sysupdate-{{ update_timestamp }}"
+            chdir: "{{ playbook_dir }}/.."
+          register: backup_result
+
+        - name: Display backup location
+          ansible.builtin.debug:
+            msg: "Backup created at: backups/pre-sysupdate-{{ update_timestamp }}"
+
+#
+# PHASE 1: UPDATE AGENTS (Batch)
+#
+- name: System Update - Wazuh Agents
+  hosts: wazuh_agents
+  become: true
+  gather_facts: true
+  serial: 10
+  tags: [agent, update]
+  vars:
+    security_only: "{{ hostvars['localhost']['update_security_only'] | default(false) }}"
+    allow_reboot: "{{ hostvars['localhost']['update_allow_reboot'] | default(true) }}"
+    auto_reboot: "{{ hostvars['localhost']['update_auto_reboot'] | default(false) }}"
+
+  tasks:
+    - name: Apply updates (Debian/Ubuntu)
+      when: ansible_os_family == 'Debian'
+      block:
+        - name: Update apt cache
+          ansible.builtin.apt:
+            update_cache: true
+
+        - name: Apply security updates only
+          ansible.builtin.apt:
+            upgrade: dist
+            update_cache: true
+            default_release: "{{ ansible_distribution_release }}-security"
+          when: security_only | bool
+          register: apt_security_result
+
+        - name: Apply all updates
+          ansible.builtin.apt:
+            upgrade: dist
+            update_cache: true
+          when: not (security_only | bool)
+          register: apt_full_result
+
+        - name: Check if reboot required
+          ansible.builtin.stat:
+            path: /var/run/reboot-required
+          register: reboot_required_file
+
+        - name: Set reboot fact
+          ansible.builtin.set_fact:
+            needs_reboot: "{{ reboot_required_file.stat.exists | default(false) }}"
+
+    - name: Apply updates (RHEL/CentOS/Rocky)
+      when: ansible_os_family == 'RedHat'
+      block:
+        - name: Apply security updates only
+          ansible.builtin.yum:
+            name: '*'
+            state: latest
+            security: true
+            update_cache: true
+          when: security_only | bool
+          register: yum_security_result
+
+        - name: Apply all updates
+          ansible.builtin.yum:
+            name: '*'
+            state: latest
+            update_cache: true
+          when: not (security_only | bool)
+          register: yum_full_result
+
+        - name: Check if reboot required (kernel update)
+          ansible.builtin.shell: needs-restarting -r 2>/dev/null; echo $?
+          register: needs_restarting
+          changed_when: false
+          failed_when: false
+
+        - name: Set reboot fact
+          ansible.builtin.set_fact:
+            needs_reboot: "{{ needs_restarting.stdout | int == 1 }}"
+
+    - name: Apply updates (SUSE)
+      when: ansible_os_family == 'Suse'
+      block:
+        - name: Apply updates
+          community.general.zypper:
+            name: '*'
+            state: latest
+            update_cache: true
+          register: zypper_result
+
+        - name: Check if reboot required
+          ansible.builtin.shell: zypper needs-rebooting; echo $?
+          register: zypper_reboot
+          changed_when: false
+          failed_when: false
+
+        - name: Set reboot fact
+          ansible.builtin.set_fact:
+            needs_reboot: "{{ zypper_reboot.stdout | int == 0 }}"
+
+    - name: Handle reboot if required
+      when:
+        - needs_reboot | default(false)
+        - allow_reboot | bool
+      block:
+        - name: Prompt for reboot confirmation
+          ansible.builtin.pause:
+            prompt: "{{ inventory_hostname }} requires reboot. Press Enter to reboot or Ctrl+C to skip"
+          when: not (auto_reboot | bool)
+
+        - name: Reboot the system
+          ansible.builtin.reboot:
+            reboot_timeout: 300
+            msg: "System update requires reboot"
+
+        - name: Wait for agent to reconnect
+          ansible.builtin.wait_for:
+            port: 22
+            delay: 30
+            timeout: 300
+          delegate_to: localhost
+
+    - name: Verify Wazuh Agent running
+      ansible.builtin.systemd:
+        name: wazuh-agent
+        state: started
+      register: agent_status
+
+#
+# PHASE 2: UPDATE DASHBOARD
+#
+- name: System Update - Wazuh Dashboard
+  hosts: wazuh_dashboards
+  become: true
+  gather_facts: true
+  serial: 1
+  tags: [dashboard, update]
+  vars:
+    security_only: "{{ hostvars['localhost']['update_security_only'] | default(false) }}"
+    allow_reboot: "{{ hostvars['localhost']['update_allow_reboot'] | default(true) }}"
+    auto_reboot: "{{ hostvars['localhost']['update_auto_reboot'] | default(false) }}"
+
+  tasks:
+    - name: Stop Dashboard before update
+      ansible.builtin.systemd:
+        name: wazuh-dashboard
+        state: stopped
+
+    - name: Apply updates (Debian/Ubuntu)
+      when: ansible_os_family == 'Debian'
+      block:
+        - name: Update apt cache
+          ansible.builtin.apt:
+            update_cache: true
+
+        - name: Apply security updates only
+          ansible.builtin.apt:
+            upgrade: dist
+            default_release: "{{ ansible_distribution_release }}-security"
+          when: security_only | bool
+
+        - name: Apply all updates
+          ansible.builtin.apt:
+            upgrade: dist
+          when: not (security_only | bool)
+
+        - name: Check if reboot required
+          ansible.builtin.stat:
+            path: /var/run/reboot-required
+          register: reboot_required_file
+
+        - name: Set reboot fact
+          ansible.builtin.set_fact:
+            needs_reboot: "{{ reboot_required_file.stat.exists | default(false) }}"
+
+    - name: Apply updates (RHEL/CentOS/Rocky)
+      when: ansible_os_family == 'RedHat'
+      block:
+        - name: Apply security updates only
+          ansible.builtin.yum:
+            name: '*'
+            state: latest
+            security: true
+          when: security_only | bool
+
+        - name: Apply all updates
+          ansible.builtin.yum:
+            name: '*'
+            state: latest
+          when: not (security_only | bool)
+
+        - name: Check if reboot required
+          ansible.builtin.shell: needs-restarting -r 2>/dev/null; echo $?
+          register: needs_restarting
+          changed_when: false
+          failed_when: false
+
+        - name: Set reboot fact
+          ansible.builtin.set_fact:
+            needs_reboot: "{{ needs_restarting.stdout | int == 1 }}"
+
+    - name: Handle reboot if required
+      when:
+        - needs_reboot | default(false)
+        - allow_reboot | bool
+      block:
+        - name: Prompt for reboot confirmation
+          ansible.builtin.pause:
+            prompt: "{{ inventory_hostname }} requires reboot. Press Enter to reboot or Ctrl+C to skip"
+          when: not (auto_reboot | bool)
+
+        - name: Reboot the system
+          ansible.builtin.reboot:
+            reboot_timeout: 300
+
+    - name: Start Dashboard after update
+      ansible.builtin.systemd:
+        name: wazuh-dashboard
+        state: started
+        enabled: true
+
+    - name: Wait for Dashboard to be ready
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:{{ wazuh_dashboard_port | default(443) }}/api/status"
+        validate_certs: false
+        status_code: [200, 302, 401]
+      register: dashboard_health
+      until: dashboard_health.status in [200, 302, 401]
+      retries: 30
+      delay: 10
+      delegate_to: localhost
+
+#
+# PHASE 3: UPDATE MANAGERS (Rolling)
+#
+- name: System Update - Wazuh Managers
+  hosts: wazuh_managers
+  become: true
+  gather_facts: true
+  serial: 1
+  tags: [manager, update]
+  vars:
+    security_only: "{{ hostvars['localhost']['update_security_only'] | default(false) }}"
+    allow_reboot: "{{ hostvars['localhost']['update_allow_reboot'] | default(true) }}"
+    auto_reboot: "{{ hostvars['localhost']['update_auto_reboot'] | default(false) }}"
+
+  tasks:
+    - name: Stop Manager services before update
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+      loop:
+        - filebeat
+        - wazuh-manager
+      failed_when: false
+
+    - name: Apply updates (Debian/Ubuntu)
+      when: ansible_os_family == 'Debian'
+      block:
+        - name: Update apt cache
+          ansible.builtin.apt:
+            update_cache: true
+
+        - name: Apply security updates only
+          ansible.builtin.apt:
+            upgrade: dist
+            default_release: "{{ ansible_distribution_release }}-security"
+          when: security_only | bool
+
+        - name: Apply all updates
+          ansible.builtin.apt:
+            upgrade: dist
+          when: not (security_only | bool)
+
+        - name: Check if reboot required
+          ansible.builtin.stat:
+            path: /var/run/reboot-required
+          register: reboot_required_file
+
+        - name: Set reboot fact
+          ansible.builtin.set_fact:
+            needs_reboot: "{{ reboot_required_file.stat.exists | default(false) }}"
+
+    - name: Apply updates (RHEL/CentOS/Rocky)
+      when: ansible_os_family == 'RedHat'
+      block:
+        - name: Apply security updates only
+          ansible.builtin.yum:
+            name: '*'
+            state: latest
+            security: true
+          when: security_only | bool
+
+        - name: Apply all updates
+          ansible.builtin.yum:
+            name: '*'
+            state: latest
+          when: not (security_only | bool)
+
+        - name: Check if reboot required
+          ansible.builtin.shell: needs-restarting -r 2>/dev/null; echo $?
+          register: needs_restarting
+          changed_when: false
+          failed_when: false
+
+        - name: Set reboot fact
+          ansible.builtin.set_fact:
+            needs_reboot: "{{ needs_restarting.stdout | int == 1 }}"
+
+    - name: Handle reboot if required
+      when:
+        - needs_reboot | default(false)
+        - allow_reboot | bool
+      block:
+        - name: Prompt for reboot confirmation
+          ansible.builtin.pause:
+            prompt: "{{ inventory_hostname }} (Manager) requires reboot. Press Enter to reboot or Ctrl+C to skip"
+          when: not (auto_reboot | bool)
+
+        - name: Reboot the system
+          ansible.builtin.reboot:
+            reboot_timeout: 300
+
+    - name: Start Manager services after update
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      loop:
+        - wazuh-manager
+        - filebeat
+
+    - name: Wait for Manager API to be ready
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:{{ wazuh_manager_api_port | default(55000) }}/"
+        validate_certs: false
+        status_code: [200, 401]
+      register: manager_health
+      until: manager_health.status in [200, 401]
+      retries: 30
+      delay: 10
+      delegate_to: localhost
+
+    - name: Wait for cluster sync (if clustered)
+      ansible.builtin.pause:
+        seconds: 30
+      when: groups['wazuh_managers'] | length > 1
+
+#
+# PHASE 4: UPDATE INDEXERS (Rolling)
+#
+- name: System Update - Wazuh Indexers
+  hosts: wazuh_indexers
+  become: true
+  gather_facts: true
+  serial: 1
+  tags: [indexer, update]
+  vars_files:
+    - ../group_vars/all/vault.yml
+    - ../group_vars/all/main.yml
+  vars:
+    security_only: "{{ hostvars['localhost']['update_security_only'] | default(false) }}"
+    allow_reboot: "{{ hostvars['localhost']['update_allow_reboot'] | default(true) }}"
+    auto_reboot: "{{ hostvars['localhost']['update_auto_reboot'] | default(false) }}"
+
+  tasks:
+    - name: Disable shard allocation (cluster)
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/settings"
+        method: PUT
+        body_format: json
+        body:
+          persistent:
+            cluster.routing.allocation.enable: "primaries"
+        user: "admin"
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: false
+      delegate_to: localhost
+      when: groups['wazuh_indexers'] | length > 1
+
+    - name: Stop Indexer before update
+      ansible.builtin.systemd:
+        name: wazuh-indexer
+        state: stopped
+
+    - name: Apply updates (Debian/Ubuntu)
+      when: ansible_os_family == 'Debian'
+      block:
+        - name: Update apt cache
+          ansible.builtin.apt:
+            update_cache: true
+
+        - name: Apply security updates only
+          ansible.builtin.apt:
+            upgrade: dist
+            default_release: "{{ ansible_distribution_release }}-security"
+          when: security_only | bool
+
+        - name: Apply all updates
+          ansible.builtin.apt:
+            upgrade: dist
+          when: not (security_only | bool)
+
+        - name: Check if reboot required
+          ansible.builtin.stat:
+            path: /var/run/reboot-required
+          register: reboot_required_file
+
+        - name: Set reboot fact
+          ansible.builtin.set_fact:
+            needs_reboot: "{{ reboot_required_file.stat.exists | default(false) }}"
+
+    - name: Apply updates (RHEL/CentOS/Rocky)
+      when: ansible_os_family == 'RedHat'
+      block:
+        - name: Apply security updates only
+          ansible.builtin.yum:
+            name: '*'
+            state: latest
+            security: true
+          when: security_only | bool
+
+        - name: Apply all updates
+          ansible.builtin.yum:
+            name: '*'
+            state: latest
+          when: not (security_only | bool)
+
+        - name: Check if reboot required
+          ansible.builtin.shell: needs-restarting -r 2>/dev/null; echo $?
+          register: needs_restarting
+          changed_when: false
+          failed_when: false
+
+        - name: Set reboot fact
+          ansible.builtin.set_fact:
+            needs_reboot: "{{ needs_restarting.stdout | int == 1 }}"
+
+    - name: Handle reboot if required
+      when:
+        - needs_reboot | default(false)
+        - allow_reboot | bool
+      block:
+        - name: Prompt for reboot confirmation
+          ansible.builtin.pause:
+            prompt: "{{ inventory_hostname }} (Indexer) requires reboot. Press Enter to reboot or Ctrl+C to skip"
+          when: not (auto_reboot | bool)
+
+        - name: Reboot the system
+          ansible.builtin.reboot:
+            reboot_timeout: 300
+
+    - name: Start Indexer after update
+      ansible.builtin.systemd:
+        name: wazuh-indexer
+        state: started
+        enabled: true
+
+    - name: Wait for Indexer to be ready
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health"
+        user: "admin"
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: false
+      register: indexer_health
+      until: indexer_health.status == 200
+      retries: 30
+      delay: 10
+      delegate_to: localhost
+
+    - name: Re-enable shard allocation
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/settings"
+        method: PUT
+        body_format: json
+        body:
+          persistent:
+            cluster.routing.allocation.enable: null
+        user: "admin"
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: false
+      delegate_to: localhost
+      when: groups['wazuh_indexers'] | length > 1
+
+    - name: Wait for cluster to stabilize
+      ansible.builtin.uri:
+        url: "https://{{ inventory_hostname }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health?wait_for_status=green&timeout=5m"
+        user: "admin"
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: false
+      delegate_to: localhost
+      when: groups['wazuh_indexers'] | length > 1
+
+#
+# POST-UPDATE VALIDATION
+#
+- name: System Update - Validation
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tags: [validate, always]
+  vars:
+    update_timestamp: "{{ hostvars['localhost']['update_timestamp'] }}"
+
+  tasks:
+    - name: Run health check
+      ansible.builtin.command:
+        cmd: ansible-playbook {{ playbook_dir }}/health-check.yml
+        chdir: "{{ playbook_dir }}/.."
+      register: health_check
+      failed_when: false
+
+    - name: Display update summary
+      ansible.builtin.debug:
+        msg: |
+
+          ══════════════════════════════════════════════════════════════
+                         SYSTEM UPDATE COMPLETE
+          ══════════════════════════════════════════════════════════════
+
+          Timestamp: {{ update_timestamp }}
+          Backup: backups/pre-sysupdate-{{ update_timestamp }}
+
+          Updated Hosts:
+            Indexers: {{ groups.get('wazuh_indexers', []) | length }}
+            Managers: {{ groups.get('wazuh_managers', []) | length }}
+            Dashboards: {{ groups.get('wazuh_dashboards', []) | length }}
+            Agents: {{ groups.get('wazuh_agents', []) | length }}
+
+          Post-Update Checklist:
+            [ ] Verify Dashboard accessible
+            [ ] Check agent connectivity
+            [ ] Review system logs for errors
+            [ ] Monitor performance for 24 hours
+
+          Rollback (if needed):
+            ansible-playbook playbooks/restore.yml -e "restore_from=pre-sysupdate-{{ update_timestamp }}"
+
+          ══════════════════════════════════════════════════════════════
