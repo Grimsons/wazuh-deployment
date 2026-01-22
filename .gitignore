@@ -17,6 +17,7 @@ wazuh-client-prep.sh
 
 # Generated configuration files (may contain passwords/secrets)
 inventory/hosts.yml
+inventory/bootstrap.yml
 group_vars/all.yml
 group_vars/vault.yml
 group_vars/all/main.yml

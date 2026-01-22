@@ -35,12 +35,31 @@ This guide provides best practices and operational procedures for managing your 
 - [ ] Note the admin credentials displayed at the end
 - [ ] Verify `.vault_password` file was created
 
+### Bootstrap & Deployment
+
+```bash
+# 1. Test connectivity to hosts (uses your personal credentials)
+ansible all -m ping -i inventory/bootstrap.yml --vault-password-file .vault_password
+
+# 2. Bootstrap hosts (creates wazuh-deploy user with SSH key)
+ansible-playbook playbooks/bootstrap-hosts.yml -i inventory/bootstrap.yml --vault-password-file .vault_password
+
+# 3. Deploy Wazuh (now uses SSH key authentication)
+ansible-playbook site.yml --vault-password-file .vault_password
+```
+
+The bootstrap step creates the `wazuh-deploy` user on all hosts with:
+- SSH key authentication (no passwords needed)
+- Passwordless sudo access
+
+After bootstrap, all operations use the main inventory (`hosts.yml`) with SSH key auth.
+
 ### After Deployment
 
 - [ ] **CRITICAL**: Back up `.vault_password` to secure offline storage
 - [ ] Back up `group_vars/all/vault.yml` (encrypted credentials)
 - [ ] Test dashboard login at `https://<dashboard-ip>:443`
-- [ ] Verify all agents are connected: `ansible-playbook playbooks/health-check.yml`
+- [ ] Verify all services running: `ansible-playbook playbooks/health-check.yml --vault-password-file .vault_password`
 - [ ] Test credential retrieval: `./scripts/manage-vault.sh view`
 - [ ] Configure automated backups (see [Maintenance Schedule](#maintenance-schedule))
 
