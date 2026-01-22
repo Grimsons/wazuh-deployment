@@ -503,7 +503,13 @@ ansible-playbook playbooks/backup.yml --vault-password-file .vault_password
 # Check certificates
 ansible-playbook playbooks/certificate-management.yml --tags check-expiry --vault-password-file .vault_password
 
-# Upgrade (dry run)
+# OS security updates
+ansible-playbook playbooks/system-update.yml -e "security_only=true" --vault-password-file .vault_password
+
+# Check for OS updates (no changes)
+ansible-playbook playbooks/system-update.yml --tags check --vault-password-file .vault_password
+
+# Wazuh upgrade (dry run)
 ansible-playbook playbooks/upgrade.yml --tags check --vault-password-file .vault_password
 
 # Full deployment
