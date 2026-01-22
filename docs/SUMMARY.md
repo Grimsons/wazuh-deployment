@@ -20,6 +20,7 @@
 
 # Operations
 
+- [Administrator's Guide](operations/administrators-guide.md)
 - [Architecture](operations/architecture.md)
 - [Security Guidelines](operations/deployment-security.md)
 - [Pre-Flight Checks](operations/pre-flight-checks.md)
