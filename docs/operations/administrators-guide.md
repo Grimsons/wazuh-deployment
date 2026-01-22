@@ -201,6 +201,8 @@ ansible-playbook playbooks/setup-maintenance-cron.yml --vault-password-file .vau
 
 ### Recommended Schedule
 
+> **Note:** All `ansible-playbook` commands require `--vault-password-file .vault_password` to decrypt credentials.
+
 | Task | Frequency | Command |
 |------|-----------|---------|
 | Health check | Daily | `ansible-playbook playbooks/health-check.yml` |
