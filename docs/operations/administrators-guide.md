@@ -206,10 +206,12 @@ ansible-playbook playbooks/setup-maintenance-cron.yml --vault-password-file .vau
 | Health check | Daily | `ansible-playbook playbooks/health-check.yml` |
 | Backup | Daily | `ansible-playbook playbooks/backup.yml` |
 | Log cleanup | Weekly | `ansible-playbook playbooks/log-cleanup.yml` |
+| OS security updates | Weekly/Monthly | `ansible-playbook playbooks/system-update.yml -e security_only=true` |
 | Certificate check | Monthly | `ansible-playbook playbooks/certificate-management.yml --tags check-expiry` |
 | Credential rotation | Quarterly | `./scripts/manage-vault.sh rotate` |
 | Vault rekey | Bi-annually | `./scripts/manage-vault.sh rekey` |
-| Version upgrade | As needed | `ansible-playbook playbooks/upgrade.yml` |
+| Wazuh upgrade | As needed | `ansible-playbook playbooks/upgrade.yml` |
+| Full OS update | Quarterly | `ansible-playbook playbooks/system-update.yml` |
 
 ### Log Retention
 
@@ -320,6 +322,33 @@ ansible-playbook playbooks/certificate-management.yml --tags check-expiry --vaul
 ---
 
 ## Upgrading
+
+### OS System Updates
+
+Apply operating system security patches and updates:
+
+```bash
+# Check for available updates (no changes)
+ansible-playbook playbooks/system-update.yml --tags check --vault-password-file .vault_password
+
+# Apply security updates only (recommended for production)
+ansible-playbook playbooks/system-update.yml -e "security_only=true" --vault-password-file .vault_password
+
+# Full system update (all packages)
+ansible-playbook playbooks/system-update.yml --vault-password-file .vault_password
+
+# Auto-reboot if kernel updates require it
+ansible-playbook playbooks/system-update.yml -e "auto_reboot=true" --vault-password-file .vault_password
+```
+
+**Best Practices for OS Updates:**
+- Apply security updates weekly or monthly
+- Schedule full updates during maintenance windows
+- The playbook updates in safe order: Agents → Dashboard → Managers → Indexers
+- Rolling updates ensure one node stays running during cluster updates
+- Backup is created automatically before updates
+
+### Wazuh Version Upgrades
 
 ### Pre-Upgrade Checklist
 
