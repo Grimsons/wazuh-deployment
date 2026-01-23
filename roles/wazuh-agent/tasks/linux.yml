@@ -84,52 +84,15 @@
   become: true
   notify: restart wazuh-agent
 
-- name: Check if enrollment password credentials file exists
-  ansible.builtin.stat:
-    path: "{{ playbook_dir }}/credentials/agent_enrollment_password.txt"
-  delegate_to: localhost
-  become: false
-  register: agent_enrollment_password_file
-  when:
-    - wazuh_authd_use_password | default(true)
-    - wazuh_agent_enrollment_password is not defined
-  vars:
-    ansible_become: false
-
-- name: Read enrollment password from credentials file
-  ansible.builtin.slurp:
-    src: "{{ playbook_dir }}/credentials/agent_enrollment_password.txt"
-  delegate_to: localhost
-  become: false
-  register: agent_enrollment_password_content
-  when:
-    - wazuh_authd_use_password | default(true)
-    - wazuh_agent_enrollment_password is not defined
-    - agent_enrollment_password_file.stat.exists | default(false)
-  vars:
-    ansible_become: false
-
-- name: Extract enrollment password
-  ansible.builtin.set_fact:
-    wazuh_agent_enrollment_password: "{{ agent_enrollment_password_content.content | b64decode | regex_search('Password:\\s*(.+)', '\\1') | first | trim }}"
-  when:
-    - agent_enrollment_password_content is defined
-    - agent_enrollment_password_content is not skipped
-    - agent_enrollment_password_content.content is defined
-  no_log: true
-
-- name: Fail if enrollment password is required but not available
+- name: Fail if enrollment password is required but not in vault
   ansible.builtin.fail:
     msg: |
-      Agent enrollment password is required but could not be obtained.
+      Agent enrollment password is required but not defined in Ansible vault.
 
-      Either:
-      1. Set 'wazuh_agent_enrollment_password' variable directly, or
-      2. Ensure the file '{{ playbook_dir }}/credentials/agent_enrollment_password.txt' exists
-         (created by running the wazuh-manager playbook first), or
-      3. Set 'wazuh_authd_use_password: false' to disable password-based enrollment
+      Please add 'wazuh_agent_enrollment_password' to your Ansible vault:
+        ansible-vault edit group_vars/all/vault.yml
 
-      File exists: {{ agent_enrollment_password_file.stat.exists | default(false) }}
+      Or set 'wazuh_authd_use_password: false' to disable password-based enrollment.
   when:
     - wazuh_authd_use_password | default(true)
     - wazuh_agent_enrollment_password is not defined or wazuh_agent_enrollment_password | length == 0

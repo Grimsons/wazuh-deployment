@@ -16,6 +16,28 @@
     arguments: '/q WAZUH_MANAGER="{{ wazuh_manager_address }}"'
     state: present
 
+- name: Windows | Fail if enrollment password is required but not in vault
+  ansible.builtin.fail:
+    msg: |
+      Agent enrollment password is required but not defined in Ansible vault.
+
+      Please add 'wazuh_agent_enrollment_password' to your Ansible vault:
+        ansible-vault edit group_vars/all/vault.yml
+
+      Or set 'wazuh_authd_use_password: false' to disable password-based enrollment.
+  when:
+    - wazuh_authd_use_password | default(true)
+    - wazuh_agent_enrollment_password is not defined or wazuh_agent_enrollment_password | length == 0
+
+- name: Windows | Deploy enrollment password file
+  ansible.windows.win_copy:
+    content: "{{ wazuh_agent_enrollment_password }}"
+    dest: 'C:\Program Files (x86)\ossec-agent\authd.pass'
+  when:
+    - wazuh_authd_use_password | default(true)
+    - wazuh_agent_enrollment_password is defined
+    - wazuh_agent_enrollment_password | length > 0
+
 - name: Windows | Stop Wazuh agent service (if already running)
   ansible.windows.win_service:
     name: "Wazuh"
