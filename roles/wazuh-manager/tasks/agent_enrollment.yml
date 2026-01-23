@@ -11,40 +11,41 @@
   vars:
     ansible_become: false
 
-- name: Generate agent enrollment password if not exists
-  block:
-    - name: Generate secure enrollment password
-      ansible.builtin.set_fact:
-        wazuh_agent_enrollment_password: "{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits') }}"
-      no_log: true
-      when: wazuh_agent_enrollment_password is not defined
+- name: Generate secure enrollment password if not defined
+  ansible.builtin.set_fact:
+    wazuh_agent_enrollment_password: "{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits') }}"
+  no_log: true
+  when: wazuh_agent_enrollment_password is not defined
 
-    - name: Save enrollment password to credentials file
-      ansible.builtin.copy:
-        content: |
-          # Wazuh Agent Enrollment Password
-          # Generated: {{ ansible_date_time.iso8601 }}
-          # Manager: {{ inventory_hostname }}
+# Save credentials file if it doesn't exist (works with both vault and generated passwords)
+- name: Save enrollment password to credentials file
+  ansible.builtin.copy:
+    content: |
+      # Wazuh Agent Enrollment Password
+      # Generated: {{ ansible_date_time.iso8601 }}
+      # Manager: {{ inventory_hostname }}
 
-          Password: {{ wazuh_agent_enrollment_password }}
+      Password: {{ wazuh_agent_enrollment_password }}
 
-          # Use this password when enrolling agents:
-          # Linux/macOS: WAZUH_REGISTRATION_PASSWORD='{{ wazuh_agent_enrollment_password }}'
-          # Windows: WAZUH_REGISTRATION_PASSWORD={{ wazuh_agent_enrollment_password }}
-          #
-          # Example agent enrollment:
-          # WAZUH_MANAGER='{{ ansible_default_ipv4.address }}' WAZUH_REGISTRATION_PASSWORD='{{ wazuh_agent_enrollment_password }}' apt install wazuh-agent
+      # Use this password when enrolling agents:
+      # Linux/macOS: WAZUH_REGISTRATION_PASSWORD='{{ wazuh_agent_enrollment_password }}'
+      # Windows: WAZUH_REGISTRATION_PASSWORD={{ wazuh_agent_enrollment_password }}
+      #
+      # Example agent enrollment:
+      # WAZUH_MANAGER='{{ ansible_default_ipv4.address }}' WAZUH_REGISTRATION_PASSWORD='{{ wazuh_agent_enrollment_password }}' apt install wazuh-agent
 
-          # IMPORTANT: Keep this file secure and delete after noting the password!
-        dest: "{{ playbook_dir }}/credentials/agent_enrollment_password.txt"
-        mode: '0600'
-      delegate_to: localhost
-      become: false
-      vars:
-        ansible_become: false
-      run_once: true
-      no_log: true
-  when: not enrollment_password_file.stat.exists
+      # IMPORTANT: Keep this file secure and delete after noting the password!
+    dest: "{{ playbook_dir }}/credentials/agent_enrollment_password.txt"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_become: false
+  run_once: true
+  no_log: true
+  when:
+    - not enrollment_password_file.stat.exists
+    - wazuh_agent_enrollment_password is defined
 
 - name: Read enrollment password from credentials file
   ansible.builtin.slurp:
