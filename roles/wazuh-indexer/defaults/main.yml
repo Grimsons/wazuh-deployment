@@ -19,7 +19,21 @@ wazuh_indexer_network_host: "0.0.0.0"
 wazuh_indexer_cluster_name: "wazuh-cluster"
 wazuh_indexer_cluster_initial_master_nodes: []
 
+# ═══════════════════════════════════════════════════════════════
+# Authentication Settings
+# ═══════════════════════════════════════════════════════════════
+# Default password used for initial indexer authentication (OpenSearch default)
+# This password is automatically changed to a secure random password during deployment
+# DO NOT change this unless the Wazuh indexer default changes
+wazuh_indexer_default_password: "admin"
+
+# Startup check timeouts (configurable for slow systems or large clusters)
+wazuh_indexer_health_check_retries: 30
+wazuh_indexer_health_check_delay: 10
+wazuh_indexer_startup_timeout: 300
+
 # JVM settings
+# IMPORTANT: Set to 50% of available RAM, max 32g for optimal performance
 wazuh_indexer_heap_size: "1g"
 wazuh_indexer_max_map_count: 262144
 # Memory lock - prevents JVM from being swapped (CRITICAL for production)

@@ -16,4 +16,4 @@
 - name: restart wazuh-agent-macos
   ansible.builtin.command: /Library/Ossec/bin/wazuh-control restart
   become: true
-  changed_when: true
+  changed_when: false

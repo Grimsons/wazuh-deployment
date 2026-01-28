@@ -9,6 +9,19 @@ wazuh_manager_service_name: "wazuh-manager"
 wazuh_manager_config_path: /var/ossec/etc/ossec.conf
 wazuh_manager_log_path: /var/ossec/logs
 
+# ═══════════════════════════════════════════════════════════════
+# API Authentication Settings
+# ═══════════════════════════════════════════════════════════════
+# Default password used for initial API authentication (Wazuh ships with this)
+# This password is automatically changed to a secure random password during deployment
+# DO NOT change this unless Wazuh changes their default
+wazuh_api_default_password: "wazuh"
+
+# Startup check timeouts (configurable for slow systems)
+wazuh_api_check_retries: 30
+wazuh_api_check_delay: 10
+wazuh_service_start_timeout: 300
+
 # API settings
 wazuh_manager_api_bind_addr: "0.0.0.0"
 wazuh_manager_api_https: true
