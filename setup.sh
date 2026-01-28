@@ -1191,6 +1191,65 @@ wazuh_log_cleanup_schedule: "${LOG_CLEANUP_SCHEDULE:-daily}"
 # When locked, the user can only run the unlock script and check Wazuh status
 # Set to false to keep full sudo access after deployment
 wazuh_lockdown_deploy_user: true
+
+# ═══════════════════════════════════════════════════════════════
+# Automatic Index Management (Prevents 1000 Index Limit)
+# ═══════════════════════════════════════════════════════════════
+# ISM (Index State Management) with automatic rollover prevents
+# reaching OpenSearch's 1000 open index limit.
+
+# Enable automatic index rollover (STRONGLY recommended)
+wazuh_rollover_enabled: true
+
+# Rollover triggers (any condition triggers new index creation)
+wazuh_rollover_max_size: "30gb"            # Rollover when index reaches 30GB
+wazuh_rollover_max_age: "1d"               # Rollover daily for predictable naming
+wazuh_rollover_max_docs: 50000000          # Rollover at 50 million documents
+
+# Index lifecycle stages
+wazuh_retention_enabled: true
+wazuh_retention_days: 365                  # Delete after 1 year
+wazuh_retention_warm_after_days: 7         # Move to warm tier after 7 days
+wazuh_retention_cold_after_days: 30        # Move to cold tier after 30 days
+
+# Close cold indices (CRITICAL: Closed indices don't count toward 1000 limit)
+wazuh_close_cold_indices: true
+
+# Monitoring/Statistics retention (shorter - less critical data)
+wazuh_monitoring_retention_days: 7
+wazuh_statistics_retention_days: 7
+
+# Shard configuration
+wazuh_alerts_primary_shards: 1
+wazuh_alerts_replica_shards: 0
+
+# ═══════════════════════════════════════════════════════════════
+# Health Check & Timeout Settings
+# ═══════════════════════════════════════════════════════════════
+# Configurable timeouts for slow systems or high-latency environments
+
+# Indexer settings
+wazuh_indexer_startup_timeout: 300
+wazuh_indexer_health_check_retries: 30
+wazuh_indexer_health_check_delay: 10
+
+# Manager settings
+wazuh_service_start_timeout: 300
+wazuh_api_check_retries: 30
+wazuh_api_check_delay: 10
+
+# Dashboard settings
+wazuh_dashboard_startup_timeout: 300
+wazuh_dashboard_health_check_retries: 30
+wazuh_dashboard_health_check_delay: 10
+
+# ═══════════════════════════════════════════════════════════════
+# Log Rotation
+# ═══════════════════════════════════════════════════════════════
+wazuh_log_rotation_enabled: true
+wazuh_log_rotation_keep_days: 30
+wazuh_log_rotation_max_size: "100M"
+wazuh_log_rotation_compress: true
 EOF
 
     print_success "Group variables created: group_vars/all/main.yml"

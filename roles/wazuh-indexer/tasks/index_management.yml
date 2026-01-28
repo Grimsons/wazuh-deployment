@@ -7,6 +7,25 @@
 # 4. Write aliases for seamless index transitions
 
 # ═══════════════════════════════════════════════════════════════
+# Build Cold State Actions (conditional close)
+# ═══════════════════════════════════════════════════════════════
+- name: Set cold state actions (with close)
+  ansible.builtin.set_fact:
+    wazuh_cold_actions_with_close:
+      - read_only: {}
+      - index_priority:
+          priority: 0
+      - close: {}
+    wazuh_cold_actions_without_close:
+      - read_only: {}
+      - index_priority:
+          priority: 0
+
+- name: Determine cold actions based on close setting
+  ansible.builtin.set_fact:
+    wazuh_cold_actions: "{{ wazuh_cold_actions_with_close if (wazuh_close_cold_indices | default(true)) else wazuh_cold_actions_without_close }}"
+
+# ═══════════════════════════════════════════════════════════════
 # ISM Policy with Rollover (Alerts)
 # ═══════════════════════════════════════════════════════════════
 - name: Create ISM policy for wazuh-alerts with rollover
@@ -46,13 +65,7 @@
                 conditions:
                   min_rollover_age: "{{ wazuh_retention_cold_after_days | default(30) }}d"
           - name: cold
-            actions:
-              - read_only: {}
-              - index_priority:
-                  priority: 0
-{% if wazuh_close_cold_indices | default(true) %}
-              - close: {}
-{% endif %}
+            actions: "{{ wazuh_cold_actions }}"
             transitions:
               - state_name: delete
                 conditions:
@@ -112,13 +125,7 @@
                 conditions:
                   min_rollover_age: "{{ wazuh_retention_cold_after_days | default(30) }}d"
           - name: cold
-            actions:
-              - read_only: {}
-              - index_priority:
-                  priority: 0
-{% if wazuh_close_cold_indices | default(true) %}
-              - close: {}
-{% endif %}
+            actions: "{{ wazuh_cold_actions }}"
             transitions:
               - state_name: delete
                 conditions:
