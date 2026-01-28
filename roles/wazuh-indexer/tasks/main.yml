@@ -4,11 +4,11 @@
 - name: Include OS-specific variables
   ansible.builtin.include_vars: "{{ item }}"
   with_first_found:
-    - "{{ ansible_distribution }}-{{ ansible_distribution_major_version }}.yml"
-    - "{{ ansible_distribution }}.yml"
-    - "{{ ansible_os_family }}.yml"
-    - "default.yml"
-  ignore_errors: true
+    - files:
+        - "{{ ansible_distribution }}-{{ ansible_distribution_major_version }}.yml"
+        - "{{ ansible_distribution }}.yml"
+        - "{{ ansible_os_family }}.yml"
+      skip: true
 
 - name: Install prerequisites
   ansible.builtin.include_tasks: prerequisites.yml
@@ -51,8 +51,8 @@
   ansible.builtin.wait_for:
     port: "{{ wazuh_indexer_http_port }}"
     host: "{{ ansible_default_ipv4.address }}"
-    delay: 10
-    timeout: 300
+    delay: "{{ wazuh_indexer_health_check_delay }}"
+    timeout: "{{ wazuh_indexer_startup_timeout }}"
   become: true
 
 - name: Verify Wazuh Indexer service is running
@@ -61,8 +61,8 @@
   become: true
   register: indexer_service_status
   until: indexer_service_status.status.ActiveState == "active"
-  retries: 30
-  delay: 10
+  retries: "{{ wazuh_indexer_health_check_retries }}"
+  delay: "{{ wazuh_indexer_health_check_delay }}"
 
 # Flush handlers to ensure indexer restarts with new config before security init
 - name: Flush handlers before security initialization
@@ -80,8 +80,8 @@
   ansible.builtin.wait_for:
     port: "{{ wazuh_indexer_http_port }}"
     host: "{{ ansible_default_ipv4.address }}"
-    delay: 10
-    timeout: 300
+    delay: "{{ wazuh_indexer_health_check_delay }}"
+    timeout: "{{ wazuh_indexer_startup_timeout }}"
   become: true
 
 - name: Initialize security (run only on first master)
@@ -111,9 +111,10 @@
     return_content: true
   register: indexer_health_stored
   until: indexer_health_stored.status in [200, 401]
-  retries: 30
-  delay: 10
+  retries: "{{ wazuh_indexer_health_check_retries }}"
+  delay: "{{ wazuh_indexer_health_check_delay }}"
   run_once: true
+  no_log: true
   when: credentials_file.stat.exists | default(false)
 
 # Set flag for whether password change is needed
@@ -128,16 +129,17 @@
   ansible.builtin.uri:
     url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_cluster/health"
     user: "admin"
-    password: "admin"
+    password: "{{ wazuh_indexer_default_password }}"
     force_basic_auth: true
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     status_code: [200]
     return_content: true
   register: indexer_health_initial
   until: indexer_health_initial.status == 200
-  retries: 30
-  delay: 10
+  retries: "{{ wazuh_indexer_health_check_retries }}"
+  delay: "{{ wazuh_indexer_health_check_delay }}"
   run_once: true
+  no_log: true
   when:
     - not (password_already_changed | default(false))
     - not (credentials_file_exists | default(false))

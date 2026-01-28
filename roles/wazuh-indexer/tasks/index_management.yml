@@ -1,13 +1,257 @@
 ---
-# Wazuh Indexer - Index Settings and ISM Policies
-# Note: Field mappings are handled by Filebeat's official wazuh-template.json
-# This file only configures index settings and retention policies
+# Wazuh Indexer - Automatic Index Management with Rollover
+# Prevents reaching the 1000 open index limit through:
+# 1. Automatic rollover based on size/age/document count
+# 2. Closing cold indices (closed indices don't count toward open limit)
+# 3. Automatic deletion after retention period
+# 4. Write aliases for seamless index transitions
 
-# Optional: Create index settings template (lower priority than Filebeat's official template)
-# This allows customizing shards/replicas without interfering with official mappings
-- name: Create wazuh-alerts index settings template
+# ═══════════════════════════════════════════════════════════════
+# Build Cold State Actions (conditional close)
+# ═══════════════════════════════════════════════════════════════
+- name: Set cold state actions (with close)
+  ansible.builtin.set_fact:
+    wazuh_cold_actions_with_close:
+      - read_only: {}
+      - index_priority:
+          priority: 0
+      - close: {}
+    wazuh_cold_actions_without_close:
+      - read_only: {}
+      - index_priority:
+          priority: 0
+
+- name: Determine cold actions based on close setting
+  ansible.builtin.set_fact:
+    wazuh_cold_actions: "{{ wazuh_cold_actions_with_close if (wazuh_close_cold_indices | default(true)) else wazuh_cold_actions_without_close }}"
+
+# ═══════════════════════════════════════════════════════════════
+# ISM Policy with Rollover (Alerts)
+# ═══════════════════════════════════════════════════════════════
+- name: Create ISM policy for wazuh-alerts with rollover
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_index_template/wazuh-alerts-settings"
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_plugins/_ism/policies/wazuh-alerts-policy"
+    method: PUT
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    body_format: json
+    body:
+      policy:
+        description: "Wazuh alerts index lifecycle with automatic rollover"
+        default_state: hot
+        states:
+          - name: hot
+            actions:
+              - rollover:
+                  min_size: "{{ wazuh_rollover_max_size | default('30gb') }}"
+                  min_index_age: "{{ wazuh_rollover_max_age | default('1d') }}"
+                  min_doc_count: "{{ wazuh_rollover_max_docs | default(50000000) }}"
+            transitions:
+              - state_name: warm
+                conditions:
+                  min_rollover_age: "{{ wazuh_retention_warm_after_days | default(7) }}d"
+          - name: warm
+            actions:
+              - replica_count:
+                  number_of_replicas: 0
+              - force_merge:
+                  max_num_segments: "{{ wazuh_warm_force_merge_segments | default(1) }}"
+              - index_priority:
+                  priority: 50
+            transitions:
+              - state_name: cold
+                conditions:
+                  min_rollover_age: "{{ wazuh_retention_cold_after_days | default(30) }}d"
+          - name: cold
+            actions: "{{ wazuh_cold_actions }}"
+            transitions:
+              - state_name: delete
+                conditions:
+                  min_rollover_age: "{{ wazuh_retention_days | default(365) }}d"
+          - name: delete
+            actions:
+              - delete: {}
+            transitions: []
+        ism_template:
+          - index_patterns:
+              - "wazuh-alerts-*"
+            priority: 100
+    status_code: [200, 201]
+    headers:
+      Content-Type: "application/json"
+  register: alerts_policy_result
+  changed_when: alerts_policy_result.status in [200, 201]
+  when: wazuh_retention_enabled | default(true)
+
+# ═══════════════════════════════════════════════════════════════
+# ISM Policy with Rollover (Archives)
+# ═══════════════════════════════════════════════════════════════
+- name: Create ISM policy for wazuh-archives with rollover
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_plugins/_ism/policies/wazuh-archives-policy"
+    method: PUT
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    body_format: json
+    body:
+      policy:
+        description: "Wazuh archives index lifecycle with automatic rollover"
+        default_state: hot
+        states:
+          - name: hot
+            actions:
+              - rollover:
+                  min_size: "{{ wazuh_rollover_max_size | default('30gb') }}"
+                  min_index_age: "{{ wazuh_rollover_max_age | default('1d') }}"
+                  min_doc_count: "{{ wazuh_rollover_max_docs | default(50000000) }}"
+            transitions:
+              - state_name: warm
+                conditions:
+                  min_rollover_age: "{{ wazuh_retention_warm_after_days | default(7) }}d"
+          - name: warm
+            actions:
+              - replica_count:
+                  number_of_replicas: 0
+              - force_merge:
+                  max_num_segments: "{{ wazuh_warm_force_merge_segments | default(1) }}"
+              - index_priority:
+                  priority: 50
+            transitions:
+              - state_name: cold
+                conditions:
+                  min_rollover_age: "{{ wazuh_retention_cold_after_days | default(30) }}d"
+          - name: cold
+            actions: "{{ wazuh_cold_actions }}"
+            transitions:
+              - state_name: delete
+                conditions:
+                  min_rollover_age: "{{ wazuh_retention_days | default(365) }}d"
+          - name: delete
+            actions:
+              - delete: {}
+            transitions: []
+        ism_template:
+          - index_patterns:
+              - "wazuh-archives-*"
+            priority: 100
+    status_code: [200, 201]
+    headers:
+      Content-Type: "application/json"
+  register: archives_policy_result
+  changed_when: archives_policy_result.status in [200, 201]
+  when: wazuh_retention_enabled | default(true)
+
+# ═══════════════════════════════════════════════════════════════
+# ISM Policy for Monitoring/Statistics (Shorter retention)
+# ═══════════════════════════════════════════════════════════════
+- name: Create ISM policy for wazuh-monitoring with rollover
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_plugins/_ism/policies/wazuh-monitoring-policy"
+    method: PUT
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    body_format: json
+    body:
+      policy:
+        description: "Wazuh monitoring index lifecycle - shorter retention"
+        default_state: hot
+        states:
+          - name: hot
+            actions:
+              - rollover:
+                  min_size: "10gb"
+                  min_index_age: "1d"
+                  min_doc_count: 10000000
+            transitions:
+              - state_name: warm
+                conditions:
+                  min_rollover_age: "3d"
+          - name: warm
+            actions:
+              - replica_count:
+                  number_of_replicas: 0
+              - force_merge:
+                  max_num_segments: 1
+            transitions:
+              - state_name: delete
+                conditions:
+                  min_rollover_age: "{{ wazuh_monitoring_retention_days | default(7) }}d"
+          - name: delete
+            actions:
+              - delete: {}
+            transitions: []
+        ism_template:
+          - index_patterns:
+              - "wazuh-monitoring-*"
+            priority: 100
+    status_code: [200, 201]
+    headers:
+      Content-Type: "application/json"
+  register: monitoring_policy_result
+  changed_when: monitoring_policy_result.status in [200, 201]
+  when: wazuh_retention_enabled | default(true)
+
+- name: Create ISM policy for wazuh-statistics with rollover
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_plugins/_ism/policies/wazuh-statistics-policy"
+    method: PUT
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    body_format: json
+    body:
+      policy:
+        description: "Wazuh statistics index lifecycle - shorter retention"
+        default_state: hot
+        states:
+          - name: hot
+            actions:
+              - rollover:
+                  min_size: "5gb"
+                  min_index_age: "1d"
+                  min_doc_count: 5000000
+            transitions:
+              - state_name: warm
+                conditions:
+                  min_rollover_age: "3d"
+          - name: warm
+            actions:
+              - replica_count:
+                  number_of_replicas: 0
+              - force_merge:
+                  max_num_segments: 1
+            transitions:
+              - state_name: delete
+                conditions:
+                  min_rollover_age: "{{ wazuh_statistics_retention_days | default(7) }}d"
+          - name: delete
+            actions:
+              - delete: {}
+            transitions: []
+        ism_template:
+          - index_patterns:
+              - "wazuh-statistics-*"
+            priority: 100
+    status_code: [200, 201]
+    headers:
+      Content-Type: "application/json"
+  register: statistics_policy_result
+  changed_when: statistics_policy_result.status in [200, 201]
+  when: wazuh_retention_enabled | default(true)
+
+# ═══════════════════════════════════════════════════════════════
+# Index Templates with Aliases for Rollover
+# ═══════════════════════════════════════════════════════════════
+- name: Create wazuh-alerts index template with rollover alias
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_index_template/wazuh-alerts-rollover"
     method: PUT
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
@@ -17,24 +261,23 @@
     body:
       index_patterns:
         - "wazuh-alerts-*"
-        - "wazuh-archives-*"
       template:
         settings:
-          number_of_shards: "{{ wazuh_indexer_alerts_shards | default(1) }}"
-          number_of_replicas: "{{ wazuh_indexer_alerts_replicas | default(0) }}"
+          number_of_shards: "{{ wazuh_alerts_primary_shards | default(1) }}"
+          number_of_replicas: "{{ wazuh_alerts_replica_shards | default(0) }}"
           index.refresh_interval: "5s"
-      # Lower priority than Filebeat's official template (which is typically 1)
-      # Settings will be merged, but official mappings take precedence
-      priority: 1
+          plugins.index_state_management.rollover_alias: "{{ wazuh_alerts_alias | default('wazuh-alerts') }}"
+      priority: 50
     status_code: [200]
-  register: alerts_settings_result
-  changed_when: alerts_settings_result.status == 200
-  when: wazuh_custom_index_settings | default(false)
+    headers:
+      Content-Type: "application/json"
+  register: alerts_template_result
+  changed_when: alerts_template_result.status == 200
+  when: wazuh_rollover_enabled | default(true)
 
-# Create ISM retention policy for automatic index lifecycle management
-- name: Create ISM retention policy
+- name: Create wazuh-archives index template with rollover alias
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_plugins/_ism/policies/wazuh-retention-policy"
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_index_template/wazuh-archives-rollover"
     method: PUT
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
@@ -42,52 +285,211 @@
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     body_format: json
     body:
-      policy:
-        description: "Wazuh index retention policy - {{ wazuh_retention_days | default(1095) }} days"
-        default_state: hot
-        states:
-          - name: hot
-            actions: []
-            transitions:
-              - state_name: warm
-                conditions:
-                  min_index_age: "{{ wazuh_retention_warm_after_days | default(30) }}d"
-          - name: warm
-            actions:
-              - replica_count:
-                  number_of_replicas: 0
-              - force_merge:
-                  max_num_segments: 1
-            transitions:
-              - state_name: cold
-                conditions:
-                  min_index_age: "{{ wazuh_retention_cold_after_days | default(90) }}d"
-          - name: cold
-            actions:
-              - read_only: {}
-            transitions:
-              - state_name: delete
-                conditions:
-                  min_index_age: "{{ wazuh_retention_days | default(1095) }}d"
-          - name: delete
-            actions:
-              - delete: {}
-            transitions: []
-        ism_template:
-          - index_patterns:
-              - "wazuh-alerts-*"
-              - "wazuh-archives-*"
-              - "wazuh-monitoring-*"
-              - "wazuh-statistics-*"
-            priority: 100
-    status_code: [200, 201, 409]
+      index_patterns:
+        - "wazuh-archives-*"
+      template:
+        settings:
+          number_of_shards: "{{ wazuh_archives_primary_shards | default(1) }}"
+          number_of_replicas: "{{ wazuh_archives_replica_shards | default(0) }}"
+          index.refresh_interval: "5s"
+          plugins.index_state_management.rollover_alias: "{{ wazuh_archives_alias | default('wazuh-archives') }}"
+      priority: 50
+    status_code: [200]
     headers:
       Content-Type: "application/json"
-  register: ism_policy_result
-  changed_when: ism_policy_result.status in [200, 201]
-  when: wazuh_retention_enabled | default(true)
+  register: archives_template_result
+  changed_when: archives_template_result.status == 200
+  when: wazuh_rollover_enabled | default(true)
 
-# Attach ISM policy to existing indices that don't have a policy
+- name: Create wazuh-monitoring index template with rollover alias
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_index_template/wazuh-monitoring-rollover"
+    method: PUT
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    body_format: json
+    body:
+      index_patterns:
+        - "wazuh-monitoring-*"
+      template:
+        settings:
+          number_of_shards: 1
+          number_of_replicas: 0
+          index.refresh_interval: "5s"
+          plugins.index_state_management.rollover_alias: "{{ wazuh_monitoring_alias | default('wazuh-monitoring') }}"
+      priority: 50
+    status_code: [200]
+    headers:
+      Content-Type: "application/json"
+  register: monitoring_template_result
+  changed_when: monitoring_template_result.status == 200
+  when: wazuh_rollover_enabled | default(true)
+
+- name: Create wazuh-statistics index template with rollover alias
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_index_template/wazuh-statistics-rollover"
+    method: PUT
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    body_format: json
+    body:
+      index_patterns:
+        - "wazuh-statistics-*"
+      template:
+        settings:
+          number_of_shards: 1
+          number_of_replicas: 0
+          index.refresh_interval: "5s"
+          plugins.index_state_management.rollover_alias: "{{ wazuh_statistics_alias | default('wazuh-statistics') }}"
+      priority: 50
+    status_code: [200]
+    headers:
+      Content-Type: "application/json"
+  register: statistics_template_result
+  changed_when: statistics_template_result.status == 200
+  when: wazuh_rollover_enabled | default(true)
+
+# ═══════════════════════════════════════════════════════════════
+# Bootstrap Initial Indices with Write Aliases
+# ═══════════════════════════════════════════════════════════════
+# These indices are created with the proper naming convention and write alias
+# Format: <index-name>-000001 (the 000001 suffix enables rollover numbering)
+
+- name: Check if wazuh-alerts bootstrap index exists
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/{{ wazuh_alerts_alias | default('wazuh-alerts') }}-000001"
+    method: HEAD
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    status_code: [200, 404]
+  register: alerts_bootstrap_check
+  when: wazuh_rollover_enabled | default(true)
+
+- name: Create wazuh-alerts bootstrap index with write alias
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/{{ wazuh_alerts_alias | default('wazuh-alerts') }}-000001"
+    method: PUT
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    body_format: json
+    body:
+      aliases:
+        "{{ wazuh_alerts_alias | default('wazuh-alerts') }}":
+          is_write_index: true
+    status_code: [200]
+    headers:
+      Content-Type: "application/json"
+  when:
+    - wazuh_rollover_enabled | default(true)
+    - alerts_bootstrap_check.status == 404
+
+- name: Check if wazuh-archives bootstrap index exists
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/{{ wazuh_archives_alias | default('wazuh-archives') }}-000001"
+    method: HEAD
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    status_code: [200, 404]
+  register: archives_bootstrap_check
+  when: wazuh_rollover_enabled | default(true)
+
+- name: Create wazuh-archives bootstrap index with write alias
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/{{ wazuh_archives_alias | default('wazuh-archives') }}-000001"
+    method: PUT
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    body_format: json
+    body:
+      aliases:
+        "{{ wazuh_archives_alias | default('wazuh-archives') }}":
+          is_write_index: true
+    status_code: [200]
+    headers:
+      Content-Type: "application/json"
+  when:
+    - wazuh_rollover_enabled | default(true)
+    - archives_bootstrap_check.status == 404
+
+- name: Check if wazuh-monitoring bootstrap index exists
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/{{ wazuh_monitoring_alias | default('wazuh-monitoring') }}-000001"
+    method: HEAD
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    status_code: [200, 404]
+  register: monitoring_bootstrap_check
+  when: wazuh_rollover_enabled | default(true)
+
+- name: Create wazuh-monitoring bootstrap index with write alias
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/{{ wazuh_monitoring_alias | default('wazuh-monitoring') }}-000001"
+    method: PUT
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    body_format: json
+    body:
+      aliases:
+        "{{ wazuh_monitoring_alias | default('wazuh-monitoring') }}":
+          is_write_index: true
+    status_code: [200]
+    headers:
+      Content-Type: "application/json"
+  when:
+    - wazuh_rollover_enabled | default(true)
+    - monitoring_bootstrap_check.status == 404
+
+- name: Check if wazuh-statistics bootstrap index exists
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/{{ wazuh_statistics_alias | default('wazuh-statistics') }}-000001"
+    method: HEAD
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    status_code: [200, 404]
+  register: statistics_bootstrap_check
+  when: wazuh_rollover_enabled | default(true)
+
+- name: Create wazuh-statistics bootstrap index with write alias
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/{{ wazuh_statistics_alias | default('wazuh-statistics') }}-000001"
+    method: PUT
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    body_format: json
+    body:
+      aliases:
+        "{{ wazuh_statistics_alias | default('wazuh-statistics') }}":
+          is_write_index: true
+    status_code: [200]
+    headers:
+      Content-Type: "application/json"
+  when:
+    - wazuh_rollover_enabled | default(true)
+    - statistics_bootstrap_check.status == 404
+
+# ═══════════════════════════════════════════════════════════════
+# Attach ISM Policies to Existing Indices
+# ═══════════════════════════════════════════════════════════════
 - name: Get existing wazuh indices
   ansible.builtin.uri:
     url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_cat/indices/wazuh-*?format=json"
@@ -101,7 +503,7 @@
   when: wazuh_retention_enabled | default(true)
   ignore_errors: true
 
-- name: Attach ISM policy to existing indices
+- name: Attach ISM policy to existing alerts indices
   ansible.builtin.uri:
     url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_plugins/_ism/add/{{ item.index }}"
     method: POST
@@ -111,7 +513,7 @@
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     body_format: json
     body:
-      policy_id: "wazuh-retention-policy"
+      policy_id: "wazuh-alerts-policy"
     status_code: [200, 409]
     headers:
       Content-Type: "application/json"
@@ -120,18 +522,131 @@
     - wazuh_retention_enabled | default(true)
     - existing_indices is defined
     - existing_indices.json is defined
-    - item.index is match('wazuh-alerts-.*|wazuh-archives-.*|wazuh-monitoring-.*|wazuh-statistics-.*')
+    - item.index is match('wazuh-alerts-.*')
   ignore_errors: true
 
-- name: Display index management status
+- name: Attach ISM policy to existing archives indices
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_plugins/_ism/add/{{ item.index }}"
+    method: POST
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    body_format: json
+    body:
+      policy_id: "wazuh-archives-policy"
+    status_code: [200, 409]
+    headers:
+      Content-Type: "application/json"
+  loop: "{{ existing_indices.json | default([]) }}"
+  when:
+    - wazuh_retention_enabled | default(true)
+    - existing_indices is defined
+    - existing_indices.json is defined
+    - item.index is match('wazuh-archives-.*')
+  ignore_errors: true
+
+- name: Attach ISM policy to existing monitoring indices
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_plugins/_ism/add/{{ item.index }}"
+    method: POST
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    body_format: json
+    body:
+      policy_id: "wazuh-monitoring-policy"
+    status_code: [200, 409]
+    headers:
+      Content-Type: "application/json"
+  loop: "{{ existing_indices.json | default([]) }}"
+  when:
+    - wazuh_retention_enabled | default(true)
+    - existing_indices is defined
+    - existing_indices.json is defined
+    - item.index is match('wazuh-monitoring-.*')
+  ignore_errors: true
+
+- name: Attach ISM policy to existing statistics indices
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_plugins/_ism/add/{{ item.index }}"
+    method: POST
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    body_format: json
+    body:
+      policy_id: "wazuh-statistics-policy"
+    status_code: [200, 409]
+    headers:
+      Content-Type: "application/json"
+  loop: "{{ existing_indices.json | default([]) }}"
+  when:
+    - wazuh_retention_enabled | default(true)
+    - existing_indices is defined
+    - existing_indices.json is defined
+    - item.index is match('wazuh-statistics-.*')
+  ignore_errors: true
+
+# ═══════════════════════════════════════════════════════════════
+# Configure Cluster Settings for Index Management
+# ═══════════════════════════════════════════════════════════════
+- name: Configure ISM job interval
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_cluster/settings"
+    method: PUT
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    body_format: json
+    body:
+      persistent:
+        plugins.index_state_management.job_interval: 5
+    status_code: [200]
+    headers:
+      Content-Type: "application/json"
+  register: ism_settings_result
+  changed_when: ism_settings_result.status == 200
+  when: wazuh_retention_enabled | default(true)
+
+# ═══════════════════════════════════════════════════════════════
+# Display Index Management Status
+# ═══════════════════════════════════════════════════════════════
+- name: Display index management configuration
   ansible.builtin.debug:
     msg: |
-      Index Management configured:
-      - Retention policy: {{ wazuh_retention_days | default(1095) }} days ({{ (wazuh_retention_days | default(1095) / 365) | round(1) }} years)
-        - Hot: 0-{{ wazuh_retention_warm_after_days | default(30) }} days
-        - Warm: {{ wazuh_retention_warm_after_days | default(30) }}-{{ wazuh_retention_cold_after_days | default(90) }} days
-        - Cold: {{ wazuh_retention_cold_after_days | default(90) }}-{{ wazuh_retention_days | default(1095) }} days
-        - Delete: after {{ wazuh_retention_days | default(1095) }} days
+      ══════════════════════════════════════════════════════════════
+      INDEX MANAGEMENT CONFIGURED - Automatic Rollover Enabled
+      ══════════════════════════════════════════════════════════════
 
-      Note: Field mappings (including MITRE ATT&CK) are handled by Filebeat's
-      official wazuh-template.json which is automatically applied during deployment.
+      ROLLOVER SETTINGS (prevents 1000 index limit):
+      ├─ Rollover triggers:
+      │   ├─ Max size: {{ wazuh_rollover_max_size | default('30gb') }}
+      │   ├─ Max age: {{ wazuh_rollover_max_age | default('1d') }}
+      │   └─ Max docs: {{ wazuh_rollover_max_docs | default(50000000) }}
+      └─ Cold indices are {{ 'CLOSED' if wazuh_close_cold_indices | default(true) else 'READ-ONLY' }}
+         (Closed indices don't count toward 1000 limit!)
+
+      ALERTS INDEX LIFECYCLE:
+      ├─ HOT:    Active writes (0-{{ wazuh_retention_warm_after_days | default(7) }} days after rollover)
+      ├─ WARM:   Reduced replicas, merged ({{ wazuh_retention_warm_after_days | default(7) }}-{{ wazuh_retention_cold_after_days | default(30) }} days)
+      ├─ COLD:   {{ 'Closed' if wazuh_close_cold_indices | default(true) else 'Read-only' }} ({{ wazuh_retention_cold_after_days | default(30) }}-{{ wazuh_retention_days | default(365) }} days)
+      └─ DELETE: After {{ wazuh_retention_days | default(365) }} days
+
+      MONITORING/STATISTICS LIFECYCLE (shorter retention):
+      ├─ HOT:    0-3 days
+      ├─ WARM:   3-{{ wazuh_monitoring_retention_days | default(7) }} days
+      └─ DELETE: After {{ wazuh_monitoring_retention_days | default(7) }} days
+
+      WRITE ALIASES (Filebeat writes to these):
+      ├─ {{ wazuh_alerts_alias | default('wazuh-alerts') }}      → wazuh-alerts-000001 (rolling)
+      ├─ {{ wazuh_archives_alias | default('wazuh-archives') }}    → wazuh-archives-000001 (rolling)
+      ├─ {{ wazuh_monitoring_alias | default('wazuh-monitoring') }}  → wazuh-monitoring-000001 (rolling)
+      └─ {{ wazuh_statistics_alias | default('wazuh-statistics') }}  → wazuh-statistics-000001 (rolling)
+
+      Note: Field mappings are handled by Filebeat's official wazuh-template.json
+      ══════════════════════════════════════════════════════════════

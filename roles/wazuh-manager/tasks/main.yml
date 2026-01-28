@@ -4,11 +4,11 @@
 - name: Include OS-specific variables
   ansible.builtin.include_vars: "{{ item }}"
   with_first_found:
-    - "{{ ansible_distribution }}-{{ ansible_distribution_major_version }}.yml"
-    - "{{ ansible_distribution }}.yml"
-    - "{{ ansible_os_family }}.yml"
-    - "default.yml"
-  ignore_errors: true
+    - files:
+        - "{{ ansible_distribution }}-{{ ansible_distribution_major_version }}.yml"
+        - "{{ ansible_distribution }}.yml"
+        - "{{ ansible_os_family }}.yml"
+      skip: true
 
 - name: Install prerequisites
   ansible.builtin.include_tasks: prerequisites.yml
@@ -66,8 +66,8 @@
   ansible.builtin.wait_for:
     port: 1514
     host: "{{ ansible_default_ipv4.address }}"
-    delay: 10
-    timeout: 300
+    delay: "{{ wazuh_api_check_delay }}"
+    timeout: "{{ wazuh_service_start_timeout }}"
   become: true
 
 - name: Verify Wazuh Manager service is running
@@ -76,23 +76,24 @@
   become: true
   register: manager_service_status
   until: manager_service_status.status.ActiveState == "active"
-  retries: 30
-  delay: 10
+  retries: "{{ wazuh_api_check_retries }}"
+  delay: "{{ wazuh_api_check_delay }}"
 
 - name: Wait for Wazuh Manager API to be ready
   ansible.builtin.uri:
     url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}/security/user/authenticate"
     method: POST
     user: "{{ wazuh_api_user }}"
-    password: "wazuh"
+    password: "{{ wazuh_api_default_password }}"
     force_basic_auth: true
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     status_code: [200, 401]
   register: wazuh_api_check
   until: wazuh_api_check.status in [200, 401]
-  retries: 30
-  delay: 10
+  retries: "{{ wazuh_api_check_retries | default(30) }}"
+  delay: "{{ wazuh_api_check_delay | default(10) }}"
   when: manager_node_type | default('master') == 'master'
+  no_log: true
 
 # Configure secure API password (run only on master)
 - name: Configure secure API password

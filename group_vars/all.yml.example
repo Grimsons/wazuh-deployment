@@ -258,12 +258,42 @@ wazuh_github_enabled: false
 #     api_token: "ghp_xxxxxxxxxxxx"
 
 # ═══════════════════════════════════════════════════════════════
-# Data Retention (Index Lifecycle Management)
+# Automatic Index Management (Prevents 1000 Index Limit)
 # ═══════════════════════════════════════════════════════════════
+# This deployment uses ISM (Index State Management) with automatic
+# rollover to prevent reaching OpenSearch's 1000 open index limit.
+#
+# Key features:
+# - Automatic rollover based on size/age/document count
+# - Cold indices are CLOSED (don't count toward 1000 limit)
+# - Automatic deletion after retention period
+# - Write aliases for seamless index transitions
+
+# Enable automatic index rollover (STRONGLY recommended)
+wazuh_rollover_enabled: true
+
+# Rollover triggers (any condition triggers new index creation)
+wazuh_rollover_max_size: "30gb"            # Rollover when index reaches 30GB
+wazuh_rollover_max_age: "1d"               # Rollover daily for predictable naming
+wazuh_rollover_max_docs: 50000000          # Rollover at 50 million documents
+
+# Index lifecycle stages
 wazuh_retention_enabled: true
-wazuh_retention_days: 1095                 # 3 years total retention
-wazuh_retention_warm_after_days: 30        # Move to warm tier after 30 days
-wazuh_retention_cold_after_days: 90        # Move to cold tier after 90 days
+wazuh_retention_days: 365                  # Delete after 1 year (adjust for compliance)
+wazuh_retention_warm_after_days: 7         # Move to warm tier after 7 days
+wazuh_retention_cold_after_days: 30        # Move to cold tier after 30 days
+
+# Close cold indices to prevent reaching 1000 open index limit
+# CRITICAL: Closed indices don't count toward the limit!
+wazuh_close_cold_indices: true
+
+# Monitoring/Statistics have shorter retention (less critical data)
+wazuh_monitoring_retention_days: 7         # Delete monitoring data after 7 days
+wazuh_statistics_retention_days: 7         # Delete statistics after 7 days
+
+# Shard configuration (adjust based on cluster size)
+wazuh_alerts_primary_shards: 1             # 1 shard recommended for most deployments
+wazuh_alerts_replica_shards: 0             # Set > 0 for high availability
 
 # ═══════════════════════════════════════════════════════════════
 # Log Rotation

@@ -38,7 +38,7 @@
     url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}/security/user/authenticate"
     method: POST
     user: "{{ wazuh_api_user }}"
-    password: "wazuh"
+    password: "{{ wazuh_api_default_password }}"
     force_basic_auth: true
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     return_content: true

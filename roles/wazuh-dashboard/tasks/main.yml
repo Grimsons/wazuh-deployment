@@ -4,11 +4,11 @@
 - name: Include OS-specific variables
   ansible.builtin.include_vars: "{{ item }}"
   with_first_found:
-    - "{{ ansible_distribution }}-{{ ansible_distribution_major_version }}.yml"
-    - "{{ ansible_distribution }}.yml"
-    - "{{ ansible_os_family }}.yml"
-    - "default.yml"
-  ignore_errors: true
+    - files:
+        - "{{ ansible_distribution }}-{{ ansible_distribution_major_version }}.yml"
+        - "{{ ansible_distribution }}.yml"
+        - "{{ ansible_os_family }}.yml"
+      skip: true
 
 - name: Install prerequisites
   ansible.builtin.include_tasks: prerequisites.yml
@@ -50,8 +50,8 @@
   ansible.builtin.wait_for:
     port: "{{ wazuh_dashboard_port }}"
     host: "{{ ansible_default_ipv4.address }}"
-    delay: 10
-    timeout: 300
+    delay: "{{ wazuh_dashboard_health_check_delay }}"
+    timeout: "{{ wazuh_dashboard_startup_timeout }}"
   become: true
 
 - name: Verify Wazuh Dashboard service is running
@@ -60,8 +60,8 @@
   become: true
   register: dashboard_service_status
   until: dashboard_service_status.status.ActiveState == "active"
-  retries: 30
-  delay: 10
+  retries: "{{ wazuh_dashboard_health_check_retries }}"
+  delay: "{{ wazuh_dashboard_health_check_delay }}"
 
 - name: Wait for Wazuh Dashboard to be ready
   ansible.builtin.uri:
@@ -70,9 +70,9 @@
     status_code: [200, 302]
   register: dashboard_health
   until: dashboard_health.status in [200, 302]
-  retries: 30
-  delay: 10
-  ignore_errors: true
+  retries: "{{ wazuh_dashboard_health_check_retries }}"
+  delay: "{{ wazuh_dashboard_health_check_delay }}"
+  failed_when: false
 
 - name: Get dashboard service status if health check failed
   ansible.builtin.command: systemctl status wazuh-dashboard --no-pager -l

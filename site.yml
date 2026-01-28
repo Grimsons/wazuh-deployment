@@ -2,9 +2,15 @@
 # Wazuh Ansible Deployment - Main Site Playbook
 # This playbook deploys the complete Wazuh stack in the correct order
 
+# ═══════════════════════════════════════════════════════════════
+# Pre-flight Checks and Validation
+# ═══════════════════════════════════════════════════════════════
 - name: Wazuh Deployment - Pre-flight Checks
   hosts: all
   gather_facts: true
+  tags:
+    - preflight
+    - validation
   tasks:
     - name: Display deployment information
       ansible.builtin.debug:
@@ -20,54 +26,136 @@
     - name: Verify connectivity to all hosts
       ansible.builtin.ping:
 
-    - name: Gather facts from all hosts
-      ansible.builtin.setup:
+    # Validate required variables are defined
+    - name: Validate required deployment variables
+      ansible.builtin.assert:
+        that:
+          - wazuh_version is defined
+          - wazuh_indexer_nodes is defined
+          - wazuh_indexer_nodes | length > 0
+          - wazuh_manager_nodes is defined
+          - wazuh_manager_nodes | length > 0
+        fail_msg: |
+          Required variables are not defined. Please ensure your group_vars/all.yml contains:
+          - wazuh_version
+          - wazuh_indexer_nodes (list with at least one node)
+          - wazuh_manager_nodes (list with at least one node)
+        success_msg: "All required variables are defined"
+      run_once: true
 
+    # Check minimum disk space on target hosts
+    - name: Check available disk space
+      ansible.builtin.shell: df -BG / | awk 'NR==2 {gsub("G",""); print $4}'
+      register: disk_space
+      changed_when: false
+      failed_when: false
+
+    - name: Validate minimum disk space (10GB required)
+      ansible.builtin.assert:
+        that:
+          - disk_space.stdout | int >= 10
+        fail_msg: "Insufficient disk space on {{ inventory_hostname }}. Required: 10GB, Available: {{ disk_space.stdout }}GB"
+        success_msg: "Disk space check passed: {{ disk_space.stdout }}GB available"
+
+    # Check available memory
+    - name: Check available memory
+      ansible.builtin.shell: free -g | awk '/^Mem:/ {print $2}'
+      register: total_memory
+      changed_when: false
+      failed_when: false
+
+    - name: Warn if memory is below recommended (4GB)
+      ansible.builtin.debug:
+        msg: "WARNING: {{ inventory_hostname }} has only {{ total_memory.stdout }}GB RAM. Recommended minimum is 4GB for Wazuh components."
+      when: total_memory.stdout | int < 4
+
+    # Check if required ports are available
+    - name: Check if port 9200 is available (indexers)
+      ansible.builtin.wait_for:
+        port: 9200
+        state: stopped
+        timeout: 5
+      when: inventory_hostname in groups['wazuh_indexers']
+      failed_when: false
+      register: port_9200_check
+
+    - name: Check if port 1514 is available (managers)
+      ansible.builtin.wait_for:
+        port: 1514
+        state: stopped
+        timeout: 5
+      when: inventory_hostname in groups['wazuh_managers']
+      failed_when: false
+      register: port_1514_check
+
+    - name: Check if port 443 is available (dashboards)
+      ansible.builtin.wait_for:
+        port: "{{ wazuh_dashboard_port | default(443) }}"
+        state: stopped
+        timeout: 5
+      when: inventory_hostname in groups['wazuh_dashboards']
+      failed_when: false
+      register: port_443_check
+
+# ═══════════════════════════════════════════════════════════════
 # Step 1: Deploy Wazuh Indexer
+# ═══════════════════════════════════════════════════════════════
 - name: Deploy Wazuh Indexer
   hosts: wazuh_indexers
   become: true
-  gather_facts: true
+  gather_facts: false  # Already gathered in pre-flight
+  serial: "{{ wazuh_indexer_deploy_serial | default(omit) }}"
   roles:
     - role: wazuh-indexer
   tags:
     - indexer
     - wazuh-indexer
 
+# ═══════════════════════════════════════════════════════════════
 # Step 2: Deploy Wazuh Manager
+# ═══════════════════════════════════════════════════════════════
 - name: Deploy Wazuh Manager
   hosts: wazuh_managers
   become: true
-  gather_facts: true
+  gather_facts: false  # Already gathered in pre-flight
+  serial: "{{ wazuh_manager_deploy_serial | default(omit) }}"
   roles:
     - role: wazuh-manager
   tags:
     - manager
     - wazuh-manager
 
+# ═══════════════════════════════════════════════════════════════
 # Step 3: Deploy Wazuh Dashboard
+# ═══════════════════════════════════════════════════════════════
 - name: Deploy Wazuh Dashboard
   hosts: wazuh_dashboards
   become: true
-  gather_facts: true
+  gather_facts: false  # Already gathered in pre-flight
   roles:
     - role: wazuh-dashboard
   tags:
     - dashboard
     - wazuh-dashboard
 
-# Step 4: Deploy Wazuh Agents (if hosts are defined)
+# ═══════════════════════════════════════════════════════════════
+# Step 4: Deploy Wazuh Agents (parallel deployment)
+# ═══════════════════════════════════════════════════════════════
 - name: Deploy Wazuh Agents
   hosts: wazuh_agents
   become: true
-  gather_facts: true
+  gather_facts: false  # Already gathered in pre-flight
+  # Deploy agents in parallel batches for faster deployment
+  serial: "{{ wazuh_agent_deploy_batch_size | default(10) }}"
   roles:
     - role: wazuh-agent
   tags:
     - agent
     - wazuh-agent
 
+# ═══════════════════════════════════════════════════════════════
 # Post-deployment: Lock down the ansible deployment user
+# ═══════════════════════════════════════════════════════════════
 - name: Wazuh Deployment - Security Lockdown
   hosts: all
   become: true
@@ -103,7 +191,9 @@
         msg: "Deployment user '{{ ansible_user }}' has been locked down on {{ inventory_hostname }}"
       when: do_lockdown | bool
 
-# Post-deployment: Setup automated maintenance (backup & log cleanup cron jobs)
+# ═══════════════════════════════════════════════════════════════
+# Post-deployment: Setup automated maintenance
+# ═══════════════════════════════════════════════════════════════
 - name: Wazuh Deployment - Maintenance Cron Setup
   import_playbook: playbooks/setup-maintenance-cron.yml
   tags:
@@ -111,7 +201,9 @@
     - cron
     - backup
 
+# ═══════════════════════════════════════════════════════════════
 # Post-deployment Summary
+# ═══════════════════════════════════════════════════════════════
 - name: Wazuh Deployment - Summary
   hosts: all
   gather_facts: false
@@ -145,6 +237,11 @@
           {% endfor %}
 
           ══════════════════════════════════════════════════════════════
+          INDEX MANAGEMENT:
+          - Automatic rollover: {{ 'enabled' if wazuh_rollover_enabled | default(true) else 'disabled' }}
+          - Retention period: {{ wazuh_retention_days | default(365) }} days
+          - Cold indices: {{ 'CLOSED (saves open index limit)' if wazuh_close_cold_indices | default(true) else 'read-only' }}
+
           MAINTENANCE:
           - Automated backups: {{ wazuh_backup_schedule | default('daily') }}
           {% if wazuh_backup_schedule | default('daily') != 'disabled' %}
