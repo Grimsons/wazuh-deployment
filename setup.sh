@@ -3,14 +3,46 @@
 # Wazuh Ansible Deployment - Interactive Setup Script
 # This script configures Ansible variables for Wazuh deployment
 #
+# Usage:
+#   ./setup.sh                    # Interactive mode (default: production profile)
+#   ./setup.sh --profile minimal  # Quick single-node setup
+#   ./setup.sh --profile production # Multi-node with prompts for IPs
+#   ./setup.sh --profile custom   # Full interactive configuration
+#   ./setup.sh --edit             # Edit existing configuration
+#   ./setup.sh --help             # Show help
+#
 # Security features:
 # - No use of eval for variable assignment
 # - Input validation for all user inputs
 # - Secure password generation
-# - Credentials stored in separate protected files
+# - Credentials stored in Ansible Vault
 # - Cleanup on exit
 
 set -euo pipefail
+
+# Script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ═══════════════════════════════════════════════════════════════
+# Source modular libraries
+# ═══════════════════════════════════════════════════════════════
+if [[ -f "$SCRIPT_DIR/lib/colors.sh" ]]; then
+    source "$SCRIPT_DIR/lib/colors.sh"
+    source "$SCRIPT_DIR/lib/validation.sh"
+    source "$SCRIPT_DIR/lib/prompts.sh"
+    source "$SCRIPT_DIR/lib/generators.sh"
+    source "$SCRIPT_DIR/lib/profiles.sh"
+    MODULAR_MODE=true
+else
+    MODULAR_MODE=false
+    # Fallback: Define colors inline if libraries not found
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    CYAN='\033[0;36m'
+    NC='\033[0m'
+fi
 
 # Cleanup trap for security
 cleanup() {
@@ -23,16 +55,99 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+# ═══════════════════════════════════════════════════════════════
+# CLI Argument Parsing
+# ═══════════════════════════════════════════════════════════════
+SELECTED_PROFILE=""
+EDIT_MODE=false
+SHOW_HELP=false
+QUIET_MODE=false
 
-# Script directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+show_usage() {
+    cat << EOF
+${CYAN}Wazuh Ansible Deployment - Setup Script${NC}
+
+${YELLOW}Usage:${NC}
+  $0 [OPTIONS]
+
+${YELLOW}Options:${NC}
+  -p, --profile PROFILE   Use deployment profile (minimal|production|custom)
+  -e, --edit              Edit existing configuration
+  -q, --quiet             Reduce output verbosity
+  -h, --help              Show this help message
+
+${YELLOW}Profiles:${NC}
+  ${GREEN}minimal${NC}      Single-node setup for testing/development
+               All components on localhost, basic features enabled
+
+  ${GREEN}production${NC}   Multi-node HA setup (default)
+               Prompts for node IPs, all security features enabled
+               Generates SSH keys and client preparation package
+
+  ${GREEN}custom${NC}       Full interactive configuration
+               Configure every option manually
+
+${YELLOW}Examples:${NC}
+  $0                           # Interactive with production defaults
+  $0 --profile minimal         # Quick single-node setup
+  $0 --profile custom          # Full interactive mode
+  $0 --edit                    # Modify existing configuration
+
+${YELLOW}Quick Start:${NC}
+  1. Run: $0 --profile minimal  (for testing)
+     or:  $0                    (for production)
+
+  2. Follow the prompts to configure your deployment
+
+  3. Run: ansible-playbook site.yml --vault-password-file .vault_password
+
+EOF
+}
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -p|--profile)
+            if [[ -n "${2:-}" ]]; then
+                SELECTED_PROFILE="$2"
+                shift 2
+            else
+                echo -e "${RED}Error: --profile requires an argument${NC}"
+                exit 1
+            fi
+            ;;
+        -e|--edit)
+            EDIT_MODE=true
+            shift
+            ;;
+        -q|--quiet)
+            QUIET_MODE=true
+            shift
+            ;;
+        -h|--help)
+            show_usage
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}Unknown option: $1${NC}"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
+# Validate profile if specified
+if [[ -n "$SELECTED_PROFILE" ]]; then
+    case "$SELECTED_PROFILE" in
+        minimal|production|custom)
+            ;;
+        *)
+            echo -e "${RED}Error: Invalid profile '$SELECTED_PROFILE'${NC}"
+            echo "Valid profiles: minimal, production, custom"
+            exit 1
+            ;;
+    esac
+fi
 
 # Default values
 DEFAULT_WAZUH_VERSION="4.14.1"
@@ -42,7 +157,18 @@ DEFAULT_DASHBOARD_PORT="443"
 DEFAULT_MANAGER_API_PORT="55000"
 DEFAULT_AGENT_PORT="1514"
 
-# Function to print colored output
+# ═══════════════════════════════════════════════════════════════
+# Fallback functions (if libraries not loaded)
+# ═══════════════════════════════════════════════════════════════
+if [[ "$MODULAR_MODE" == "false" ]]; then
+    print_header() {
+        echo -e "\n${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+        echo -e "${CYAN}  $1${NC}"
+        echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}\n"
+    }
+fi
+
+# Function to print colored output (keep for compatibility)
 print_header() {
     echo -e "\n${BLUE}═══════════════════════════════════════════════════════════════${NC}"
     echo -e "${CYAN}  $1${NC}"
@@ -243,13 +369,83 @@ main() {
     echo
 
     # ═══════════════════════════════════════════════════════════════
+    # PROFILE SELECTION
+    # ═══════════════════════════════════════════════════════════════
+    if [[ -z "$SELECTED_PROFILE" ]]; then
+        # No profile specified via CLI, prompt user
+        if [[ "$MODULAR_MODE" == "true" ]]; then
+            select_profile "SELECTED_PROFILE"
+        else
+            # Fallback: simple selection without library
+            echo -e "${CYAN}Select Deployment Profile:${NC}"
+            echo -e "  ${YELLOW}1)${NC} minimal     - Single-node for testing"
+            echo -e "  ${YELLOW}2)${NC} production  - Multi-node HA setup ${GREEN}[default]${NC}"
+            echo -e "  ${YELLOW}3)${NC} custom      - Full interactive"
+            echo
+            read -erp "$(echo -e "${CYAN}Select profile ${NC}[${YELLOW}2${NC}]: ")" profile_choice
+            case "${profile_choice:-2}" in
+                1) SELECTED_PROFILE="minimal" ;;
+                3) SELECTED_PROFILE="custom" ;;
+                *) SELECTED_PROFILE="production" ;;
+            esac
+        fi
+    fi
+
+    # Apply profile defaults
+    echo
+    case "$SELECTED_PROFILE" in
+        minimal)
+            print_info "Using MINIMAL profile - single-node setup for testing"
+            if [[ "$MODULAR_MODE" == "true" ]]; then
+                apply_profile_minimal
+            else
+                # Inline minimal defaults
+                INDEXER_NODES="localhost"
+                MANAGER_NODES="localhost"
+                DASHBOARD_NODES="localhost"
+                DEPLOY_AGENTS="false"
+                ENVIRONMENT="development"
+                CUSTOM_PASSWORDS="false"
+                USE_SELF_SIGNED_CERTS="true"
+                GENERATE_SSH_KEY="false"
+                CREATE_PREP_PACKAGE="false"
+            fi
+            ;;
+        production)
+            print_info "Using PRODUCTION profile - multi-node HA setup"
+            if [[ "$MODULAR_MODE" == "true" ]]; then
+                apply_profile_production
+            fi
+            ;;
+        custom)
+            print_info "Using CUSTOM profile - all options will be prompted"
+            ;;
+    esac
+    echo
+
+    # ═══════════════════════════════════════════════════════════════
     # GENERAL SETTINGS
     # ═══════════════════════════════════════════════════════════════
     print_section "General Settings"
 
-    prompt_with_default "Wazuh version to install" "$DEFAULT_WAZUH_VERSION" "WAZUH_VERSION"
-    prompt_with_default "Environment name (e.g., production, staging)" "production" "ENVIRONMENT"
-    prompt_with_default "Organization name" "MyOrg" "ORG_NAME"
+    # Skip prompts if already set by profile
+    if [[ -z "${WAZUH_VERSION:-}" ]]; then
+        prompt_with_default "Wazuh version to install" "$DEFAULT_WAZUH_VERSION" "WAZUH_VERSION"
+    else
+        print_info "Wazuh version: $WAZUH_VERSION"
+    fi
+
+    if [[ -z "${ENVIRONMENT:-}" ]]; then
+        prompt_with_default "Environment name (e.g., production, staging)" "production" "ENVIRONMENT"
+    else
+        print_info "Environment: $ENVIRONMENT"
+    fi
+
+    if [[ -z "${ORG_NAME:-}" ]]; then
+        prompt_with_default "Organization name" "MyOrg" "ORG_NAME"
+    else
+        print_info "Organization: $ORG_NAME"
+    fi
 
     # ═══════════════════════════════════════════════════════════════
     # WAZUH INDEXER CONFIGURATION
@@ -259,7 +455,12 @@ main() {
     print_info "The Wazuh Indexer stores and indexes alerts and events."
     echo
 
-    prompt_hosts "Enter Wazuh Indexer node(s)" "INDEXER_NODES"
+    # Skip if already set by profile
+    if [[ -z "${INDEXER_NODES:-}" ]]; then
+        prompt_hosts "Enter Wazuh Indexer node(s)" "INDEXER_NODES"
+    else
+        print_info "Indexer nodes: $INDEXER_NODES"
+    fi
 
     if [ -z "$INDEXER_NODES" ]; then
         print_error "At least one Indexer node is required!"
@@ -269,15 +470,24 @@ main() {
     INDEXER_NODES_ARRAY=($INDEXER_NODES)
     INDEXER_COUNT=${#INDEXER_NODES_ARRAY[@]}
 
-    prompt_with_default "Indexer HTTP port" "$DEFAULT_INDEXER_HTTP_PORT" "INDEXER_HTTP_PORT"
-    prompt_with_default "Indexer cluster name" "wazuh-cluster" "INDEXER_CLUSTER_NAME"
+    if [[ -z "${INDEXER_HTTP_PORT:-}" ]]; then
+        prompt_with_default "Indexer HTTP port" "$DEFAULT_INDEXER_HTTP_PORT" "INDEXER_HTTP_PORT"
+    fi
+
+    if [[ -z "${INDEXER_CLUSTER_NAME:-}" ]]; then
+        prompt_with_default "Indexer cluster name" "wazuh-cluster" "INDEXER_CLUSTER_NAME"
+    fi
 
     # Indexer memory settings
-    print_info "JVM heap size determines indexer performance and memory usage."
-    echo -e "${CYAN}Options:${NC}"
-    echo -e "  ${YELLOW}auto${NC} - Automatically calculate 50% of RAM (min 1g, max 32g) [RECOMMENDED]"
-    echo -e "  ${YELLOW}Manual${NC} - Specify value: 1g, 2g, 4g, 8g, 16g, 32g (max 32g for compressed OOPs)"
-    prompt_with_default "Indexer JVM heap size" "auto" "INDEXER_HEAP_SIZE"
+    if [[ -z "${INDEXER_HEAP_SIZE:-}" ]]; then
+        print_info "JVM heap size determines indexer performance and memory usage."
+        echo -e "${CYAN}Options:${NC}"
+        echo -e "  ${YELLOW}auto${NC} - Automatically calculate 50% of RAM (min 1g, max 32g) [RECOMMENDED]"
+        echo -e "  ${YELLOW}Manual${NC} - Specify value: 1g, 2g, 4g, 8g, 16g, 32g (max 32g for compressed OOPs)"
+        prompt_with_default "Indexer JVM heap size" "auto" "INDEXER_HEAP_SIZE"
+    else
+        print_info "JVM heap size: $INDEXER_HEAP_SIZE"
+    fi
 
     # ═══════════════════════════════════════════════════════════════
     # WAZUH MANAGER CONFIGURATION
