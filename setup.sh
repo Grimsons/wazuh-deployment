@@ -273,7 +273,8 @@ main() {
     prompt_with_default "Indexer cluster name" "wazuh-cluster" "INDEXER_CLUSTER_NAME"
 
     # Indexer memory settings
-    prompt_with_default "Indexer JVM heap size (e.g., 1g, 2g, 4g)" "1g" "INDEXER_HEAP_SIZE"
+    echo -e "${CYAN}Heap size options: 'auto' (50% of RAM, max 32g) or specific value (e.g., 4g, 8g)${NC}"
+    prompt_with_default "Indexer JVM heap size" "auto" "INDEXER_HEAP_SIZE"
 
     # ═══════════════════════════════════════════════════════════════
     # WAZUH MANAGER CONFIGURATION
