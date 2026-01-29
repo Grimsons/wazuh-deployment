@@ -2,9 +2,9 @@
 # Wazuh Deployment - Deployment Profiles
 # Provides predefined configurations for common deployment scenarios
 
-# Source dependencies
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[[ -z "$NC" ]] && source "$SCRIPT_DIR/colors.sh"
+# Source dependencies (use local var to avoid overwriting parent's SCRIPT_DIR)
+_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[[ -z "$NC" ]] && source "$_LIB_DIR/colors.sh"
 
 # Available profiles
 declare -A PROFILES
