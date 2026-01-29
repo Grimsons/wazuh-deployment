@@ -33,8 +33,10 @@ wazuh_indexer_health_check_delay: 10
 wazuh_indexer_startup_timeout: 300
 
 # JVM settings
-# IMPORTANT: Set to 50% of available RAM, max 32g for optimal performance
-wazuh_indexer_heap_size: "1g"
+# Heap size: "auto" calculates 50% of RAM (min 1GB, max 32GB)
+# Or specify manually: "1g", "4g", "16g", etc.
+# IMPORTANT: Max 32GB - over this, JVM can't use compressed OOPs
+wazuh_indexer_heap_size: "auto"
 wazuh_indexer_max_map_count: 262144
 # Memory lock - prevents JVM from being swapped (CRITICAL for production)
 wazuh_indexer_memory_lock: true

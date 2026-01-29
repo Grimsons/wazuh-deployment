@@ -356,7 +356,7 @@ ansible-playbook playbooks/health-check-alerts.yml -e "alert_slack=true" -e "ale
 | `wazuh_indexer_http_port` | Indexer HTTP port | 9200 |
 | `wazuh_manager_api_port` | Manager API port | 55000 |
 | `wazuh_dashboard_port` | Dashboard HTTPS port | 443 |
-| `wazuh_indexer_heap_size` | Indexer JVM heap | 4g |
+| `wazuh_indexer_heap_size` | Indexer JVM heap ("auto" = 50% RAM, max 32g) | auto |
 
 ### Feature Toggles
 

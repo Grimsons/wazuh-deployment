@@ -17,7 +17,8 @@ organization_name: "MyOrganization"
 wazuh_indexer_cluster_name: "wazuh-cluster"
 wazuh_indexer_http_port: 9200
 wazuh_indexer_transport_port: 9300
-wazuh_indexer_heap_size: "4g"
+# JVM heap size: "auto" = 50% of RAM (min 1GB, max 32GB), or specify: "4g", "8g", etc.
+wazuh_indexer_heap_size: "auto"
 
 # Admin password is auto-generated during deployment by default
 # Credentials saved to: ./credentials/indexer_admin_password.txt
