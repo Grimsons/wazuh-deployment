@@ -273,7 +273,10 @@ main() {
     prompt_with_default "Indexer cluster name" "wazuh-cluster" "INDEXER_CLUSTER_NAME"
 
     # Indexer memory settings
-    echo -e "${CYAN}Heap size options: 'auto' (50% of RAM, max 32g) or specific value (e.g., 4g, 8g)${NC}"
+    print_info "JVM heap size determines indexer performance and memory usage."
+    echo -e "${CYAN}Options:${NC}"
+    echo -e "  ${YELLOW}auto${NC} - Automatically calculate 50% of RAM (min 1g, max 32g) [RECOMMENDED]"
+    echo -e "  ${YELLOW}Manual${NC} - Specify value: 1g, 2g, 4g, 8g, 16g, 32g (max 32g for compressed OOPs)"
     prompt_with_default "Indexer JVM heap size" "auto" "INDEXER_HEAP_SIZE"
 
     # ═══════════════════════════════════════════════════════════════
