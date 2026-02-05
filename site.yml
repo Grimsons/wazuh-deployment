@@ -1,6 +1,117 @@
 ---
 # Wazuh Ansible Deployment - Main Site Playbook
 # This playbook deploys the complete Wazuh stack in the correct order
+#
+# Usage:
+#   ansible-playbook site.yml                         # Normal deployment
+#   ansible-playbook site.yml -e bootstrap=true       # Bootstrap + deploy
+#   ansible-playbook site.yml --tags bootstrap        # Bootstrap only
+#
+# Bootstrap connects as the initial SSH user (e.g. root) to create the
+# wazuh-deploy user with SSH key auth and passwordless sudo. After that,
+# all subsequent plays connect as wazuh-deploy.
+
+# ═══════════════════════════════════════════════════════════════
+# Step 0: Bootstrap - Prepare hosts for Ansible management
+# Creates the ansible deployment user with SSH key + sudoers
+# ═══════════════════════════════════════════════════════════════
+- name: Wazuh Deployment - Bootstrap Host Preparation
+  hosts: all:!local
+  become: true
+  gather_facts: false
+  tags:
+    - bootstrap
+    - never  # Only runs when explicitly tagged: --tags bootstrap
+  vars:
+    # Override connection to use initial SSH user for bootstrap
+    ansible_user: "{{ wazuh_bootstrap_user | default('root') }}"
+    ansible_ssh_pass: "{{ vault_ansible_connection_password | default(wazuh_bootstrap_password) | default(omit) }}"
+    ansible_ssh_private_key_file: "{{ wazuh_bootstrap_ssh_key | default(omit) }}"
+    ansible_user_name: "{{ wazuh_ansible_user | default('wazuh-deploy') }}"
+    ssh_public_key_file: "{{ playbook_dir }}/keys/wazuh_ansible_key.pub"
+  tasks:
+    - name: Display bootstrap information
+      ansible.builtin.debug:
+        msg: |
+          ══════════════════════════════════════════════
+          BOOTSTRAP - Preparing hosts for deployment
+          ══════════════════════════════════════════════
+          Connecting as: {{ ansible_user }}
+          Creating user: {{ ansible_user_name }}
+          Target: {{ inventory_hostname }}
+          ══════════════════════════════════════════════
+      run_once: true
+
+    - name: Gather minimal facts
+      ansible.builtin.setup:
+        gather_subset:
+          - '!all'
+          - '!min'
+          - os_family
+
+    - name: Read SSH public key
+      ansible.builtin.set_fact:
+        ssh_public_key: "{{ lookup('file', ssh_public_key_file) }}"
+      delegate_to: localhost
+      run_once: true
+
+    - name: Create ansible deployment user
+      ansible.builtin.user:
+        name: "{{ ansible_user_name }}"
+        comment: "Wazuh Ansible Deployment User"
+        shell: /bin/bash
+        create_home: true
+        state: present
+
+    - name: Create .ssh directory
+      ansible.builtin.file:
+        path: "/home/{{ ansible_user_name }}/.ssh"
+        state: directory
+        owner: "{{ ansible_user_name }}"
+        group: "{{ ansible_user_name }}"
+        mode: '0700'
+
+    - name: Deploy SSH public key
+      ansible.builtin.authorized_key:
+        user: "{{ ansible_user_name }}"
+        key: "{{ ssh_public_key }}"
+        state: present
+        exclusive: false
+
+    - name: Configure passwordless sudo
+      ansible.builtin.copy:
+        content: |
+          # Ansible deployment user - passwordless sudo
+          {{ ansible_user_name }} ALL=(ALL) NOPASSWD: ALL
+        dest: "/etc/sudoers.d/{{ ansible_user_name }}"
+        owner: root
+        group: root
+        mode: '0440'
+        validate: 'visudo -cf %s'
+
+    - name: Verify sudo works for new user
+      ansible.builtin.command: sudo -n true
+      become: true
+      become_user: "{{ ansible_user_name }}"
+      changed_when: false
+
+    - name: Test SSH key authentication
+      ansible.builtin.command:
+        cmd: >
+          ssh -i {{ playbook_dir }}/keys/wazuh_ansible_key
+          -o StrictHostKeyChecking=no
+          -o UserKnownHostsFile=/dev/null
+          -o BatchMode=yes
+          {{ ansible_user_name }}@{{ inventory_hostname }}
+          'echo SSH_KEY_AUTH_SUCCESS'
+      delegate_to: localhost
+      register: ssh_test
+      changed_when: false
+      failed_when: "'SSH_KEY_AUTH_SUCCESS' not in ssh_test.stdout"
+
+    - name: Bootstrap complete for host
+      ansible.builtin.debug:
+        msg: "{{ ansible_user_name }}@{{ inventory_hostname }} - SSH key auth OK, sudo OK"
 
 # ═══════════════════════════════════════════════════════════════
 # Pre-flight Checks and Validation

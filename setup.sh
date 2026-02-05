@@ -32,6 +32,7 @@ if [[ -f "$SCRIPT_DIR/lib/colors.sh" ]]; then
     source "$SCRIPT_DIR/lib/prompts.sh"
     source "$SCRIPT_DIR/lib/generators.sh"
     source "$SCRIPT_DIR/lib/profiles.sh"
+    source "$SCRIPT_DIR/lib/client-prep.sh"
     MODULAR_MODE=true
 else
     MODULAR_MODE=false
@@ -1396,6 +1397,11 @@ wazuh_log_retention_days: ${LOG_RETENTION_DAYS:-30}
 wazuh_log_cleanup_schedule: "${LOG_CLEANUP_SCHEDULE:-daily}"
 
 # ═══════════════════════════════════════════════════════════════
+# Bootstrap Settings (used by --tags bootstrap)
+# ═══════════════════════════════════════════════════════════════
+wazuh_bootstrap_user: "${INITIAL_SSH_USER:-root}"
+
+# ═══════════════════════════════════════════════════════════════
 # Post-Deployment Security
 # ═══════════════════════════════════════════════════════════════
 # Lock down the ansible deployment user after deployment completes
@@ -1524,135 +1530,12 @@ EOF
     if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
         print_section "Creating Client Preparation Package"
 
-        local prep_dir="${SCRIPT_DIR}/client-prep"
-        local tarball="${SCRIPT_DIR}/wazuh-client-prep.tar.gz"
+        # Wire up log callbacks for the shared library
+        _prep_info()    { print_info "$@"; }
+        _prep_success() { print_success "$@"; }
+        _prep_warn()    { print_warning "$@"; }
 
-        mkdir -p "$prep_dir"
-
-        # Copy preparation script
-        if [ -f "${SCRIPT_DIR}/scripts/prepare-client.sh" ]; then
-            cp "${SCRIPT_DIR}/scripts/prepare-client.sh" "$prep_dir/"
-        else
-            print_warning "Preparation script not found, skipping..."
-        fi
-
-        # Copy SSH public key
-        if [ -f "${ANSIBLE_SSH_KEY}.pub" ]; then
-            cp "${ANSIBLE_SSH_KEY}.pub" "$prep_dir/ansible_key.pub"
-        elif [ -f "${SCRIPT_DIR}/keys/wazuh_ansible_key.pub" ]; then
-            cp "${SCRIPT_DIR}/keys/wazuh_ansible_key.pub" "$prep_dir/ansible_key.pub"
-        fi
-
-        # Create install script for easy deployment
-        cat > "$prep_dir/install.sh" << 'INSTALL_EOF'
-#!/bin/bash
-# Quick install script - run this on target machines
-set -e
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-chmod +x "${SCRIPT_DIR}/prepare-client.sh"
-sudo "${SCRIPT_DIR}/prepare-client.sh" -k "${SCRIPT_DIR}/ansible_key.pub" "$@"
-INSTALL_EOF
-        chmod +x "$prep_dir/install.sh"
-
-        # Create README
-        cat > "$prep_dir/README.txt" << README_EOF
-Wazuh Client Preparation Package
-=================================
-
-This package prepares target machines for Wazuh deployment via Ansible.
-
-Quick Start:
-1. Copy this entire folder to the target machine
-2. Run: sudo ./install.sh
-
-Or run with options:
-  sudo ./prepare-client.sh -k ansible_key.pub --minimal
-
-Supported Operating Systems:
-- Ubuntu 20.04+, Debian 10+
-- RHEL/CentOS 8+, Rocky Linux 8+, Fedora
-- SUSE Linux Enterprise, openSUSE
-- Arch Linux
-
-Options:
-  -u, --user NAME     Ansible user to create (default: wazuh-deploy)
-  -p, --port PORT     SSH port (default: 22)
-  -k, --key FILE      Path to SSH public key file
-  -m, --minimal       Skip package removal (faster)
-  -d, --dry-run       Show what would happen
-  -h, --help          Show help
-
-What this script does:
-- Detects your OS automatically
-- Removes unnecessary packages (desktop, games, office suites, etc.)
-- Installs required packages (Python, SSH, sudo, etc.)
-- Creates an Ansible deployment user with sudo access
-- Deploys the SSH public key for passwordless access
-- Configures firewall for Wazuh ports (UFW, firewalld, iptables, or nftables)
-- Optimizes system settings
-- Installs unlock script for post-deployment reactivation
-
-Firewall Ports Configured:
-- 1514/tcp  - Agent communication
-- 1515/tcp  - Agent enrollment
-- 1516/tcp  - Manager cluster
-- 9200/tcp  - Indexer API
-- 9300/tcp  - Indexer cluster
-- 443/tcp   - Dashboard HTTPS
-- 55000/tcp - Manager API
-
-Post-Deployment:
-After Wazuh deployment, the ansible user is automatically locked down
-for security. To run future deployments:
-
-  # From your Ansible control node:
-  ansible-playbook unlock-deploy-user.yml
-
-  # Or manually on each host:
-  sudo /usr/local/bin/wazuh-unlock-deploy
-
-SSH User: ${ANSIBLE_USER}
-README_EOF
-
-        # Create tarball
-        tar -czf "$tarball" -C "${SCRIPT_DIR}" "client-prep"
-
-        # Also create a self-extracting script
-        cat > "${SCRIPT_DIR}/wazuh-client-prep.sh" << 'SELFEXTRACT_EOF'
-#!/bin/bash
-# Wazuh Client Preparation - Self-extracting installer
-# Usage: curl -sSL http://your-server/wazuh-client-prep.sh | sudo bash
-
-set -e
-
-TEMP_DIR=$(mktemp -d)
-ARCHIVE_START=$(awk '/^__ARCHIVE_START__$/{print NR + 1; exit 0; }' "$0")
-
-echo "Extracting Wazuh client preparation package..."
-tail -n+$ARCHIVE_START "$0" | tar -xz -C "$TEMP_DIR"
-
-cd "$TEMP_DIR/client-prep"
-chmod +x prepare-client.sh install.sh
-
-echo "Running preparation script..."
-sudo ./prepare-client.sh -k ansible_key.pub "$@"
-
-# Cleanup
-rm -rf "$TEMP_DIR"
-
-exit 0
-
-__ARCHIVE_START__
-SELFEXTRACT_EOF
-
-        # Append tarball to self-extracting script
-        cat "$tarball" >> "${SCRIPT_DIR}/wazuh-client-prep.sh"
-        chmod +x "${SCRIPT_DIR}/wazuh-client-prep.sh"
-
-        print_success "Client preparation package created:"
-        print_info "  Folder: ${prep_dir}/"
-        print_info "  Tarball: ${tarball}"
-        print_info "  Self-extracting: ${SCRIPT_DIR}/wazuh-client-prep.sh"
+        create_client_prep_package "$SCRIPT_DIR" "$ANSIBLE_SSH_KEY" "$ANSIBLE_USER"
     fi
 
     # ═══════════════════════════════════════════════════════════════
@@ -1884,21 +1767,17 @@ SELFEXTRACT_EOF
     echo
 
     if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
-        echo -e "4. Bootstrap hosts (create ansible user with SSH key):"
+        echo -e "4. Bootstrap + deploy (one command):"
     else
-        echo -e "3. Bootstrap hosts (create ansible user with SSH key):"
+        echo -e "3. Bootstrap + deploy (one command):"
     fi
-    echo -e "   ${YELLOW}ansible-playbook playbooks/bootstrap-hosts.yml -i inventory/bootstrap.yml --vault-password-file .vault_password${NC}"
+    echo -e "   ${YELLOW}ansible-playbook site.yml --tags bootstrap,all${NC}"
     echo
-    echo -e "   This creates the '${CYAN}wazuh-deploy${NC}' user with SSH key auth and passwordless sudo."
+    echo -e "   This first connects as '${CYAN}${INITIAL_SSH_USER:-root}${NC}' to create the '${CYAN}wazuh-deploy${NC}' user"
+    echo -e "   with SSH key auth and passwordless sudo, then runs the full deployment."
     echo
-
-    if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
-        echo -e "5. Run the deployment:"
-    else
-        echo -e "4. Run the deployment:"
-    fi
-    echo -e "   ${YELLOW}ansible-playbook site.yml --vault-password-file .vault_password${NC}"
+    echo -e "   Subsequent deployments (no bootstrap needed):"
+    echo -e "   ${YELLOW}ansible-playbook site.yml${NC}"
     echo
     echo -e "   Or deploy components individually:"
     echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-indexer.yml --vault-password-file .vault_password${NC}"
