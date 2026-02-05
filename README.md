@@ -562,13 +562,45 @@ wazuh_agent_groups:
 
 ## Deployment Modes
 
-### All-in-One (Single Server)
+### Recommended: Setup Script + site.yml (Production)
+
+The full workflow with all security features:
+
+```bash
+# 1. Run interactive setup (generates inventory, vault, certs, SSH keys)
+./setup-tui.sh   # or ./setup.sh
+
+# 2. Deploy with bootstrap (first time)
+ansible-playbook site.yml --tags bootstrap,all
+
+# 3. Subsequent deployments
+ansible-playbook site.yml
+```
+
+**Includes:** Vault-encrypted credentials, SSH key generation, bootstrap workflow, index management, certificate generation, client-prep package, deployment lockdown.
+
+### Quick: wazuh-aio.yml (Testing Only)
+
+Minimal single-server deployment for quick testing:
 
 ```bash
 ansible-playbook wazuh-aio.yml -e "target_host=192.168.1.10"
 ```
 
-### Distributed Cluster
+> **Warning:** This is a bare-bones deployment using role defaults. It does NOT include:
+> - Credential encryption (Ansible Vault)
+> - SSH key generation
+> - Bootstrap workflow
+> - Index management policies
+> - Certificate generation
+> - Client preparation package
+> - Post-deployment lockdown
+>
+> **Use only for local testing. For anything production-facing, use the setup script workflow above.**
+
+### Quick: wazuh-distributed.yml (Testing Only)
+
+Same as above but for multi-node testing. Requires manual inventory setup.
 
 ```bash
 ansible-playbook wazuh-distributed.yml
@@ -576,10 +608,14 @@ ansible-playbook wazuh-distributed.yml
 
 ### Selective Deployment (Tags)
 
+Deploy specific components using the full workflow:
+
 ```bash
 ansible-playbook site.yml --tags indexer
 ansible-playbook site.yml --tags manager
 ansible-playbook site.yml --tags dashboard
+ansible-playbook site.yml --tags bootstrap   # Bootstrap only
+ansible-playbook site.yml --tags monitoring  # Prometheus exporters
 ```
 
 ## Post-Deployment Verification
