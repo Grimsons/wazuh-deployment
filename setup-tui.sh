@@ -615,6 +615,113 @@ EOF
     success "Created: inventory/hosts.yml"
 
     # ════════════════════════════════════════════════════════════
+    # SSH Key Generation
+    # ════════════════════════════════════════════════════════════
+    if [[ "${GENERATE_SSH_KEY:-false}" == "true" ]]; then
+        gum spin --spinner dot --title "Generating SSH key pair..." -- sleep 0.5
+
+        mkdir -p "$SCRIPT_DIR/keys"
+        if [[ ! -f "$SCRIPT_DIR/keys/wazuh_ansible_key" ]]; then
+            ssh-keygen -t ed25519 -f "$SCRIPT_DIR/keys/wazuh_ansible_key" -N "" -C "wazuh-ansible-deploy" >/dev/null 2>&1
+            chmod 600 "$SCRIPT_DIR/keys/wazuh_ansible_key"
+            chmod 644 "$SCRIPT_DIR/keys/wazuh_ansible_key.pub"
+            success "Generated: keys/wazuh_ansible_key"
+        else
+            success "SSH key already exists: keys/wazuh_ansible_key"
+        fi
+    fi
+
+    # ════════════════════════════════════════════════════════════
+    # inventory/bootstrap.yml (for initial host preparation)
+    # ════════════════════════════════════════════════════════════
+    if [[ "$SELECTED_PROFILE" != "minimal" ]]; then
+        gum spin --spinner dot --title "Creating bootstrap inventory..." -- sleep 0.5
+
+        cat > "$SCRIPT_DIR/inventory/bootstrap.yml" << EOF
+---
+# Bootstrap Inventory - For initial setup ONLY
+# Connects as ${INITIAL_SSH_USER:-root} to create the ${ANSIBLE_USER} user
+# After bootstrap, use hosts.yml for all operations
+all:
+  vars:
+    ansible_user: ${INITIAL_SSH_USER:-root}
+    ansible_port: ${ANSIBLE_SSH_PORT:-22}
+    ansible_become: ${USE_BECOME:-true}
+EOF
+
+        # Add SSH password if provided
+        if [[ -n "${DEFAULT_SSH_PASS:-}" ]]; then
+            echo "    ansible_ssh_pass: \"{{ vault_bootstrap_ssh_pass }}\"" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+        fi
+
+        cat >> "$SCRIPT_DIR/inventory/bootstrap.yml" << EOF
+
+  children:
+    wazuh_indexers:
+      hosts:
+EOF
+
+        for i in "${!INDEXER_NODES_ARRAY[@]}"; do
+            local node="${INDEXER_NODES_ARRAY[$i]}"
+            echo "        ${node}:" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+            echo "          indexer_node_name: indexer-$((i+1))" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+            if [[ $i -eq 0 ]]; then
+                echo "          indexer_cluster_initial_master: true" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+            fi
+        done
+
+        cat >> "$SCRIPT_DIR/inventory/bootstrap.yml" << EOF
+
+    wazuh_managers:
+      hosts:
+EOF
+
+        for i in "${!MANAGER_NODES_ARRAY[@]}"; do
+            local node="${MANAGER_NODES_ARRAY[$i]}"
+            echo "        ${node}:" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+            echo "          manager_node_name: manager-$((i+1))" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+            if [[ $i -eq 0 ]]; then
+                echo "          manager_node_type: master" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+            else
+                echo "          manager_node_type: worker" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+            fi
+        done
+
+        cat >> "$SCRIPT_DIR/inventory/bootstrap.yml" << EOF
+
+    wazuh_dashboards:
+      hosts:
+EOF
+
+        for node in "${DASHBOARD_NODES_ARRAY[@]}"; do
+            echo "        ${node}:" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+        done
+
+        if [[ "$DEPLOY_AGENTS" == "true" ]] && [[ -n "${AGENT_NODES:-}" ]]; then
+            cat >> "$SCRIPT_DIR/inventory/bootstrap.yml" << EOF
+
+    wazuh_agents:
+      hosts:
+EOF
+            for node in "${AGENT_NODES_ARRAY[@]}"; do
+                echo "        ${node}:" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+            done
+        fi
+
+        cat >> "$SCRIPT_DIR/inventory/bootstrap.yml" << 'EOF'
+
+    local:
+      hosts:
+        localhost:
+          ansible_connection: local
+          ansible_user: "{{ lookup('env', 'USER') }}"
+          ansible_become: false
+EOF
+
+        success "Created: inventory/bootstrap.yml"
+    fi
+
+    # ════════════════════════════════════════════════════════════
     # group_vars/all/main.yml
     # ════════════════════════════════════════════════════════════
     gum spin --spinner dot --title "Creating group variables..." -- sleep 0.5
@@ -629,6 +736,7 @@ EOF
 wazuh_version: "${WAZUH_VERSION}"
 environment_name: "${ENVIRONMENT}"
 organization_name: "${ORG_NAME}"
+wazuh_ansible_user: "${ANSIBLE_USER:-wazuh-deploy}"
 
 # ═══════════════════════════════════════════════════════════════
 # Wazuh Indexer Settings
@@ -832,21 +940,32 @@ Vault:        Enabled (encrypted credentials)
 📁 FILES CREATED
 • ansible.cfg
 • inventory/hosts.yml
+$([ "$SELECTED_PROFILE" != "minimal" ] && echo "• inventory/bootstrap.yml (initial access as ${INITIAL_SSH_USER:-root})")
 • group_vars/all/main.yml
 • group_vars/all/vault.yml (encrypted)
+$([ "${GENERATE_SSH_KEY:-false}" == "true" ] && echo "• keys/wazuh_ansible_key (SSH key pair)")
 EOF
 )"
 
     echo ""
     gum style --foreground "#FFE66D" --bold "🚀 NEXT STEPS"
     echo ""
-    echo "  1. Review configuration files"
-    echo "  2. Prepare target hosts:"
-    echo "     $(gum style --foreground '#4ECDC4' 'scp -r client-prep/ root@HOST:/tmp/')"
-    echo ""
-    echo "  3. Run deployment:"
-    echo "     $(gum style --foreground '#4ECDC4' 'ansible-playbook site.yml --vault-password-file .vault_password')"
-    echo ""
+    if [[ "$SELECTED_PROFILE" != "minimal" ]]; then
+        echo "  1. Review configuration files"
+        echo ""
+        echo "  2. Bootstrap target hosts (connects as ${INITIAL_SSH_USER:-root} to create ${ANSIBLE_USER}):"
+        echo "     $(gum style --foreground '#4ECDC4' "ansible-playbook playbooks/bootstrap-hosts.yml -i inventory/bootstrap.yml")"
+        echo ""
+        echo "  3. Run deployment (connects as ${ANSIBLE_USER} with SSH key):"
+        echo "     $(gum style --foreground '#4ECDC4' 'ansible-playbook site.yml')"
+        echo ""
+    else
+        echo "  1. Review configuration files"
+        echo ""
+        echo "  2. Run deployment:"
+        echo "     $(gum style --foreground '#4ECDC4' 'ansible-playbook site.yml')"
+        echo ""
+    fi
 
     if [[ -f "$SCRIPT_DIR/.vault_password" ]]; then
         gum style \

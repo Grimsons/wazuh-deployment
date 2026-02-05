@@ -1112,6 +1112,7 @@ EOF
 wazuh_version: "${WAZUH_VERSION}"
 environment_name: "${ENVIRONMENT}"
 organization_name: "${ORG_NAME}"
+wazuh_ansible_user: "${ANSIBLE_USER:-wazuh-deploy}"
 
 # ═══════════════════════════════════════════════════════════════
 # Wazuh Indexer Settings
