@@ -549,6 +549,14 @@ all:
     ansible_user: ${ANSIBLE_USER:-wazuh-deploy}
     ansible_port: ${ANSIBLE_SSH_PORT:-22}
     ansible_become: ${USE_BECOME:-true}
+EOF
+
+    # Add SSH private key path if key was generated
+    if [[ "${GENERATE_SSH_KEY:-false}" == "true" ]]; then
+        echo "    ansible_ssh_private_key_file: ${ANSIBLE_SSH_KEY:-keys/wazuh_ansible_key}" >> "$SCRIPT_DIR/inventory/hosts.yml"
+    fi
+
+    cat >> "$SCRIPT_DIR/inventory/hosts.yml" << EOF
 
   children:
     wazuh_indexers:
