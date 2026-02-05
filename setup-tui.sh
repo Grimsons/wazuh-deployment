@@ -872,6 +872,11 @@ wazuh_log_cleanup_enabled: ${ENABLE_LOG_CLEANUP:-true}
 wazuh_log_retention_days: ${LOG_RETENTION_DAYS:-30}
 
 # ═══════════════════════════════════════════════════════════════
+# Bootstrap Settings (used by --tags bootstrap)
+# ═══════════════════════════════════════════════════════════════
+wazuh_bootstrap_user: "${INITIAL_SSH_USER:-root}"
+
+# ═══════════════════════════════════════════════════════════════
 # Post-Deployment Security
 # ═══════════════════════════════════════════════════════════════
 wazuh_lockdown_deploy_user: true
@@ -907,6 +912,8 @@ EOF
         VAULT_INDEXER_PASSWORD="$GENERATED_INDEXER_PASSWORD" \
         VAULT_API_PASSWORD="$GENERATED_API_PASSWORD" \
         VAULT_CLUSTER_KEY="${MANAGER_CLUSTER_KEY:-}" \
+        VAULT_CONNECTION_PASSWORD="${DEFAULT_SSH_PASS:-}" \
+        VAULT_ANSIBLE_USER="${ANSIBLE_USER:-wazuh-deploy}" \
         bash "$SCRIPT_DIR/scripts/manage-vault.sh" create 2>/dev/null || true
 
         success "Vault initialized with encrypted credentials"
@@ -961,10 +968,16 @@ EOF
     if [[ "$SELECTED_PROFILE" != "minimal" ]]; then
         echo "  1. Review configuration files"
         echo ""
-        echo "  2. Bootstrap target hosts (connects as ${INITIAL_SSH_USER:-root} to create ${ANSIBLE_USER}):"
-        echo "     $(gum style --foreground '#4ECDC4' "ansible-playbook playbooks/bootstrap-hosts.yml -i inventory/bootstrap.yml")"
+        echo "  2. First run (bootstrap + deploy):"
+        if [[ -n "${DEFAULT_SSH_PASS:-}" ]]; then
+            echo "     $(gum style --foreground '#4ECDC4' 'ansible-playbook site.yml --tags bootstrap,all --ask-pass')"
+        else
+            echo "     $(gum style --foreground '#4ECDC4' 'ansible-playbook site.yml --tags bootstrap,all')"
+        fi
         echo ""
-        echo "  3. Run deployment (connects as ${ANSIBLE_USER} with SSH key):"
+        echo "     This connects as ${INITIAL_SSH_USER:-root}, creates ${ANSIBLE_USER}, then deploys everything."
+        echo ""
+        echo "  3. Subsequent deployments (no bootstrap needed):"
         echo "     $(gum style --foreground '#4ECDC4' 'ansible-playbook site.yml')"
         echo ""
     else

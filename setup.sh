@@ -1396,6 +1396,11 @@ wazuh_log_retention_days: ${LOG_RETENTION_DAYS:-30}
 wazuh_log_cleanup_schedule: "${LOG_CLEANUP_SCHEDULE:-daily}"
 
 # ═══════════════════════════════════════════════════════════════
+# Bootstrap Settings (used by --tags bootstrap)
+# ═══════════════════════════════════════════════════════════════
+wazuh_bootstrap_user: "${INITIAL_SSH_USER:-root}"
+
+# ═══════════════════════════════════════════════════════════════
 # Post-Deployment Security
 # ═══════════════════════════════════════════════════════════════
 # Lock down the ansible deployment user after deployment completes
@@ -1884,21 +1889,17 @@ SELFEXTRACT_EOF
     echo
 
     if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
-        echo -e "4. Bootstrap hosts (create ansible user with SSH key):"
+        echo -e "4. Bootstrap + deploy (one command):"
     else
-        echo -e "3. Bootstrap hosts (create ansible user with SSH key):"
+        echo -e "3. Bootstrap + deploy (one command):"
     fi
-    echo -e "   ${YELLOW}ansible-playbook playbooks/bootstrap-hosts.yml -i inventory/bootstrap.yml --vault-password-file .vault_password${NC}"
+    echo -e "   ${YELLOW}ansible-playbook site.yml --tags bootstrap,all${NC}"
     echo
-    echo -e "   This creates the '${CYAN}wazuh-deploy${NC}' user with SSH key auth and passwordless sudo."
+    echo -e "   This first connects as '${CYAN}${INITIAL_SSH_USER:-root}${NC}' to create the '${CYAN}wazuh-deploy${NC}' user"
+    echo -e "   with SSH key auth and passwordless sudo, then runs the full deployment."
     echo
-
-    if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
-        echo -e "5. Run the deployment:"
-    else
-        echo -e "4. Run the deployment:"
-    fi
-    echo -e "   ${YELLOW}ansible-playbook site.yml --vault-password-file .vault_password${NC}"
+    echo -e "   Subsequent deployments (no bootstrap needed):"
+    echo -e "   ${YELLOW}ansible-playbook site.yml${NC}"
     echo
     echo -e "   Or deploy components individually:"
     echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-indexer.yml --vault-password-file .vault_password${NC}"
