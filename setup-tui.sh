@@ -574,12 +574,10 @@ EOF
         local node="${MANAGER_NODES_ARRAY[$i]}"
         echo "        ${node}:" >> "$SCRIPT_DIR/inventory/hosts.yml"
         echo "          manager_node_name: manager-$((i+1))" >> "$SCRIPT_DIR/inventory/hosts.yml"
-        if (( MANAGER_COUNT > 1 )); then
-            if [[ $i -eq 0 ]]; then
-                echo "          manager_node_type: master" >> "$SCRIPT_DIR/inventory/hosts.yml"
-            else
-                echo "          manager_node_type: worker" >> "$SCRIPT_DIR/inventory/hosts.yml"
-            fi
+        if [[ $i -eq 0 ]]; then
+            echo "          manager_node_type: master" >> "$SCRIPT_DIR/inventory/hosts.yml"
+        else
+            echo "          manager_node_type: worker" >> "$SCRIPT_DIR/inventory/hosts.yml"
         fi
     done
 
