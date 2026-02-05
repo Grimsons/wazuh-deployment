@@ -24,6 +24,7 @@
 - [Architecture](operations/architecture.md)
 - [Security Guidelines](operations/deployment-security.md)
 - [Pre-Flight Checks](operations/pre-flight-checks.md)
+- [Prometheus Monitoring](operations/monitoring.md)
 - [Backup and Restore](operations/backup-restore.md)
 - [Upgrade Guide](operations/upgrade.md)
 - [Disaster Recovery](operations/disaster-recovery.md)

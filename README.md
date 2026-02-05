@@ -7,9 +7,12 @@ Production-ready automated deployment of Wazuh SIEM/XDR stack using Ansible with
 This project provides an enterprise-grade deployment solution for Wazuh with:
 
 - **Secure by Default** - Ansible Vault encrypted credentials, API rate limiting, TLS 1.2+
-- **Interactive Setup** - Configure your deployment through a guided CLI wizard
+- **Interactive Setup** - CLI wizard or beautiful TUI with deployment profiles (minimal/production/custom)
+- **One-Command Bootstrap** - Automatic host preparation with SSH key deployment via `--tags bootstrap`
 - **Client Preparation** - Cross-platform target host preparation (Ubuntu, Debian, RHEL, Arch Linux)
 - **Multiple Deployment Modes** - All-in-One or Distributed multi-node cluster
+- **Prometheus Monitoring** - Built-in exporters and pre-configured Grafana dashboard
+- **Smart Index Management** - Automatic rollover, tiered retention, cold index closing to prevent 1000-index limit
 - **Certificate Management** - Self-signed or external CA with rotation/renewal playbooks
 - **Encrypted Secrets** - Ansible Vault for credential encryption (enabled by default)
 - **Post-Deployment Security** - Automatic lockdown of deployment user after completion
@@ -50,51 +53,71 @@ ansible-galaxy install -r requirements.yml
 
 ### 1. Run Interactive Setup
 
+Choose your preferred setup method:
+
 ```bash
+# Option A: Beautiful TUI (recommended, requires gum)
+./setup-tui.sh
+
+# Option B: Traditional CLI wizard
 ./setup.sh
 ```
 
-The wizard configures:
-- Wazuh version selection (default: 4.14.2)
-- Node IP addresses (indexer, manager, dashboard)
-- Agent hosts (optional)
-- Feature toggles (vulnerability detection, FIM, SCA, etc.)
-- Email alerts, syslog output, and integrations (Slack, VirusTotal)
-- **Automatic certificate generation** (no separate step needed)
+**TUI Setup** offers:
+- Visual deployment profiles: **minimal** (single-node), **production** (cluster), **custom**
+- Interactive host entry with validation
+- Automatic SSH key generation
+- Bootstrap inventory for first-time deployment
 
-Generated files:
+**CLI Setup** offers the same features with traditional prompts.
+
+Both generate:
 - `inventory/hosts.yml` - Ansible inventory
+- `inventory/bootstrap.yml` - Initial connection inventory (for first deployment)
 - `group_vars/all/main.yml` - Configuration variables
 - `group_vars/all/vault.yml` - Encrypted credentials (Ansible Vault)
 - `.vault_password` - Vault encryption key (keep secure!)
 - `ansible.cfg` - Ansible settings
-- `keys/` - SSH keypair for deployment
-- `client-prep/` - Host preparation package
-- `files/certs/` - SSL/TLS certificates
+- `keys/wazuh_ansible_key` - SSH keypair for deployment
+- `client-prep/` - Host preparation package (optional)
+- `wazuh-client-prep.sh` - Self-extracting installer (optional)
 
-### 2. Prepare Target Hosts
+### 2. Deploy (First Time - Bootstrap + Deploy)
+
+For first-time deployment, bootstrap creates the `wazuh-deploy` user with SSH keys on target hosts, then deploys Wazuh—all in one command:
 
 ```bash
-# Option A: Copy and run
+# If using password authentication for initial root access:
+ansible-playbook site.yml --tags bootstrap,all --ask-pass
+
+# If root already has your SSH key:
+ansible-playbook site.yml --tags bootstrap,all
+```
+
+This connects as root (or your configured initial user), creates the deployment user, deploys SSH keys, then continues with full Wazuh deployment.
+
+### 3. Deploy (Subsequent Runs)
+
+After bootstrap, subsequent deployments use the `wazuh-deploy` user automatically:
+
+```bash
+ansible-playbook site.yml
+```
+
+### Alternative: Manual Host Preparation
+
+If you prefer to prepare hosts manually instead of using bootstrap:
+
+```bash
+# Option A: Copy and run client-prep package
 scp -r client-prep/ root@TARGET:/tmp/
-ssh root@TARGET 'bash /tmp/client-prep/install.sh'
+ssh root@TARGET 'cd /tmp/client-prep && sudo ./install.sh'
 
-# Option B: Multi-host deployment
-./scripts/deploy-prep.sh 192.168.1.10 192.168.1.11 192.168.1.12
-```
+# Option B: Use self-extracting installer
+scp wazuh-client-prep.sh root@TARGET:/tmp/
+ssh root@TARGET 'sudo bash /tmp/wazuh-client-prep.sh'
 
-Supports: Ubuntu, Debian, RHEL/CentOS, Rocky Linux, Fedora, SUSE, and **Arch Linux**.
-
-### 3. Test Connectivity
-
-```bash
-ansible all -m ping
-```
-
-### 4. Deploy
-
-```bash
-# Full stack deployment
+# Then deploy without bootstrap tag
 ansible-playbook site.yml
 
 # Or individual components
@@ -132,21 +155,31 @@ ansible-playbook site.yml
 
 ```
 wazuh-deployment/
-├── setup.sh                     # Interactive setup wizard
+├── setup.sh                     # Interactive CLI setup wizard
+├── setup-tui.sh                 # Beautiful TUI setup (requires gum)
 ├── generate-certs.sh            # Certificate generation
-├── site.yml                     # Main deployment playbook
+├── site.yml                     # Main deployment playbook (includes bootstrap)
 ├── wazuh-aio.yml               # All-in-One deployment
 ├── wazuh-distributed.yml       # Multi-node cluster deployment
 ├── wazuh-agent.yml             # Agent-only deployment
 ├── .vault_password              # Ansible Vault encryption key (keep secure!)
 │
 ├── inventory/
-│   └── hosts.yml               # Generated inventory
+│   ├── hosts.yml               # Generated inventory (connects as wazuh-deploy)
+│   └── bootstrap.yml           # Bootstrap inventory (connects as root)
 │
 ├── group_vars/
 │   └── all/
 │       ├── main.yml            # Configuration variables
 │       └── vault.yml           # Encrypted credentials (Ansible Vault)
+│
+├── lib/                         # Shared bash libraries
+│   ├── colors.sh               # Terminal colors/formatting
+│   ├── validation.sh           # Input validation functions
+│   ├── generators.sh           # Password/key generation
+│   ├── profiles.sh             # Deployment profiles
+│   ├── prompts.sh              # User prompt helpers
+│   └── client-prep.sh          # Client prep package generation
 │
 ├── scripts/
 │   ├── manage-vault.sh         # Vault credential management
@@ -171,10 +204,11 @@ wazuh-deployment/
 │   └── upgrade.yml             # In-place version upgrades
 │
 ├── roles/
-│   ├── wazuh-indexer/          # Indexer role
+│   ├── wazuh-indexer/          # Indexer role (includes index management)
 │   ├── wazuh-manager/          # Manager role
 │   ├── wazuh-dashboard/        # Dashboard role
 │   ├── wazuh-agent/            # Agent role
+│   ├── wazuh-monitoring/       # Prometheus exporters + Grafana dashboard
 │   └── ...
 │
 ├── files/
@@ -241,12 +275,69 @@ ansible-playbook playbooks/certificate-management.yml --tags renew
 - HTTP security headers (CSP, X-Frame-Options, X-XSS-Protection)
 - Session timeout configuration
 
-### Index Data Retention (ISM Policy)
-Default 3-year retention with tiered storage:
-- **Hot**: 0-30 days (fast storage)
-- **Warm**: 30-90 days (standard storage)
-- **Cold**: 90-1095 days (archive storage)
-- **Delete**: After 1095 days (3 years)
+### Index Management (ISM Policy)
+
+**Automatic rollover** prevents hitting OpenSearch's 1000 open index limit:
+- Rolls over indices by size (50GB default) or age (1 day default)
+- Tiered storage: hot → warm → cold → delete
+- **Cold indices are CLOSED** (not just read-only) to save open-index slots
+
+Default retention tiers:
+| Phase | Age | State |
+|-------|-----|-------|
+| **Hot** | 0-7 days | Active, fast storage |
+| **Warm** | 7-30 days | Read-only, standard storage |
+| **Cold** | 30-90 days | **Closed** (saves open index limit) |
+| **Delete** | 90+ days | Removed |
+
+Configure in `group_vars/all.yml`:
+```yaml
+wazuh_rollover_enabled: true
+wazuh_rollover_max_size: "50gb"
+wazuh_rollover_max_age: "1d"
+wazuh_retention_days: 90
+wazuh_close_cold_indices: true  # Critical for preventing 1000-index limit
+```
+
+### Prometheus Monitoring
+
+Optional Prometheus exporters with a pre-built Grafana dashboard:
+
+```bash
+# Deploy monitoring after main deployment
+ansible-playbook site.yml --tags monitoring -e wazuh_monitoring_enabled=true
+```
+
+**Metrics exported:**
+
+| Exporter | Port | Metrics |
+|----------|------|---------|
+| **Indexer** | 9114 | Cluster health, JVM heap, disk, CPU, shards, document counts |
+| **Manager** | 9115 | Active/disconnected agents, alerts by severity, rule groups |
+
+**Prometheus scrape config:**
+```yaml
+scrape_configs:
+  - job_name: 'wazuh-indexer'
+    static_configs:
+      - targets: ['indexer1:9114']
+    scheme: https
+    tls_config:
+      insecure_skip_verify: true
+
+  - job_name: 'wazuh-manager'
+    static_configs:
+      - targets: ['manager1:9115']
+```
+
+**Grafana dashboard** is auto-provisioned, or import manually:
+```bash
+# Copy to your Grafana instance
+scp roles/wazuh-monitoring/files/grafana-wazuh-dashboard.json \
+  user@grafana:/etc/grafana/provisioning/dashboards/
+```
+
+See [Monitoring Guide](docs/operations/monitoring.md) for detailed setup.
 
 ## Operational Playbooks
 
@@ -357,6 +448,9 @@ ansible-playbook playbooks/health-check-alerts.yml -e "alert_slack=true" -e "ale
 | `wazuh_manager_api_port` | Manager API port | 55000 |
 | `wazuh_dashboard_port` | Dashboard HTTPS port | 443 |
 | `wazuh_indexer_heap_size` | Indexer JVM heap ("auto" = 50% RAM, max 32g) | auto |
+| `wazuh_monitoring_enabled` | Enable Prometheus exporters | false |
+| `wazuh_rollover_enabled` | Enable automatic index rollover | true |
+| `wazuh_close_cold_indices` | Close cold indices (saves open-index slots) | true |
 
 ### Feature Toggles
 

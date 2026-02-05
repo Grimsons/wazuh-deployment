@@ -330,3 +330,45 @@ wazuh_configure_selinux: true
 wazuh_repo_gpg_key: "https://packages.wazuh.com/key/GPG-KEY-WAZUH"
 wazuh_repo_url_apt: "https://packages.wazuh.com/4.x/apt/"
 wazuh_repo_url_yum: "https://packages.wazuh.com/4.x/yum/"
+
+# ═══════════════════════════════════════════════════════════════
+# Prometheus Monitoring (Optional)
+# ═══════════════════════════════════════════════════════════════
+# Enable Prometheus exporters for Wazuh metrics
+# Deploy with: ansible-playbook site.yml --tags monitoring
+wazuh_monitoring_enabled: false
+
+# Indexer (OpenSearch) metrics exporter
+wazuh_indexer_exporter_enabled: true
+wazuh_indexer_metrics_port: 9114
+
+# Manager API metrics exporter
+wazuh_manager_exporter_enabled: true
+wazuh_manager_exporter_port: 9115
+wazuh_manager_exporter_scrape_interval: 30
+
+# Grafana dashboard provisioning (requires Grafana on dashboard node)
+wazuh_grafana_dashboard_enabled: true
+wazuh_grafana_provisioning_dir: "/etc/grafana/provisioning/dashboards"
+
+# Alert thresholds for Grafana alerting rules
+# wazuh_alert_thresholds:
+#   disconnected_agents_warn: 5
+#   disconnected_agents_critical: 20
+#   disk_usage_warn_percent: 75
+#   disk_usage_critical_percent: 90
+#   jvm_heap_usage_warn_percent: 80
+#   jvm_heap_usage_critical_percent: 95
+
+# Prometheus scrape targets (add to your prometheus.yml):
+# scrape_configs:
+#   - job_name: 'wazuh-indexer'
+#     static_configs:
+#       - targets: ['indexer1:9114']
+#     scheme: https
+#     tls_config:
+#       insecure_skip_verify: true
+#
+#   - job_name: 'wazuh-manager'
+#     static_configs:
+#       - targets: ['manager1:9115']
