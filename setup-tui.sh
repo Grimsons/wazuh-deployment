@@ -3,12 +3,13 @@
 # Wazuh Ansible Deployment - TUI Setup Script (using gum)
 # Beautiful terminal UI for configuring Wazuh deployment
 #
-# Requirements: gum (https://github.com/charmbracelet/gum)
+# Requirements: gum >= 0.10 (https://github.com/charmbracelet/gum)
 # Install: brew install gum  OR  go install github.com/charmbracelet/gum@latest
 #
 # Usage:
 #   ./setup-tui.sh                    # Interactive TUI mode
 #   ./setup-tui.sh --profile minimal  # Quick setup with profile
+#   ./setup-tui.sh --check            # Validate gum installation
 #   ./setup-tui.sh --help             # Show help
 
 set -euo pipefail
@@ -18,6 +19,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ═══════════════════════════════════════════════════════════════
 # Check for gum installation
 # ═══════════════════════════════════════════════════════════════
+GUM_MIN_VERSION="0.10.0"
+
 check_gum() {
     if ! command -v gum &>/dev/null; then
         echo "Error: 'gum' is not installed."
@@ -30,6 +33,87 @@ check_gum() {
         echo ""
         echo "Or use the classic setup script: ./setup.sh"
         exit 1
+    fi
+}
+
+# Version comparison: returns 0 if $1 >= $2
+version_gte() {
+    printf '%s\n%s\n' "$2" "$1" | sort -V -C
+}
+
+# Comprehensive gum validation
+validate_gum() {
+    local verbose="${1:-false}"
+    local errors=0
+
+    # Check installation
+    if ! command -v gum &>/dev/null; then
+        echo "✗ gum is not installed"
+        echo ""
+        echo "Install gum using one of these methods:"
+        echo "  brew install gum                              # macOS/Linux (Homebrew)"
+        echo "  sudo apt install gum                          # Debian/Ubuntu"
+        echo "  sudo dnf install gum                          # Fedora"
+        echo "  go install github.com/charmbracelet/gum@latest # Go"
+        echo ""
+        echo "Or use the classic setup script: ./setup.sh"
+        return 1
+    fi
+    [[ "$verbose" == "true" ]] && echo "✓ gum is installed: $(command -v gum)"
+
+    # Check version
+    local gum_version
+    gum_version=$(gum --version 2>/dev/null | head -1 | sed 's/^gum version //' | sed 's/^v//')
+    if [[ -z "$gum_version" ]]; then
+        echo "✗ Could not determine gum version"
+        ((errors++))
+    elif version_gte "$gum_version" "$GUM_MIN_VERSION"; then
+        [[ "$verbose" == "true" ]] && echo "✓ gum version $gum_version >= $GUM_MIN_VERSION"
+    else
+        echo "✗ gum version $gum_version is below minimum $GUM_MIN_VERSION"
+        echo "  Please upgrade: brew upgrade gum  OR  go install github.com/charmbracelet/gum@latest"
+        ((errors++))
+    fi
+
+    # Test terminal capabilities
+    if [[ -t 1 ]]; then
+        [[ "$verbose" == "true" ]] && echo "✓ Running in interactive terminal"
+    else
+        echo "⚠ Not running in interactive terminal (some features may not work)"
+    fi
+
+    # Test gum commands work
+    if gum style "test" >/dev/null 2>&1; then
+        [[ "$verbose" == "true" ]] && echo "✓ gum style works"
+    else
+        echo "✗ gum style command failed"
+        ((errors++))
+    fi
+
+    if echo "test" | gum choose --limit 1 >/dev/null 2>&1; then
+        [[ "$verbose" == "true" ]] && echo "✓ gum choose works"
+    else
+        echo "✗ gum choose command failed"
+        ((errors++))
+    fi
+
+    if gum input --value "test" >/dev/null 2>&1 </dev/null; then
+        [[ "$verbose" == "true" ]] && echo "✓ gum input works"
+    else
+        echo "✗ gum input command failed"
+        ((errors++))
+    fi
+
+    # Summary
+    if [[ $errors -eq 0 ]]; then
+        [[ "$verbose" == "true" ]] && echo ""
+        echo "✓ All gum checks passed - ready for TUI setup"
+        return 0
+    else
+        echo ""
+        echo "✗ $errors check(s) failed"
+        echo "  Consider using the classic setup script: ./setup.sh"
+        return 1
     fi
 }
 
@@ -1034,18 +1118,32 @@ Store this securely - you'll need it for deployment!"
 # Main
 # ═══════════════════════════════════════════════════════════════
 main() {
-    check_gum
-
-    # Parse arguments
+    # Parse arguments first (before gum check, so --check can run without gum)
     SELECTED_PROFILE=""
+    local do_check="false"
+
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --profile|-p)
                 SELECTED_PROFILE="$2"
                 shift 2
                 ;;
+            --check|-c)
+                do_check="true"
+                shift
+                ;;
             --help|-h)
-                echo "Usage: $0 [--profile minimal|production|custom]"
+                echo "Usage: $0 [OPTIONS]"
+                echo ""
+                echo "Options:"
+                echo "  --profile, -p PROFILE   Set deployment profile (minimal|production|custom)"
+                echo "  --check, -c             Validate gum installation and exit"
+                echo "  --help, -h              Show this help message"
+                echo ""
+                echo "Examples:"
+                echo "  $0                      # Interactive TUI mode"
+                echo "  $0 --profile minimal    # Quick setup with minimal profile"
+                echo "  $0 --check              # Verify gum is properly installed"
                 exit 0
                 ;;
             *)
@@ -1053,6 +1151,19 @@ main() {
                 ;;
         esac
     done
+
+    # Handle --check flag
+    if [[ "$do_check" == "true" ]]; then
+        echo "Validating gum installation..."
+        echo ""
+        if validate_gum true; then
+            exit 0
+        else
+            exit 1
+        fi
+    fi
+
+    check_gum
 
     # Profile selection
     if [[ -z "$SELECTED_PROFILE" ]]; then
