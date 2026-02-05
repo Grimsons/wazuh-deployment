@@ -937,12 +937,10 @@ EOF
         node_name="manager-$((i+1))"
         echo "        ${node}:" >> "$SCRIPT_DIR/inventory/hosts.yml"
         echo "          manager_node_name: ${node_name}" >> "$SCRIPT_DIR/inventory/hosts.yml"
-        if [ $MANAGER_COUNT -gt 1 ]; then
-            if [ $i -eq 0 ]; then
-                echo "          manager_node_type: master" >> "$SCRIPT_DIR/inventory/hosts.yml"
-            else
-                echo "          manager_node_type: worker" >> "$SCRIPT_DIR/inventory/hosts.yml"
-            fi
+        if [ $i -eq 0 ]; then
+            echo "          manager_node_type: master" >> "$SCRIPT_DIR/inventory/hosts.yml"
+        else
+            echo "          manager_node_type: worker" >> "$SCRIPT_DIR/inventory/hosts.yml"
         fi
     done
 
@@ -1044,12 +1042,10 @@ EOF
         if [ -n "${HOST_SSH_PASS[$node]:-}" ]; then
             echo "          ansible_ssh_pass: \"{{ vault_ssh_pass_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
         fi
-        if [ $MANAGER_COUNT -gt 1 ]; then
-            if [ $i -eq 0 ]; then
-                echo "          manager_node_type: master" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
-            else
-                echo "          manager_node_type: worker" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
-            fi
+        if [ $i -eq 0 ]; then
+            echo "          manager_node_type: master" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+        else
+            echo "          manager_node_type: worker" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
         fi
     done
 
