@@ -122,6 +122,7 @@ error() {
 }
 
 # Input with validation
+# IMPORTANT: Error display goes to stderr so command substitution only captures the value.
 input_validated() {
     local prompt="$1"
     local default="$2"
@@ -136,7 +137,7 @@ input_validated() {
         fi
 
         if [[ -n "$validator" ]] && ! "$validator" "$value" 2>/dev/null; then
-            error "Invalid input. Please try again."
+            error "Invalid input. Please try again." >&2
             continue
         fi
 
@@ -146,24 +147,38 @@ input_validated() {
 }
 
 # Multi-host input
+# IMPORTANT: All display output goes to stderr so command substitution
+# only captures the return value (the host list), not decorative text.
 input_hosts() {
     local prompt="$1"
     local min_hosts="${2:-1}"
 
-    info "$prompt"
-    info "Enter hostnames/IPs, one per line. Save when done."
-    echo ""
+    info "$prompt" >&2
+    info "Enter hostnames/IPs, one per line. Save when done." >&2
+    echo "" >&2
 
     local hosts=""
     hosts=$(gum write --placeholder "192.168.1.10
 192.168.1.11
 ..." --width 50 --height 6)
 
-    # Convert newlines to spaces
+    # Convert newlines to spaces and filter to valid hostnames/IPs only
     hosts=$(echo "$hosts" | tr '\n' ' ' | xargs)
 
+    # Sanitize: keep only entries that look like hostnames or IPs
+    local clean_hosts=""
+    for entry in $hosts; do
+        # Match IPv4, IPv6, or valid hostname (alphanumeric, dots, hyphens, colons)
+        if [[ "$entry" =~ ^[a-zA-Z0-9.:_-]+$ ]]; then
+            clean_hosts="${clean_hosts:+$clean_hosts }$entry"
+        else
+            warn "Skipping invalid entry: $entry" >&2
+        fi
+    done
+    hosts="$clean_hosts"
+
     if [[ -z "$hosts" ]] && (( min_hosts > 0 )); then
-        error "At least $min_hosts host(s) required!"
+        error "At least $min_hosts host(s) required!" >&2
         return 1
     fi
 
@@ -174,10 +189,11 @@ input_hosts() {
 # Profile Selection
 # ═══════════════════════════════════════════════════════════════
 select_profile() {
-    header "Select Deployment Profile"
+    # Display output goes to stderr so command substitution only captures the profile name
+    header "Select Deployment Profile" >&2
 
-    info "Choose a profile to get started quickly:"
-    echo ""
+    info "Choose a profile to get started quickly:" >&2
+    echo "" >&2
 
     local profile
     profile=$(gum choose \
@@ -893,11 +909,14 @@ main() {
     else
         # Minimal defaults
         CUSTOM_PASSWORDS="false"
+        API_USER="wazuh"
+        INDEXER_ADMIN_USER="admin"
         USE_SELF_SIGNED_CERTS="true"
         GENERATE_CERTS="true"
         EXTERNAL_CA="false"
         GENERATE_SSH_KEY="false"
         ANSIBLE_USER="$(whoami)"
+        ANSIBLE_SSH_PORT="22"
         USE_BECOME="true"
         ENABLE_VULN_DETECTION="true"
         ENABLE_FIM="true"
