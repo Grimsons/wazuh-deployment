@@ -161,6 +161,28 @@ ansible-playbook playbooks/wazuh-dashboard.yml
 ansible-playbook playbooks/wazuh-agents.yml
 ```
 
+### Alternative Quick Playbooks (Testing Only)
+
+The repository includes `wazuh-aio.yml` and `wazuh-distributed.yml` for quick testing:
+
+```bash
+# Single-server test deployment
+ansible-playbook wazuh-aio.yml -e "target_host=192.168.1.10"
+
+# Multi-node test deployment (requires manual inventory)
+ansible-playbook wazuh-distributed.yml
+```
+
+> **Warning:** These playbooks are minimal and use role defaults only. They do **NOT** include:
+> - Encrypted credentials (Ansible Vault)
+> - SSH key generation or bootstrap workflow
+> - Index management (rollover, retention policies)
+> - Certificate generation
+> - Client preparation package
+> - Post-deployment security lockdown
+>
+> **For production deployments, always use `setup.sh` or `setup-tui.sh` followed by `site.yml`.**
+
 ### 5. Access the Dashboard
 
 After setup completes, credentials are displayed on screen and stored encrypted in Ansible Vault. To view them later:
