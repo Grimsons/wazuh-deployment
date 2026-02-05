@@ -54,6 +54,7 @@ export GUM_CONFIRM_UNSELECTED_FOREGROUND="#666666"
 # ═══════════════════════════════════════════════════════════════
 source "$SCRIPT_DIR/lib/validation.sh" 2>/dev/null || true
 source "$SCRIPT_DIR/lib/generators.sh" 2>/dev/null || true
+source "$SCRIPT_DIR/lib/client-prep.sh" 2>/dev/null || true
 
 # Fallback password generator if library not loaded
 if ! command -v generate_password &>/dev/null; then
@@ -885,6 +886,20 @@ EOF
     success "Created: group_vars/all/main.yml"
 
     # ════════════════════════════════════════════════════════════
+    # Client Preparation Package
+    # ════════════════════════════════════════════════════════════
+    if [[ "${CREATE_PREP_PACKAGE:-false}" == "true" ]]; then
+        gum spin --spinner dot --title "Creating client preparation package..." -- sleep 0.3
+
+        # Wire up log callbacks for TUI
+        _prep_info()    { info "$@"; }
+        _prep_success() { success "$@"; }
+        _prep_warn()    { warn "$@"; }
+
+        create_client_prep_package "$SCRIPT_DIR" "${ANSIBLE_SSH_KEY:-$SCRIPT_DIR/keys/wazuh_ansible_key}" "${ANSIBLE_USER:-wazuh-deploy}"
+    fi
+
+    # ════════════════════════════════════════════════════════════
     # Ansible Vault
     # ════════════════════════════════════════════════════════════
     gum spin --spinner dot --title "Initializing Ansible Vault..." -- sleep 0.5
@@ -959,6 +974,8 @@ $([ "$SELECTED_PROFILE" != "minimal" ] && echo "• inventory/bootstrap.yml (ini
 • group_vars/all/main.yml
 • group_vars/all/vault.yml (encrypted)
 $([ "${GENERATE_SSH_KEY:-false}" == "true" ] && echo "• keys/wazuh_ansible_key (SSH key pair)")
+$([ "${CREATE_PREP_PACKAGE:-false}" == "true" ] && echo "• client-prep/ (client preparation package)
+• wazuh-client-prep.sh (self-extracting installer)")
 EOF
 )"
 
@@ -977,7 +994,19 @@ EOF
         echo ""
         echo "     This connects as ${INITIAL_SSH_USER:-root}, creates ${ANSIBLE_USER}, then deploys everything."
         echo ""
-        echo "  3. Subsequent deployments (no bootstrap needed):"
+        if [[ "${CREATE_PREP_PACKAGE:-false}" == "true" ]]; then
+            echo "  3. (Optional) Prepare target hosts manually:"
+            echo "     $(gum style --foreground '#4ECDC4' 'scp -r client-prep/ root@TARGET_HOST:/tmp/')"
+            echo "     $(gum style --foreground '#4ECDC4' 'ssh root@TARGET_HOST \"cd /tmp/client-prep && sudo ./install.sh\"')"
+            echo ""
+            echo "     Or use self-extracting script:"
+            echo "     $(gum style --foreground '#4ECDC4' 'scp wazuh-client-prep.sh root@TARGET_HOST:/tmp/')"
+            echo "     $(gum style --foreground '#4ECDC4' 'ssh root@TARGET_HOST \"sudo bash /tmp/wazuh-client-prep.sh\"')"
+            echo ""
+            echo "  4. Subsequent deployments (no bootstrap needed):"
+        else
+            echo "  3. Subsequent deployments (no bootstrap needed):"
+        fi
         echo "     $(gum style --foreground '#4ECDC4' 'ansible-playbook site.yml')"
         echo ""
     else
