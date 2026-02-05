@@ -1,0 +1,287 @@
+#!/usr/bin/env python3
+"""
+Wazuh OpenSearch/Indexer Prometheus Exporter
+Exposes OpenSearch cluster metrics in Prometheus format.
+
+Metrics exposed:
+- Cluster health (status, nodes, shards)
+- Node statistics (JVM, disk, CPU, memory)
+- Index statistics (doc count, size, operations)
+"""
+
+import json
+import ssl
+import time
+import urllib.request
+import urllib.error
+from prometheus_client import start_http_server, Gauge, Counter, Info
+
+# ═══════════════════════════════════════════════════════════════
+# Configuration
+# ═══════════════════════════════════════════════════════════════
+OPENSEARCH_HOST = "{{ wazuh_api_protocol | default('https') }}://localhost:9200"
+METRICS_PORT = {{ wazuh_indexer_metrics_port | default(9114) }}
+SCRAPE_INTERVAL = {{ wazuh_manager_exporter_scrape_interval | default(30) }}
+
+# SSL context for self-signed certs
+SSL_CONTEXT = ssl.create_default_context()
+SSL_CONTEXT.check_hostname = False
+SSL_CONTEXT.verify_mode = ssl.CERT_NONE
+
+# Basic auth if needed (usually internal certs handle this)
+OPENSEARCH_USER = "{{ indexer_admin_user | default('admin') }}"
+OPENSEARCH_PASS = "{{ vault_indexer_admin_password | default('admin') }}"
+
+# ═══════════════════════════════════════════════════════════════
+# Prometheus Metrics Definition
+# ═══════════════════════════════════════════════════════════════
+
+# Cluster Health
+cluster_status = Gauge('wazuh_indexer_cluster_status',
+    'Cluster health status (0=green, 1=yellow, 2=red)')
+cluster_nodes_total = Gauge('wazuh_indexer_cluster_nodes_total',
+    'Total number of nodes in the cluster')
+cluster_data_nodes = Gauge('wazuh_indexer_cluster_data_nodes',
+    'Number of data nodes in the cluster')
+cluster_active_shards = Gauge('wazuh_indexer_cluster_active_shards',
+    'Number of active shards')
+cluster_relocating_shards = Gauge('wazuh_indexer_cluster_relocating_shards',
+    'Number of relocating shards')
+cluster_initializing_shards = Gauge('wazuh_indexer_cluster_initializing_shards',
+    'Number of initializing shards')
+cluster_unassigned_shards = Gauge('wazuh_indexer_cluster_unassigned_shards',
+    'Number of unassigned shards')
+cluster_active_shards_percent = Gauge('wazuh_indexer_cluster_active_shards_percent',
+    'Percentage of active shards')
+
+# Node Stats
+node_jvm_heap_used_bytes = Gauge('wazuh_indexer_jvm_heap_used_bytes',
+    'JVM heap memory used in bytes', ['node'])
+node_jvm_heap_max_bytes = Gauge('wazuh_indexer_jvm_heap_max_bytes',
+    'JVM heap memory max in bytes', ['node'])
+node_jvm_heap_used_percent = Gauge('wazuh_indexer_jvm_heap_used_percent',
+    'JVM heap memory usage percentage', ['node'])
+node_jvm_gc_old_count = Counter('wazuh_indexer_jvm_gc_old_collection_count',
+    'JVM old generation GC count', ['node'])
+node_jvm_gc_old_time_ms = Counter('wazuh_indexer_jvm_gc_old_collection_time_ms',
+    'JVM old generation GC time in milliseconds', ['node'])
+
+node_disk_total_bytes = Gauge('wazuh_indexer_disk_total_bytes',
+    'Total disk space in bytes', ['node'])
+node_disk_free_bytes = Gauge('wazuh_indexer_disk_free_bytes',
+    'Free disk space in bytes', ['node'])
+node_disk_used_percent = Gauge('wazuh_indexer_disk_used_percent',
+    'Disk usage percentage', ['node'])
+
+node_cpu_percent = Gauge('wazuh_indexer_cpu_percent',
+    'CPU usage percentage', ['node'])
+node_load_average_1m = Gauge('wazuh_indexer_load_average_1m',
+    '1 minute load average', ['node'])
+
+node_docs_count = Gauge('wazuh_indexer_node_docs_count',
+    'Total document count on node', ['node'])
+node_docs_deleted = Gauge('wazuh_indexer_node_docs_deleted',
+    'Total deleted documents on node', ['node'])
+node_store_size_bytes = Gauge('wazuh_indexer_node_store_size_bytes',
+    'Total store size on node in bytes', ['node'])
+
+# Index Stats
+index_docs_count = Gauge('wazuh_indexer_index_docs_count',
+    'Document count per index', ['index'])
+index_store_size_bytes = Gauge('wazuh_indexer_index_store_size_bytes',
+    'Store size per index in bytes', ['index'])
+index_search_query_total = Counter('wazuh_indexer_index_search_query_total',
+    'Total search queries per index', ['index'])
+index_indexing_total = Counter('wazuh_indexer_index_indexing_total',
+    'Total indexing operations per index', ['index'])
+
+# Wazuh-specific
+wazuh_alerts_index_count = Gauge('wazuh_alerts_index_count',
+    'Number of Wazuh alerts indices')
+wazuh_alerts_total_docs = Gauge('wazuh_alerts_total_docs',
+    'Total documents in all Wazuh alerts indices')
+wazuh_alerts_total_size_bytes = Gauge('wazuh_alerts_total_size_bytes',
+    'Total size of all Wazuh alerts indices in bytes')
+
+# Exporter health
+exporter_scrape_success = Gauge('wazuh_indexer_exporter_scrape_success',
+    'Whether the last scrape was successful (1=yes, 0=no)')
+exporter_scrape_duration_seconds = Gauge('wazuh_indexer_exporter_scrape_duration_seconds',
+    'Duration of the last scrape in seconds')
+
+# ═══════════════════════════════════════════════════════════════
+# Helper Functions
+# ═══════════════════════════════════════════════════════════════
+
+def fetch_json(path):
+    """Fetch JSON from OpenSearch API"""
+    url = f"{OPENSEARCH_HOST}{path}"
+
+    # Create request with basic auth
+    request = urllib.request.Request(url)
+    credentials = f"{OPENSEARCH_USER}:{OPENSEARCH_PASS}"
+    import base64
+    encoded_credentials = base64.b64encode(credentials.encode()).decode()
+    request.add_header("Authorization", f"Basic {encoded_credentials}")
+
+    try:
+        with urllib.request.urlopen(request, context=SSL_CONTEXT, timeout=10) as response:
+            return json.loads(response.read().decode())
+    except urllib.error.URLError as e:
+        print(f"Error fetching {url}: {e}")
+        return None
+    except json.JSONDecodeError as e:
+        print(f"Error parsing JSON from {url}: {e}")
+        return None
+
+def status_to_number(status):
+    """Convert cluster status to numeric value"""
+    return {"green": 0, "yellow": 1, "red": 2}.get(status.lower(), 2)
+
+# ═══════════════════════════════════════════════════════════════
+# Metric Collection Functions
+# ═══════════════════════════════════════════════════════════════
+
+def collect_cluster_health():
+    """Collect cluster health metrics"""
+    data = fetch_json("/_cluster/health")
+    if not data:
+        return False
+
+    cluster_status.set(status_to_number(data.get("status", "red")))
+    cluster_nodes_total.set(data.get("number_of_nodes", 0))
+    cluster_data_nodes.set(data.get("number_of_data_nodes", 0))
+    cluster_active_shards.set(data.get("active_shards", 0))
+    cluster_relocating_shards.set(data.get("relocating_shards", 0))
+    cluster_initializing_shards.set(data.get("initializing_shards", 0))
+    cluster_unassigned_shards.set(data.get("unassigned_shards", 0))
+    cluster_active_shards_percent.set(data.get("active_shards_percent_as_number", 0))
+
+    return True
+
+def collect_node_stats():
+    """Collect node-level statistics"""
+    data = fetch_json("/_nodes/stats")
+    if not data or "nodes" not in data:
+        return False
+
+    for node_id, node_data in data["nodes"].items():
+        node_name = node_data.get("name", node_id)
+
+        # JVM stats
+        jvm = node_data.get("jvm", {})
+        mem = jvm.get("mem", {})
+        node_jvm_heap_used_bytes.labels(node=node_name).set(mem.get("heap_used_in_bytes", 0))
+        node_jvm_heap_max_bytes.labels(node=node_name).set(mem.get("heap_max_in_bytes", 0))
+        node_jvm_heap_used_percent.labels(node=node_name).set(mem.get("heap_used_percent", 0))
+
+        gc = jvm.get("gc", {}).get("collectors", {})
+        old_gc = gc.get("old", {})
+        # Note: Counters should only increase, so we use _total suffix convention
+
+        # Disk stats
+        fs = node_data.get("fs", {})
+        fs_total = fs.get("total", {})
+        total_bytes = fs_total.get("total_in_bytes", 0)
+        free_bytes = fs_total.get("free_in_bytes", 0)
+        node_disk_total_bytes.labels(node=node_name).set(total_bytes)
+        node_disk_free_bytes.labels(node=node_name).set(free_bytes)
+        if total_bytes > 0:
+            used_percent = ((total_bytes - free_bytes) / total_bytes) * 100
+            node_disk_used_percent.labels(node=node_name).set(used_percent)
+
+        # CPU/OS stats
+        os_data = node_data.get("os", {})
+        cpu = os_data.get("cpu", {})
+        node_cpu_percent.labels(node=node_name).set(cpu.get("percent", 0))
+        load_avg = cpu.get("load_average", {})
+        node_load_average_1m.labels(node=node_name).set(load_avg.get("1m", 0))
+
+        # Index stats per node
+        indices = node_data.get("indices", {})
+        docs = indices.get("docs", {})
+        node_docs_count.labels(node=node_name).set(docs.get("count", 0))
+        node_docs_deleted.labels(node=node_name).set(docs.get("deleted", 0))
+        store = indices.get("store", {})
+        node_store_size_bytes.labels(node=node_name).set(store.get("size_in_bytes", 0))
+
+    return True
+
+def collect_index_stats():
+    """Collect per-index statistics"""
+    data = fetch_json("/_stats")
+    if not data or "indices" not in data:
+        return False
+
+    wazuh_alert_indices = 0
+    wazuh_alert_docs = 0
+    wazuh_alert_size = 0
+
+    for index_name, index_data in data["indices"].items():
+        # Skip system indices
+        if index_name.startswith("."):
+            continue
+
+        primaries = index_data.get("primaries", {})
+
+        docs = primaries.get("docs", {})
+        doc_count = docs.get("count", 0)
+        index_docs_count.labels(index=index_name).set(doc_count)
+
+        store = primaries.get("store", {})
+        size_bytes = store.get("size_in_bytes", 0)
+        index_store_size_bytes.labels(index=index_name).set(size_bytes)
+
+        # Track Wazuh alerts indices
+        if index_name.startswith("wazuh-alerts"):
+            wazuh_alert_indices += 1
+            wazuh_alert_docs += doc_count
+            wazuh_alert_size += size_bytes
+
+    wazuh_alerts_index_count.set(wazuh_alert_indices)
+    wazuh_alerts_total_docs.set(wazuh_alert_docs)
+    wazuh_alerts_total_size_bytes.set(wazuh_alert_size)
+
+    return True
+
+def collect_all_metrics():
+    """Collect all metrics"""
+    start_time = time.time()
+    success = True
+
+    try:
+        if not collect_cluster_health():
+            success = False
+        if not collect_node_stats():
+            success = False
+        if not collect_index_stats():
+            success = False
+    except Exception as e:
+        print(f"Error collecting metrics: {e}")
+        success = False
+
+    duration = time.time() - start_time
+    exporter_scrape_success.set(1 if success else 0)
+    exporter_scrape_duration_seconds.set(duration)
+
+    return success
+
+# ═══════════════════════════════════════════════════════════════
+# Main Loop
+# ═══════════════════════════════════════════════════════════════
+
+if __name__ == "__main__":
+    print(f"Starting Wazuh OpenSearch Exporter on port {METRICS_PORT}")
+    print(f"Scraping OpenSearch at {OPENSEARCH_HOST}")
+
+    # Start Prometheus HTTP server
+    start_http_server(METRICS_PORT)
+    print(f"Prometheus metrics available at http://0.0.0.0:{METRICS_PORT}/metrics")
+
+    # Initial collection
+    collect_all_metrics()
+
+    # Main loop
+    while True:
+        time.sleep(SCRAPE_INTERVAL)
+        collect_all_metrics()

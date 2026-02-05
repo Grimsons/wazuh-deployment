@@ -3,9 +3,10 @@
 # This playbook deploys the complete Wazuh stack in the correct order
 #
 # Usage:
-#   ansible-playbook site.yml                         # Normal deployment
-#   ansible-playbook site.yml -e bootstrap=true       # Bootstrap + deploy
-#   ansible-playbook site.yml --tags bootstrap        # Bootstrap only
+#   ansible-playbook site.yml                                           # Normal deployment
+#   ansible-playbook site.yml --tags bootstrap,all                      # Bootstrap + deploy
+#   ansible-playbook site.yml --tags bootstrap                          # Bootstrap only
+#   ansible-playbook site.yml --tags monitoring -e wazuh_monitoring_enabled=true  # Setup Prometheus exporters
 #
 # Bootstrap connects as the initial SSH user (e.g. root) to create the
 # wazuh-deploy user with SSH key auth and passwordless sudo. After that,
@@ -313,6 +314,21 @@
     - backup
 
 # ═══════════════════════════════════════════════════════════════
+# Step 5: Optional Prometheus Monitoring
+# Deploys exporters for indexer and manager metrics
+# ═══════════════════════════════════════════════════════════════
+- name: Wazuh Deployment - Prometheus Monitoring
+  hosts: wazuh_indexers:wazuh_managers:wazuh_dashboards
+  become: true
+  gather_facts: true
+  tags:
+    - monitoring
+    - never  # Only runs when explicitly tagged: --tags monitoring
+  roles:
+    - role: wazuh-monitoring
+      when: wazuh_monitoring_enabled | default(false)
+
+# ═══════════════════════════════════════════════════════════════
 # Post-deployment Summary
 # ═══════════════════════════════════════════════════════════════
 - name: Wazuh Deployment - Summary
@@ -368,5 +384,11 @@
           - Passwords are stored in ./credentials/ (mode 0600)
           - Deployment user has been LOCKED DOWN on all hosts
           - Before next deployment, run: ansible-playbook unlock-deploy-user.yml
+
+          PROMETHEUS MONITORING:
+          - To enable: ansible-playbook site.yml --tags monitoring -e wazuh_monitoring_enabled=true
+          - Indexer metrics: https://<indexer>:{{ wazuh_indexer_metrics_port | default(9114) }}/metrics
+          - Manager metrics: http://<manager>:{{ wazuh_manager_exporter_port | default(9115) }}/metrics
+          - Grafana dashboard: auto-provisioned to /etc/grafana/provisioning/dashboards/
           ══════════════════════════════════════════════════════════════
       run_once: true

@@ -1,0 +1,78 @@
+---
+# Wazuh Manager API Prometheus Exporter Setup
+# ═══════════════════════════════════════════════════════════════
+#
+# Exports Wazuh Manager metrics via the Wazuh API:
+# - Agent statistics (active, disconnected, pending, etc.)
+# - Alert counts by level
+# - Manager status and cluster info
+# - Events per second
+
+- name: Ensure Python dependencies
+  ansible.builtin.package:
+    name:
+      - python3
+      - python3-pip
+    state: present
+
+- name: Create exporter directory
+  ansible.builtin.file:
+    path: "{{ wazuh_exporter_install_dir }}"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Install Python dependencies
+  ansible.builtin.pip:
+    name:
+      - prometheus_client
+      - requests
+    state: present
+    executable: pip3
+
+- name: Deploy Wazuh Manager exporter script
+  ansible.builtin.template:
+    src: wazuh-manager-exporter.py.j2
+    dest: "{{ wazuh_exporter_install_dir }}/wazuh-manager-exporter.py"
+    mode: "0755"
+    owner: root
+    group: root
+  notify: Restart wazuh manager exporter
+
+- name: Deploy Wazuh Manager exporter systemd service
+  ansible.builtin.template:
+    src: wazuh-manager-exporter.service.j2
+    dest: /etc/systemd/system/wazuh-manager-exporter.service
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart wazuh manager exporter
+
+- name: Ensure Wazuh Manager exporter is started and enabled
+  ansible.builtin.systemd:
+    name: wazuh-manager-exporter
+    state: started
+    enabled: true
+    daemon_reload: true
+
+# ─────────────────────────────────────────────────────────────────
+# Firewall rules for metrics port
+# ─────────────────────────────────────────────────────────────────
+- name: Allow Prometheus to scrape manager metrics (firewalld)
+  ansible.posix.firewalld:
+    port: "{{ wazuh_manager_exporter_port }}/tcp"
+    permanent: true
+    state: enabled
+    immediate: true
+  when: ansible_facts.services['firewalld.service'] is defined
+  ignore_errors: true
+
+- name: Allow Prometheus to scrape manager metrics (ufw)
+  community.general.ufw:
+    rule: allow
+    port: "{{ wazuh_manager_exporter_port }}"
+    proto: tcp
+    comment: "Wazuh manager Prometheus metrics"
+  when: ansible_facts.services['ufw.service'] is defined
+  ignore_errors: true
