@@ -487,8 +487,10 @@ deploy_to_host() {
         # Running as root, no sudo needed
         exec_cmd="bash -c '$prep_cmd'"
     elif [ "$ASK_BECOME_PASS" = "true" ] && [ -n "$BECOME_PASSWORD" ]; then
-        # Use sudo with password from stdin
-        exec_cmd="echo '$BECOME_PASSWORD' | sudo -S bash -c '$prep_cmd'"
+        # Use sudo with password from stdin (base64 encode to safely handle special chars)
+        local encoded_password
+        encoded_password=$(printf '%s' "$BECOME_PASSWORD" | base64)
+        exec_cmd="printf '%s' '${encoded_password}' | base64 -d | sudo -S bash -c '$prep_cmd'"
     else
         # Use sudo without password (assumes NOPASSWD or already root)
         exec_cmd="sudo bash -c '$prep_cmd'"

@@ -345,7 +345,10 @@ generate_password() {
     local upper=$(head -c 100 /dev/urandom | LC_ALL=C tr -dc 'A-Z' | head -c 1)
     local lower=$(head -c 100 /dev/urandom | LC_ALL=C tr -dc 'a-z' | head -c 1)
     local number=$(head -c 100 /dev/urandom | LC_ALL=C tr -dc '0-9' | head -c 1)
-    local symbol="${symbols:$((RANDOM % ${#symbols})):1}"
+    # Use /dev/urandom for cryptographically secure symbol selection
+    local symbol_idx
+    symbol_idx=$(head -c 4 /dev/urandom | od -An -tu4 | tr -d ' ')
+    local symbol="${symbols:$((symbol_idx % ${#symbols})):1}"
 
     # Fallback if any character generation failed
     [ -z "$upper" ] && upper="A"
@@ -468,7 +471,7 @@ main() {
         exit 1
     fi
 
-    INDEXER_NODES_ARRAY=($INDEXER_NODES)
+    IFS=' ' read -r -a INDEXER_NODES_ARRAY <<< "$INDEXER_NODES"
     INDEXER_COUNT=${#INDEXER_NODES_ARRAY[@]}
 
     if [[ -z "${INDEXER_HTTP_PORT:-}" ]]; then
@@ -505,7 +508,7 @@ main() {
         exit 1
     fi
 
-    MANAGER_NODES_ARRAY=($MANAGER_NODES)
+    IFS=' ' read -r -a MANAGER_NODES_ARRAY <<< "$MANAGER_NODES"
     MANAGER_COUNT=${#MANAGER_NODES_ARRAY[@]}
 
     prompt_with_default "Manager API port" "$DEFAULT_MANAGER_API_PORT" "MANAGER_API_PORT"
@@ -547,7 +550,7 @@ main() {
         exit 1
     fi
 
-    DASHBOARD_NODES_ARRAY=($DASHBOARD_NODES)
+    IFS=' ' read -r -a DASHBOARD_NODES_ARRAY <<< "$DASHBOARD_NODES"
 
     prompt_with_default "Dashboard HTTPS port" "$DEFAULT_DASHBOARD_PORT" "DASHBOARD_PORT"
 
@@ -561,9 +564,11 @@ main() {
 
     prompt_yes_no "Do you want to deploy agents now?" "yes" "DEPLOY_AGENTS"
 
+    AGENT_NODES_ARRAY=()
     if [ "$DEPLOY_AGENTS" = "true" ]; then
         prompt_hosts "Enter Agent host(s)" "AGENT_NODES"
-        AGENT_NODES_ARRAY=($AGENT_NODES)
+        # Use read -a to safely split into array without glob expansion
+        IFS=' ' read -r -a AGENT_NODES_ARRAY <<< "$AGENT_NODES"
     fi
 
     # ═══════════════════════════════════════════════════════════════

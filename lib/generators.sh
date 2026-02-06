@@ -28,7 +28,10 @@ generate_password() {
     local upper=$(head -c 100 /dev/urandom | LC_ALL=C tr -dc 'A-Z' | head -c 1)
     local lower=$(head -c 100 /dev/urandom | LC_ALL=C tr -dc 'a-z' | head -c 1)
     local number=$(head -c 100 /dev/urandom | LC_ALL=C tr -dc '0-9' | head -c 1)
-    local symbol="${symbols:$((RANDOM % ${#symbols})):1}"
+    # Use /dev/urandom for cryptographically secure symbol selection
+    local symbol_idx
+    symbol_idx=$(head -c 4 /dev/urandom | od -An -tu4 | tr -d ' ')
+    local symbol="${symbols:$((symbol_idx % ${#symbols})):1}"
 
     # Fallback if any character generation failed
     [ -z "$upper" ] && upper="A"

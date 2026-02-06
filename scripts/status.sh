@@ -65,12 +65,12 @@ get_service_status() {
     result=$(ansible "$host" -m shell -a "systemctl is-active $service 2>/dev/null || echo 'inactive'" \
         --one-line -i "$PROJECT_DIR/inventory/hosts.yml" 2>/dev/null | tail -1)
 
-    if echo "$result" | grep -q "active"; then
-        echo "active"
-    elif echo "$result" | grep -q "inactive"; then
-        echo "inactive"
-    elif echo "$result" | grep -q "UNREACHABLE"; then
+    if echo "$result" | grep -q "UNREACHABLE"; then
         echo "unreachable"
+    elif echo "$result" | grep -qw "inactive"; then
+        echo "inactive"
+    elif echo "$result" | grep -qw "active"; then
+        echo "active"
     else
         echo "unknown"
     fi

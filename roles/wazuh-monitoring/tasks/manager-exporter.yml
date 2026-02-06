@@ -31,6 +31,32 @@
     state: present
     executable: pip3
 
+- name: Create exporter service group
+  ansible.builtin.group:
+    name: "{{ wazuh_exporter_group }}"
+    system: true
+
+- name: Create exporter service user
+  ansible.builtin.user:
+    name: "{{ wazuh_exporter_user }}"
+    group: "{{ wazuh_exporter_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Deploy Manager exporter environment file with credentials
+  ansible.builtin.copy:
+    content: |
+      WAZUH_API_USER={{ wazuh_api_user | default('wazuh') }}
+      WAZUH_API_PASS={{ wazuh_api_password }}
+      WAZUH_API_CA_CERT={{ wazuh_manager_certs_path | default('/etc/wazuh-manager/certs') }}/root-ca.pem
+    dest: "{{ wazuh_exporter_install_dir }}/wazuh-manager-exporter.env"
+    mode: "0600"
+    owner: "{{ wazuh_exporter_user }}"
+    group: "{{ wazuh_exporter_group }}"
+  no_log: true
+  notify: Restart wazuh manager exporter
+
 - name: Deploy Wazuh Manager exporter script
   ansible.builtin.template:
     src: wazuh-manager-exporter.py.j2
