@@ -91,8 +91,10 @@ cat > "$SUDOERS_FILE" << EOF
 ${ANSIBLE_USER} ALL=(ALL) NOPASSWD: ${UNLOCK_SCRIPT}
 
 # Allow basic Ansible connectivity checks (gather_facts)
-${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/bin/python3, /usr/bin/python
-${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /bin/sh -c echo*
+# Note: Ansible needs to run Python for fact gathering, but we restrict it
+# to only the specific Ansible module runner to prevent arbitrary code execution
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/bin/python3 /tmp/.ansible/tmp/*/AnsiballZ_*.py, /usr/bin/python /tmp/.ansible/tmp/*/AnsiballZ_*.py
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/bin/python3 /root/.ansible/tmp/*/AnsiballZ_*.py, /usr/bin/python /root/.ansible/tmp/*/AnsiballZ_*.py
 
 # Allow checking Wazuh service status (read-only)
 ${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl status wazuh-*

@@ -4,13 +4,13 @@
 -->
 <ossec_config>
   <client>
-    <server>
 {% for node in wazuh_manager_nodes %}
+    <server>
       <address>{{ node.ip }}</address>
-{% endfor %}
       <port>{{ wazuh_manager_agent_port | default(1514) }}</port>
       <protocol>{{ wazuh_agent_protocol | default('tcp') }}</protocol>
     </server>
+{% endfor %}
     <config-profile>macos, macos{{ ansible_distribution_major_version }}</config-profile>
     <notify_time>{{ wazuh_agent_notify_time | default(10) }}</notify_time>
     <time-reconnect>{{ wazuh_agent_time_reconnect | default(60) }}</time-reconnect>

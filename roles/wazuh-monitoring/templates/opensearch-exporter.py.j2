@@ -9,8 +9,12 @@ Metrics exposed:
 - Index statistics (doc count, size, operations)
 """
 
+import base64
 import json
+import os
+import signal
 import ssl
+import sys
 import time
 import urllib.request
 import urllib.error
@@ -19,18 +23,22 @@ from prometheus_client import start_http_server, Gauge, Counter, Info
 # ═══════════════════════════════════════════════════════════════
 # Configuration
 # ═══════════════════════════════════════════════════════════════
-OPENSEARCH_HOST = "{{ wazuh_api_protocol | default('https') }}://localhost:9200"
+OPENSEARCH_HOST = "{{ wazuh_api_protocol | default('https') }}://localhost:{{ wazuh_indexer_http_port | default(9200) }}"
 METRICS_PORT = {{ wazuh_indexer_metrics_port | default(9114) }}
 SCRAPE_INTERVAL = {{ wazuh_manager_exporter_scrape_interval | default(30) }}
 
-# SSL context for self-signed certs
+# SSL context - use CA cert if available, otherwise fall back to unverified
 SSL_CONTEXT = ssl.create_default_context()
-SSL_CONTEXT.check_hostname = False
-SSL_CONTEXT.verify_mode = ssl.CERT_NONE
+_ca_cert = os.environ.get("OPENSEARCH_CA_CERT", "{{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') }}/root-ca.pem")
+if os.path.isfile(_ca_cert):
+    SSL_CONTEXT.load_verify_locations(_ca_cert)
+else:
+    SSL_CONTEXT.check_hostname = False
+    SSL_CONTEXT.verify_mode = ssl.CERT_NONE
 
-# Basic auth if needed (usually internal certs handle this)
-OPENSEARCH_USER = "{{ indexer_admin_user | default('admin') }}"
-OPENSEARCH_PASS = "{{ vault_indexer_admin_password | default('admin') }}"
+# Credentials from environment variables (set via systemd EnvironmentFile)
+OPENSEARCH_USER = os.environ.get("OPENSEARCH_USER", "{{ wazuh_indexer_admin_user | default('admin') }}")
+OPENSEARCH_PASS = os.environ.get("OPENSEARCH_PASS", "")
 
 # ═══════════════════════════════════════════════════════════════
 # Prometheus Metrics Definition
@@ -61,9 +69,9 @@ node_jvm_heap_max_bytes = Gauge('wazuh_indexer_jvm_heap_max_bytes',
     'JVM heap memory max in bytes', ['node'])
 node_jvm_heap_used_percent = Gauge('wazuh_indexer_jvm_heap_used_percent',
     'JVM heap memory usage percentage', ['node'])
-node_jvm_gc_old_count = Counter('wazuh_indexer_jvm_gc_old_collection_count',
+node_jvm_gc_old_count = Gauge('wazuh_indexer_jvm_gc_old_collection_count',
     'JVM old generation GC count', ['node'])
-node_jvm_gc_old_time_ms = Counter('wazuh_indexer_jvm_gc_old_collection_time_ms',
+node_jvm_gc_old_time_ms = Gauge('wazuh_indexer_jvm_gc_old_collection_time_ms',
     'JVM old generation GC time in milliseconds', ['node'])
 
 node_disk_total_bytes = Gauge('wazuh_indexer_disk_total_bytes',
@@ -90,9 +98,9 @@ index_docs_count = Gauge('wazuh_indexer_index_docs_count',
     'Document count per index', ['index'])
 index_store_size_bytes = Gauge('wazuh_indexer_index_store_size_bytes',
     'Store size per index in bytes', ['index'])
-index_search_query_total = Counter('wazuh_indexer_index_search_query_total',
+index_search_query_total = Gauge('wazuh_indexer_index_search_query_total',
     'Total search queries per index', ['index'])
-index_indexing_total = Counter('wazuh_indexer_index_indexing_total',
+index_indexing_total = Gauge('wazuh_indexer_index_indexing_total',
     'Total indexing operations per index', ['index'])
 
 # Wazuh-specific
@@ -120,7 +128,6 @@ def fetch_json(path):
     # Create request with basic auth
     request = urllib.request.Request(url)
     credentials = f"{OPENSEARCH_USER}:{OPENSEARCH_PASS}"
-    import base64
     encoded_credentials = base64.b64encode(credentials.encode()).decode()
     request.add_header("Authorization", f"Basic {encoded_credentials}")
 
@@ -177,7 +184,8 @@ def collect_node_stats():
 
         gc = jvm.get("gc", {}).get("collectors", {})
         old_gc = gc.get("old", {})
-        # Note: Counters should only increase, so we use _total suffix convention
+        node_jvm_gc_old_count.labels(node=node_name).set(old_gc.get("collection_count", 0))
+        node_jvm_gc_old_time_ms.labels(node=node_name).set(old_gc.get("collection_time_in_millis", 0))
 
         # Disk stats
         fs = node_data.get("fs", {})
@@ -232,6 +240,12 @@ def collect_index_stats():
         size_bytes = store.get("size_in_bytes", 0)
         index_store_size_bytes.labels(index=index_name).set(size_bytes)
 
+        search = primaries.get("search", {})
+        index_search_query_total.labels(index=index_name).set(search.get("query_total", 0))
+
+        indexing = primaries.get("indexing", {})
+        index_indexing_total.labels(index=index_name).set(indexing.get("index_total", 0))
+
         # Track Wazuh alerts indices
         if index_name.startswith("wazuh-alerts"):
             wazuh_alert_indices += 1
@@ -270,13 +284,22 @@ def collect_all_metrics():
 # Main Loop
 # ═══════════════════════════════════════════════════════════════
 
+def handle_signal(signum, frame):
+    """Handle shutdown signals gracefully"""
+    print(f"Received signal {signum}, shutting down...")
+    sys.exit(0)
+
 if __name__ == "__main__":
-    print(f"Starting Wazuh OpenSearch Exporter on port {METRICS_PORT}")
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
+
+    bind_addr = os.environ.get("METRICS_BIND_ADDR", "{{ wazuh_exporter_bind_addr | default('127.0.0.1') }}")
+    print(f"Starting Wazuh OpenSearch Exporter on {bind_addr}:{METRICS_PORT}")
     print(f"Scraping OpenSearch at {OPENSEARCH_HOST}")
 
     # Start Prometheus HTTP server
-    start_http_server(METRICS_PORT)
-    print(f"Prometheus metrics available at http://0.0.0.0:{METRICS_PORT}/metrics")
+    start_http_server(METRICS_PORT, addr=bind_addr)
+    print(f"Prometheus metrics available at http://{bind_addr}:{METRICS_PORT}/metrics")
 
     # Initial collection
     collect_all_metrics()

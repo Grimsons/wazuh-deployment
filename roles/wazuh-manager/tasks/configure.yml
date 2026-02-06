@@ -84,11 +84,18 @@
     mode: '0750'
   become: true
 
-- name: Set correct permissions on /var/ossec
+- name: Set correct permissions on /var/ossec writable directories
   ansible.builtin.file:
-    path: /var/ossec
+    path: "{{ item }}"
     state: directory
     owner: wazuh
     group: wazuh
     recurse: true
+  loop:
+    - /var/ossec/etc
+    - /var/ossec/logs
+    - /var/ossec/queue
+    - /var/ossec/var
+    - /var/ossec/tmp
+    - /var/ossec/stats
   become: true

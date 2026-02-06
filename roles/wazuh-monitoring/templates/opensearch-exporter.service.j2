@@ -6,6 +6,9 @@ Wants=wazuh-indexer.service
 
 [Service]
 Type=simple
+User={{ wazuh_exporter_user }}
+Group={{ wazuh_exporter_group }}
+EnvironmentFile=-{{ wazuh_exporter_install_dir }}/opensearch-exporter.env
 ExecStart=/usr/bin/python3 {{ wazuh_exporter_install_dir }}/opensearch-exporter.py
 Restart=always
 RestartSec=10
@@ -17,7 +20,6 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-ReadOnlyPaths=/
 
 # Resource limits
 MemoryMax=256M

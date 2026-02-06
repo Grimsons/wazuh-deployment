@@ -65,8 +65,12 @@ sanitize_alphanum() {
 # Sanitize path (prevent traversal)
 sanitize_path() {
     local path="$1"
-    # Remove any ../ sequences
-    path="${path//\.\.\//}"
+    # Remove ../ sequences iteratively until none remain
+    # Single-pass removal can leave traversal in crafted inputs like "..../"
+    while [[ "$path" == *".."* ]]; do
+        path="${path//\.\.\//}"
+        path="${path//\.\./}"
+    done
     echo "$path" | tr -cd 'a-zA-Z0-9._/-'
 }
 

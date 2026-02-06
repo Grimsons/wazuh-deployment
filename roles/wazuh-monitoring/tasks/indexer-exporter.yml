@@ -33,6 +33,32 @@
     state: present
     executable: pip3
 
+- name: Create exporter service user
+  ansible.builtin.user:
+    name: "{{ wazuh_exporter_user }}"
+    group: "{{ wazuh_exporter_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Create exporter service group
+  ansible.builtin.group:
+    name: "{{ wazuh_exporter_group }}"
+    system: true
+
+- name: Deploy OpenSearch exporter environment file with credentials
+  ansible.builtin.copy:
+    content: |
+      OPENSEARCH_USER={{ wazuh_indexer_admin_user | default('admin') }}
+      OPENSEARCH_PASS={{ wazuh_indexer_admin_password }}
+      OPENSEARCH_CA_CERT={{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') }}/root-ca.pem
+    dest: "{{ wazuh_exporter_install_dir }}/opensearch-exporter.env"
+    mode: "0600"
+    owner: "{{ wazuh_exporter_user }}"
+    group: "{{ wazuh_exporter_group }}"
+  no_log: true
+  notify: Restart opensearch exporter
+
 - name: Deploy OpenSearch metrics exporter script
   ansible.builtin.template:
     src: opensearch-exporter.py.j2
