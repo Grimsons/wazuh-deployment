@@ -1,7 +1,7 @@
 ---
 # Wazuh Manager - Configuration
 
-- name: Configure ossec.conf from template
+- name: Deploy ossec.conf from template
   ansible.builtin.template:
     src: ossec.conf.j2
     dest: /var/ossec/etc/ossec.conf
@@ -10,7 +10,34 @@
     mode: '0640'
     backup: true
   become: true
+  register: manager_config_deployed
   notify: restart wazuh-manager
+
+- name: Validate manager configuration before restart
+  block:
+    - name: Run Wazuh configuration test
+      ansible.builtin.command: /var/ossec/bin/wazuh-logtest-legacy -t
+      become: true
+      register: config_validation
+      changed_when: false
+
+    - name: Configuration validation passed
+      ansible.builtin.debug:
+        msg: "Manager configuration validation: PASSED"
+      when: config_validation.rc == 0
+  rescue:
+    - name: Configuration validation failed
+      ansible.builtin.debug:
+        msg: |
+          WARNING: Manager configuration validation FAILED.
+          Error output: {{ config_validation.stderr | default('Unknown error') }}
+          A backup of the previous config has been preserved by Ansible.
+          Please review the configuration and fix any errors.
+
+    - name: Abort due to invalid configuration
+      ansible.builtin.fail:
+        msg: "Aborting: Wazuh manager configuration is invalid. Fix the errors shown above."
+  when: manager_config_deployed.changed
 
 # Read indexer password from credentials file if not defined
 - name: Check for indexer credentials file

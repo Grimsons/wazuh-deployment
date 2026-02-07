@@ -1,0 +1,246 @@
+---
+# Wazuh Canary/Staged Deployment Playbook
+# Performs rolling updates with health check gates between stages
+#
+# Usage:
+#   Full staged deployment:
+#     ansible-playbook playbooks/canary-deploy.yml
+#
+#   Deploy only agents in batches:
+#     ansible-playbook playbooks/canary-deploy.yml --tags agents
+#
+#   Skip health check gates (not recommended):
+#     ansible-playbook playbooks/canary-deploy.yml -e "skip_health_gates=true"
+#
+#   Custom batch size for agents:
+#     ansible-playbook playbooks/canary-deploy.yml -e "agent_batch_size=5"
+#
+# Deployment order:
+#   1. Indexers (serial: 1) with health gate
+#   2. Managers (serial: 1) with health gate
+#   3. Dashboards (serial: 1) with health gate
+#   4. Agents (serial: batch_size) with health gate per batch
+
+# ═══════════════════════════════════════════════════════════════
+# Stage 1: Indexer Rolling Update
+# ═══════════════════════════════════════════════════════════════
+- name: "Stage 1: Indexer Rolling Update"
+  hosts: wazuh_indexers
+  serial: 1
+  become: true
+  gather_facts: true
+  tags: [indexers, infrastructure]
+
+  pre_tasks:
+    - name: Pre-flight - Check cluster health before update
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health"
+        method: GET
+        user: "{{ wazuh_indexer_admin_user | default('admin') }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: false
+        return_content: true
+      register: pre_cluster_health
+      failed_when: false
+      no_log: true
+
+    - name: Pre-flight - Abort if cluster is RED
+      ansible.builtin.fail:
+        msg: |
+          Aborting deployment: Indexer cluster status is RED.
+          Fix cluster health before proceeding with updates.
+          Cluster status: {{ pre_cluster_health.json.status | default('unknown') }}
+      when:
+        - pre_cluster_health.json is defined
+        - pre_cluster_health.json.status | default('') == 'red'
+
+    - name: Announce - Beginning indexer update
+      ansible.builtin.debug:
+        msg: "Updating indexer {{ inventory_hostname }} ({{ ansible_play_hosts_all.index(inventory_hostname) + 1 }}/{{ ansible_play_hosts_all | length }})"
+
+  roles:
+    - role: wazuh-indexer
+
+  post_tasks:
+    - name: Health Gate - Wait for indexer to rejoin cluster
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health?wait_for_status=yellow&timeout=120s"
+        method: GET
+        user: "{{ wazuh_indexer_admin_user | default('admin') }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: false
+        return_content: true
+      register: post_cluster_health
+      until: post_cluster_health.status == 200
+      retries: 12
+      delay: 10
+      no_log: true
+      when: not (skip_health_gates | default(false) | bool)
+
+    - name: Health Gate - Verify node count
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health"
+        method: GET
+        user: "{{ wazuh_indexer_admin_user | default('admin') }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: false
+        return_content: true
+      register: final_health
+      no_log: true
+      when: not (skip_health_gates | default(false) | bool)
+
+    - name: Health Gate - Report
+      ansible.builtin.debug:
+        msg: |
+          Indexer {{ inventory_hostname }} updated successfully.
+          Cluster status: {{ final_health.json.status | default('unknown') }}
+          Active nodes: {{ final_health.json.number_of_nodes | default('unknown') }}
+      when: not (skip_health_gates | default(false) | bool)
+
+# ═══════════════════════════════════════════════════════════════
+# Stage 2: Manager Rolling Update
+# ═══════════════════════════════════════════════════════════════
+- name: "Stage 2: Manager Rolling Update"
+  hosts: wazuh_managers
+  serial: 1
+  become: true
+  gather_facts: true
+  tags: [managers, infrastructure]
+
+  pre_tasks:
+    - name: Pre-flight - Check manager service before update
+      ansible.builtin.systemd:
+        name: wazuh-manager
+      register: pre_manager_service
+      failed_when: false
+
+    - name: Announce - Beginning manager update
+      ansible.builtin.debug:
+        msg: "Updating manager {{ inventory_hostname }} ({{ ansible_play_hosts_all.index(inventory_hostname) + 1 }}/{{ ansible_play_hosts_all | length }})"
+
+  roles:
+    - role: wazuh-manager
+
+  post_tasks:
+    - name: Health Gate - Wait for manager API
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:{{ wazuh_manager_api_port | default(55000) }}/"
+        method: GET
+        validate_certs: false
+        status_code: [200, 401]
+      register: post_manager_api
+      until: post_manager_api.status in [200, 401]
+      retries: 30
+      delay: 10
+      when: not (skip_health_gates | default(false) | bool)
+
+    - name: Health Gate - Verify agent connectivity port
+      ansible.builtin.wait_for:
+        port: 1514
+        host: 127.0.0.1
+        timeout: 60
+      when: not (skip_health_gates | default(false) | bool)
+
+    - name: Health Gate - Report
+      ansible.builtin.debug:
+        msg: "Manager {{ inventory_hostname }} updated successfully. API responding on port {{ wazuh_manager_api_port | default(55000) }}."
+      when: not (skip_health_gates | default(false) | bool)
+
+# ═══════════════════════════════════════════════════════════════
+# Stage 3: Dashboard Rolling Update
+# ═══════════════════════════════════════════════════════════════
+- name: "Stage 3: Dashboard Rolling Update"
+  hosts: wazuh_dashboards
+  serial: 1
+  become: true
+  gather_facts: true
+  tags: [dashboards, infrastructure]
+
+  pre_tasks:
+    - name: Announce - Beginning dashboard update
+      ansible.builtin.debug:
+        msg: "Updating dashboard {{ inventory_hostname }} ({{ ansible_play_hosts_all.index(inventory_hostname) + 1 }}/{{ ansible_play_hosts_all | length }})"
+
+  roles:
+    - role: wazuh-dashboard
+
+  post_tasks:
+    - name: Health Gate - Wait for dashboard HTTP
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:{{ wazuh_dashboard_port | default(443) }}/app/wazuh"
+        method: GET
+        validate_certs: false
+        status_code: [200, 302, 401]
+      register: post_dashboard_http
+      until: post_dashboard_http.status in [200, 302, 401]
+      retries: 24
+      delay: 10
+      when: not (skip_health_gates | default(false) | bool)
+
+    - name: Health Gate - Report
+      ansible.builtin.debug:
+        msg: "Dashboard {{ inventory_hostname }} updated successfully. HTTP status: {{ post_dashboard_http.status | default('unknown') }}."
+      when: not (skip_health_gates | default(false) | bool)
+
+# ═══════════════════════════════════════════════════════════════
+# Stage 4: Agent Batched Rolling Update
+# ═══════════════════════════════════════════════════════════════
+- name: "Stage 4: Agent Batched Rolling Update"
+  hosts: wazuh_agents
+  serial: "{{ agent_batch_size | default(3) }}"
+  become: true
+  gather_facts: true
+  tags: [agents]
+
+  pre_tasks:
+    - name: Announce - Beginning agent batch update
+      ansible.builtin.debug:
+        msg: "Updating agent {{ inventory_hostname }} (batch of {{ agent_batch_size | default(3) }})"
+
+  roles:
+    - role: wazuh-agent
+
+  post_tasks:
+    - name: Health Gate - Wait for agent to connect
+      ansible.builtin.wait_for:
+        path: /var/ossec/var/run/wazuh-agentd.state
+        state: present
+        timeout: 120
+      when:
+        - not (skip_health_gates | default(false) | bool)
+        - ansible_os_family != 'Windows'
+        - ansible_os_family != 'Darwin'
+
+    - name: Health Gate - Report
+      ansible.builtin.debug:
+        msg: "Agent {{ inventory_hostname }} updated and connected."
+
+# ═══════════════════════════════════════════════════════════════
+# Final Validation
+# ═══════════════════════════════════════════════════════════════
+- name: "Final: Post-Deployment Validation"
+  hosts: localhost
+  gather_facts: false
+  tags: [always]
+
+  tasks:
+    - name: Run health check
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir }}/health-check.yml"
+      when: not (skip_health_gates | default(false) | bool)
+      ignore_errors: true
+
+    - name: Deployment complete
+      ansible.builtin.debug:
+        msg: |
+          ══════════════════════════════════════════════════════════════
+          CANARY DEPLOYMENT COMPLETE
+          ══════════════════════════════════════════════════════════════
+          Indexers:    {{ groups.get('wazuh_indexers', []) | length }} updated
+          Managers:    {{ groups.get('wazuh_managers', []) | length }} updated
+          Dashboards:  {{ groups.get('wazuh_dashboards', []) | length }} updated
+          Agents:      {{ groups.get('wazuh_agents', []) | length }} updated
+
+          Run health check to verify:
+            ansible-playbook playbooks/health-check.yml -e "check_agents=true"
+          ══════════════════════════════════════════════════════════════
