@@ -72,6 +72,9 @@
 {% for directory in wazuh_agent_fim_directories | default(['/etc', '/usr/bin', '/usr/sbin', '/bin', '/sbin', '/boot']) %}
     <directories check_all="yes" realtime="yes">{{ directory }}</directories>
 {% endfor %}
+{% for directory in wazuh_agent_fim_extra_directories | default([]) %}
+    <directories check_all="yes" realtime="yes">{{ directory }}</directories>
+{% endfor %}
     <ignore>/etc/mtab</ignore>
     <ignore>/etc/hosts.deny</ignore>
     <ignore>/etc/mail/statistics</ignore>
@@ -199,6 +202,44 @@
     <log_format>full_command</log_format>
     <command>last -n 20</command>
     <frequency>360</frequency>
+  </localfile>
+
+{% if wazuh_agent_auditd_enabled | default(true) %}
+  <!-- Auditd log collection (MITRE ATT&CK syscall-level monitoring) -->
+  <localfile>
+    <log_format>audit</log_format>
+    <location>/var/log/audit/audit.log</location>
+  </localfile>
+{% endif %}
+{% endif %}
+{% if wazuh_agent_process_monitoring_enabled | default(true) %}
+  <!-- Process/Command Monitoring - Detect suspicious activity -->
+  <localfile>
+    <log_format>full_command</log_format>
+    <command>ps auxwww --sort=-%mem | head -20</command>
+    <alias>top processes by memory</alias>
+    <frequency>{{ wazuh_agent_process_monitoring_interval | default(300) }}</frequency>
+  </localfile>
+
+  <localfile>
+    <log_format>full_command</log_format>
+    <command>ss -tulnp</command>
+    <alias>listening sockets</alias>
+    <frequency>{{ wazuh_agent_process_monitoring_interval | default(300) }}</frequency>
+  </localfile>
+
+  <localfile>
+    <log_format>full_command</log_format>
+    <command>find /tmp /var/tmp /dev/shm -type f -executable 2>/dev/null | head -20</command>
+    <alias>executable files in temp directories</alias>
+    <frequency>{{ wazuh_agent_process_monitoring_interval | default(300) }}</frequency>
+  </localfile>
+
+  <localfile>
+    <log_format>full_command</log_format>
+    <command>find /tmp /var/tmp /dev/shm -name ".*" -type f 2>/dev/null | head -20</command>
+    <alias>hidden files in temp directories</alias>
+    <frequency>{{ wazuh_agent_process_monitoring_interval | default(300) }}</frequency>
   </localfile>
 {% endif %}
 

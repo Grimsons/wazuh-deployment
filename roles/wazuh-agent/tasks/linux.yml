@@ -68,6 +68,52 @@
   when: ansible_os_family == 'RedHat'
   notify: restart wazuh-agent
 
+# ─────────────────────────────────────────────────────────────
+# Auditd Integration - Syscall-level monitoring for MITRE ATT&CK
+# ─────────────────────────────────────────────────────────────
+- name: Install auditd package (Debian/Ubuntu)
+  ansible.builtin.apt:
+    name:
+      - auditd
+      - audispd-plugins
+    state: present
+  become: true
+  when:
+    - wazuh_agent_auditd_enabled | default(true)
+    - ansible_os_family == 'Debian'
+
+- name: Install auditd package (RHEL/CentOS)
+  ansible.builtin.dnf:
+    name:
+      - audit
+      - audit-libs
+    state: present
+  become: true
+  when:
+    - wazuh_agent_auditd_enabled | default(true)
+    - ansible_os_family == 'RedHat'
+
+- name: Deploy Wazuh auditd rules
+  ansible.builtin.copy:
+    src: audit-wazuh.rules
+    dest: /etc/audit/rules.d/wazuh.rules
+    owner: root
+    group: root
+    mode: '0640'
+  become: true
+  when:
+    - wazuh_agent_auditd_enabled | default(true)
+    - wazuh_agent_auditd_rules_deploy | default(true)
+  notify: restart auditd
+
+- name: Enable and start auditd
+  ansible.builtin.systemd:
+    name: auditd
+    state: started
+    enabled: true
+  become: true
+  when: wazuh_agent_auditd_enabled | default(true)
+
 - name: Reload systemd daemon
   ansible.builtin.systemd:
     daemon_reload: true

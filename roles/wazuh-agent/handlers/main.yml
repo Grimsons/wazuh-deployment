@@ -17,3 +17,8 @@
   ansible.builtin.command: /Library/Ossec/bin/wazuh-control restart
   become: true
   changed_when: false
+
+- name: restart auditd
+  ansible.builtin.command: service auditd restart
+  become: true
+  changed_when: true
