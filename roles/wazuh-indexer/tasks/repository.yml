@@ -1,16 +1,49 @@
 ---
 # Wazuh Indexer - Repository Configuration
 
-- name: Import Wazuh GPG key (Debian/Ubuntu)
-  ansible.builtin.apt_key:
-    url: "{{ wazuh_repo_gpg_key }}"
-    state: present
+- name: Ensure keyrings directory exists (Debian/Ubuntu)
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
   become: true
   when: ansible_os_family == 'Debian'
 
-- name: Add Wazuh repository (Debian/Ubuntu)
+- name: Download Wazuh GPG key (Debian/Ubuntu)
+  ansible.builtin.get_url:
+    url: "{{ wazuh_repo_gpg_key }}"
+    dest: /etc/apt/keyrings/wazuh.gpg
+    mode: '0644'
+  become: true
+  when: ansible_os_family == 'Debian'
+
+- name: Dearmor Wazuh GPG key if needed (Debian/Ubuntu)
+  ansible.builtin.shell: |
+    set -o pipefail
+    if file /etc/apt/keyrings/wazuh.gpg | grep -q 'PGP public key block Public-Key (old)'; then
+      echo "Key already in binary format"
+    else
+      gpg --dearmor < /etc/apt/keyrings/wazuh.gpg > /etc/apt/keyrings/wazuh.gpg.tmp && mv /etc/apt/keyrings/wazuh.gpg.tmp /etc/apt/keyrings/wazuh.gpg
+      echo "Key dearmored"
+    fi
+  args:
+    executable: /bin/bash
+  become: true
+  register: dearmor_result
+  changed_when: "'dearmored' in dearmor_result.stdout"
+  when: ansible_os_family == 'Debian'
+
+- name: Remove legacy apt-key entry if present (Debian/Ubuntu)
+  ansible.builtin.apt_key:
+    url: "{{ wazuh_repo_gpg_key }}"
+    state: absent
+  become: true
+  when: ansible_os_family == 'Debian'
+  ignore_errors: true
+
+- name: Add Wazuh repository with signed-by (Debian/Ubuntu)
   ansible.builtin.apt_repository:
-    repo: "deb {{ wazuh_repo_url_apt }} stable main"
+    repo: "deb [signed-by=/etc/apt/keyrings/wazuh.gpg] {{ wazuh_repo_url_apt }} stable main"
     state: present
     filename: wazuh
     update_cache: true

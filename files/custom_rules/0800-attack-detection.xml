@@ -2,7 +2,7 @@
   Wazuh Custom Attack Detection Rules
   Deployed by Ansible
 
-  Rule ID range: 100100-100199
+  Rule ID range: 800100-800199 (avoids SOCFortress community rule ranges)
   These rules detect common attack patterns with MITRE ATT&CK mapping.
 -->
 
@@ -11,7 +11,7 @@
   <!-- ═══════════════════════════════════════════════════════════════
        Reverse Shell Detection (T1059 - Command and Scripting Interpreter)
        ═══════════════════════════════════════════════════════════════ -->
-  <rule id="100100" level="14">
+  <rule id="800100" level="14">
     <if_sid>530,531</if_sid>
     <regex>bash -i >& /dev/tcp|bash -i >& /dev/udp|nc -e /bin|ncat -e /bin|python.*socket.*connect|perl.*socket.*INET|ruby.*TCPSocket|php.*fsockopen.*exec</regex>
     <description>Possible reverse shell detected: suspicious network-capable command execution</description>
@@ -22,7 +22,7 @@
     <group>attack,reverse_shell,</group>
   </rule>
 
-  <rule id="100101" level="14">
+  <rule id="800101" level="14">
     <if_sid>530,531</if_sid>
     <regex>mkfifo.*nc |mknod.*nc |/dev/tcp/|socat.*EXEC:|exec \d+<>/dev/tcp/</regex>
     <description>Possible reverse shell detected: named pipe or /dev/tcp redirection</description>
@@ -36,7 +36,7 @@
   <!-- ═══════════════════════════════════════════════════════════════
        Credential Dumping (T1003 - OS Credential Dumping)
        ═══════════════════════════════════════════════════════════════ -->
-  <rule id="100110" level="14">
+  <rule id="800110" level="14">
     <if_sid>530,531</if_sid>
     <regex>mimikatz|sekurlsa|lsadump|pypykatz|gsecdump|wce.exe|lazagne|hashdump</regex>
     <description>Credential dumping tool detected</description>
@@ -46,7 +46,7 @@
     <group>attack,credential_access,</group>
   </rule>
 
-  <rule id="100111" level="12">
+  <rule id="800111" level="12">
     <if_sid>530,531</if_sid>
     <regex>unshadow |john |hashcat |hydra |medusa |ncrack |patator</regex>
     <description>Password cracking/brute-force tool execution detected</description>
@@ -56,7 +56,7 @@
     <group>attack,credential_access,</group>
   </rule>
 
-  <rule id="100112" level="12">
+  <rule id="800112" level="12">
     <if_sid>530,531</if_sid>
     <regex>/etc/shadow|/etc/gshadow|SAM.*SYSTEM.*SECURITY|secretsdump</regex>
     <description>Possible credential file access or extraction</description>
@@ -69,7 +69,7 @@
   <!-- ═══════════════════════════════════════════════════════════════
        Container Escape (T1611 - Escape to Host)
        ═══════════════════════════════════════════════════════════════ -->
-  <rule id="100120" level="14">
+  <rule id="800120" level="14">
     <if_sid>530,531</if_sid>
     <regex>nsenter.*-t.*1|docker.*--privileged|mount.*/proc/.*ns/|cdk.*exploit|/var/run/docker.sock</regex>
     <description>Possible container escape attempt detected</description>
@@ -79,7 +79,7 @@
     <group>attack,container_escape,</group>
   </rule>
 
-  <rule id="100121" level="12">
+  <rule id="800121" level="12">
     <if_sid>530,531</if_sid>
     <regex>capsh.*--print|cat.*/proc/1/cgroup|mount.*cgroup|/proc/sysrq-trigger</regex>
     <description>Container environment reconnaissance or breakout attempt</description>
@@ -93,7 +93,7 @@
   <!-- ═══════════════════════════════════════════════════════════════
        SSH Tunneling / Port Forwarding (T1572 - Protocol Tunneling)
        ═══════════════════════════════════════════════════════════════ -->
-  <rule id="100130" level="10">
+  <rule id="800130" level="10">
     <if_sid>530,531</if_sid>
     <regex>ssh.*-L \d+:|ssh.*-R \d+:|ssh.*-D \d+|ssh.*-w \d+:\d+|sshuttle|chisel </regex>
     <description>SSH tunnel or port forwarding detected</description>
@@ -106,7 +106,7 @@
   <!-- ═══════════════════════════════════════════════════════════════
        Ransomware Indicators (T1486 - Data Encrypted for Impact)
        ═══════════════════════════════════════════════════════════════ -->
-  <rule id="100140" level="14">
+  <rule id="800140" level="14">
     <if_sid>550,553,554</if_sid>
     <regex>.encrypted$|.locked$|.crypted$|.crypt$|.enc$|.ransom$|README.*DECRYPT|RECOVER.*FILES|HOW.*UNLOCK</regex>
     <description>Possible ransomware activity: mass file encryption or ransom note detected</description>
@@ -119,7 +119,7 @@
   <!-- ═══════════════════════════════════════════════════════════════
        Privilege Escalation via SUID/SGID (T1548.001)
        ═══════════════════════════════════════════════════════════════ -->
-  <rule id="100150" level="10">
+  <rule id="800150" level="10">
     <if_group>syscheck</if_group>
     <regex>Permissions changed.*suid|Permissions changed.*sgid</regex>
     <field name="changed_attributes">permission</field>
@@ -133,7 +133,7 @@
   <!-- ═══════════════════════════════════════════════════════════════
        Suspicious Cron Modification (T1053.003 - Cron)
        ═══════════════════════════════════════════════════════════════ -->
-  <rule id="100151" level="10">
+  <rule id="800151" level="10">
     <if_group>syscheck</if_group>
     <match>/etc/cron|/var/spool/cron</match>
     <description>Cron job modification detected - review for persistence</description>
@@ -146,7 +146,7 @@
   <!-- ═══════════════════════════════════════════════════════════════
        Systemd Service Persistence (T1543.002)
        ═══════════════════════════════════════════════════════════════ -->
-  <rule id="100152" level="10">
+  <rule id="800152" level="10">
     <if_group>syscheck</if_group>
     <match>/etc/systemd/system|/usr/lib/systemd/system</match>
     <regex>.service$|.timer$</regex>
@@ -160,7 +160,7 @@
   <!-- ═══════════════════════════════════════════════════════════════
        Authorized Keys Modification (T1098.004)
        ═══════════════════════════════════════════════════════════════ -->
-  <rule id="100153" level="10">
+  <rule id="800153" level="10">
     <if_group>syscheck</if_group>
     <match>authorized_keys</match>
     <description>SSH authorized_keys file modified - review for unauthorized access persistence</description>
@@ -173,7 +173,7 @@
   <!-- ═══════════════════════════════════════════════════════════════
        Reconnaissance Commands (T1082, T1016, T1049)
        ═══════════════════════════════════════════════════════════════ -->
-  <rule id="100160" level="6">
+  <rule id="800160" level="6">
     <if_sid>530,531</if_sid>
     <regex>whoami|id -a|uname -a|cat /etc/os-release|hostnamectl|systemctl list-units</regex>
     <description>System reconnaissance command executed</description>
@@ -183,7 +183,7 @@
     <group>recon,discovery,</group>
   </rule>
 
-  <rule id="100161" level="8">
+  <rule id="800161" level="8">
     <if_sid>530,531</if_sid>
     <regex>nmap |masscan |zmap |rustscan |enum4linux|nbtscan|smbclient.*-L</regex>
     <description>Network scanning tool execution detected</description>
@@ -196,7 +196,7 @@
   <!-- ═══════════════════════════════════════════════════════════════
        Defense Evasion (T1070 - Indicator Removal)
        ═══════════════════════════════════════════════════════════════ -->
-  <rule id="100170" level="12">
+  <rule id="800170" level="12">
     <if_sid>530,531</if_sid>
     <regex>history -c|history -w /dev/null|export HISTSIZE=0|unset HISTFILE|rm.*\.bash_history|shred.*\.bash_history</regex>
     <description>Shell history clearing detected - possible evidence tampering</description>
@@ -206,7 +206,7 @@
     <group>attack,defense_evasion,</group>
   </rule>
 
-  <rule id="100171" level="12">
+  <rule id="800171" level="12">
     <if_sid>530,531</if_sid>
     <regex>rm -rf /var/log|truncate.*-s 0.*/var/log|> /var/log/|shred.*/var/log/</regex>
     <description>Log file deletion or truncation detected - possible evidence tampering</description>
@@ -219,7 +219,7 @@
   <!-- ═══════════════════════════════════════════════════════════════
        Kernel Module Loading (T1547.006)
        ═══════════════════════════════════════════════════════════════ -->
-  <rule id="100180" level="10">
+  <rule id="800180" level="10">
     <if_sid>80700,80701,80702</if_sid>
     <field name="audit.key">kernel_module</field>
     <description>Kernel module operation detected via auditd</description>
@@ -232,7 +232,7 @@
   <!-- ═══════════════════════════════════════════════════════════════
        LD_PRELOAD Hijacking (T1574.006)
        ═══════════════════════════════════════════════════════════════ -->
-  <rule id="100181" level="12">
+  <rule id="800181" level="12">
     <if_group>syscheck</if_group>
     <match>/etc/ld.so.preload</match>
     <description>ld.so.preload modified - possible library injection persistence</description>
@@ -245,7 +245,7 @@
   <!-- ═══════════════════════════════════════════════════════════════
        Data Exfiltration Indicators (T1048)
        ═══════════════════════════════════════════════════════════════ -->
-  <rule id="100190" level="10">
+  <rule id="800190" level="10">
     <if_sid>530,531</if_sid>
     <regex>curl.*-T |curl.*--upload|wget.*--post-file|scp.*@.*:|rsync.*@.*:</regex>
     <description>Possible data exfiltration: file upload to external destination</description>
