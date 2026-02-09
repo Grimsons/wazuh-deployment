@@ -19,9 +19,17 @@ wazuh_agent_notify_time: 10
 wazuh_agent_time_reconnect: 60
 wazuh_agent_auto_restart: true
 
+# Auditd integration (Linux only)
+wazuh_agent_auditd_enabled: true
+wazuh_agent_auditd_rules_deploy: true
+
+# Process/command monitoring
+wazuh_agent_process_monitoring_enabled: true
+wazuh_agent_process_monitoring_interval: 300
+
 # File integrity monitoring
 wazuh_agent_fim_enabled: true
-wazuh_agent_fim_frequency: 43200
+wazuh_agent_fim_frequency: 21600
 wazuh_agent_fim_directories:
   - /etc
   - /usr/bin
@@ -29,6 +37,20 @@ wazuh_agent_fim_directories:
   - /bin
   - /sbin
   - /boot
+wazuh_agent_fim_extra_directories:
+  - /root/.ssh/authorized_keys
+  - /etc/cron.d
+  - /etc/cron.daily
+  - /etc/cron.hourly
+  - /etc/cron.weekly
+  - /etc/cron.monthly
+  - /var/spool/cron
+  - /etc/systemd/system
+  - /usr/lib/systemd/system
+  - /etc/ld.so.preload
+  - /etc/ld.so.conf.d
+  - /etc/sudoers.d
+  - /etc/pam.d
 
 # Rootcheck
 wazuh_agent_rootcheck_enabled: true

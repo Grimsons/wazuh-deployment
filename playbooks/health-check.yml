@@ -247,6 +247,65 @@
           URL:              https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}
           ═══════════════════════════════════════════════════════════════
 
+- name: "End-to-End Data Flow Validation"
+  hosts: wazuh_managers
+  become: true
+  gather_facts: false
+  tags: [e2e, dataflow]
+  tasks:
+    - name: "E2E: Inject test alert on manager"
+      ansible.builtin.shell: |
+        /var/ossec/bin/wazuh-logtest-legacy <<< '{"timestamp":"{{ ansible_date_time.iso8601 | default("now") }}","rule":{"level":3,"description":"E2E health check test alert","id":"100099"},"agent":{"id":"000","name":"e2e-test"},"manager":{"name":"{{ inventory_hostname }}"},"full_log":"E2E-HEALTH-CHECK-{{ ansible_date_time.epoch | default("0") }}"}'
+      register: test_alert_inject
+      changed_when: false
+      failed_when: false
+      run_once: true
+      when: check_e2e | default(false) | bool
+
+    - name: "E2E: Check alerts are flowing to indexer"
+      ansible.builtin.uri:
+        url: "https://{{ wazuh_indexer_nodes[0].ip }}:{{ wazuh_indexer_http_port | default(9200) }}/wazuh-alerts-*/_count"
+        method: GET
+        user: "{{ wazuh_indexer_admin_user | default('admin') }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: false
+        return_content: true
+      register: alert_count
+      failed_when: false
+      no_log: true
+      run_once: true
+      when: check_e2e | default(false) | bool
+
+    - name: "E2E: Check Filebeat is forwarding"
+      ansible.builtin.shell: |
+        filebeat test output 2>&1 | head -5
+      register: filebeat_test
+      changed_when: false
+      failed_when: false
+      when: check_e2e | default(false) | bool
+
+    - name: "E2E: Check manager event queue"
+      ansible.builtin.shell: |
+        /var/ossec/bin/wazuh-control info 2>/dev/null | grep -E "events_dropped|events_received" || echo "Queue stats not available"
+      register: queue_stats
+      changed_when: false
+      failed_when: false
+      when: check_e2e | default(false) | bool
+
+    - name: "E2E: Display data flow results"
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════════════════════
+          END-TO-END DATA FLOW - {{ inventory_hostname }}
+          ═══════════════════════════════════════════════════════════════
+          Alert count in indexer: {{ alert_count.json.count | default('N/A') }}
+          Filebeat output test:  {{ 'OK' if filebeat_test.rc | default(1) == 0 else 'ISSUE' }}
+          {{ filebeat_test.stdout | default('') }}
+          Queue stats: {{ queue_stats.stdout | default('N/A') }}
+          ═══════════════════════════════════════════════════════════════
+      run_once: true
+      when: check_e2e | default(false) | bool
+
 - name: Health Summary
   hosts: localhost
   gather_facts: false

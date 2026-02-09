@@ -226,6 +226,75 @@
     <executable>route-null</executable>
     <timeout_allowed>yes</timeout_allowed>
   </command>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       Active Response Rules
+       These rules are COMMENTED OUT by default. To enable, uncomment
+       the desired <active-response> blocks below.
+
+       IMPORTANT: Test in a staging environment before enabling in production.
+       Active responses can block legitimate traffic if rules are too aggressive.
+       ═══════════════════════════════════════════════════════════════ -->
+
+  <!-- SSH Brute Force Protection (Rule 5763 = multiple auth failures)
+       Action: Block attacking IP via firewall for 30 minutes
+  <active-response>
+    <command>firewall-drop</command>
+    <location>local</location>
+    <rules_id>5763</rules_id>
+    <timeout>1800</timeout>
+  </active-response>
+  -->
+
+  <!-- Repeated SSH Auth Failures - Disable Account (Rule 5720 = multiple failures same user)
+       Action: Disable the targeted user account for 1 hour
+  <active-response>
+    <command>disable-account</command>
+    <location>local</location>
+    <rules_id>5720</rules_id>
+    <timeout>3600</timeout>
+  </active-response>
+  -->
+
+  <!-- Web Application Attack Protection (Rule group web_attack)
+       Action: Block attacking IP via firewall for 10 minutes
+  <active-response>
+    <command>firewall-drop</command>
+    <location>local</location>
+    <rules_group>web_attack</rules_group>
+    <timeout>600</timeout>
+  </active-response>
+  -->
+
+  <!-- SQL Injection Attempt (Rule group sql_injection)
+       Action: Block via host-deny for 1 hour
+  <active-response>
+    <command>host-deny</command>
+    <location>local</location>
+    <rules_group>sql_injection</rules_group>
+    <timeout>3600</timeout>
+  </active-response>
+  -->
+
+  <!-- Network Scan Detection (Rule 581 = port scan)
+       Action: Null-route scanning IP for 30 minutes
+  <active-response>
+    <command>route-null</command>
+    <location>local</location>
+    <rules_id>581</rules_id>
+    <timeout>1800</timeout>
+  </active-response>
+  -->
+
+  <!-- High-Severity Alert Auto-Response (level >= 12)
+       Action: Block IP via firewall for 1 hour
+  <active-response>
+    <command>firewall-drop</command>
+    <location>all</location>
+    <level>12</level>
+    <timeout>3600</timeout>
+  </active-response>
+  -->
 {% endif %}
 
   <!-- Remote Syslog -->

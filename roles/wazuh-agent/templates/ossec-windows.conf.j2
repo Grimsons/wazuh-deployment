@@ -90,6 +90,17 @@
     <windows_registry>HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\RunOnce</windows_registry>
     <windows_registry arch="both">HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\RunOnceEx</windows_registry>
     <windows_registry arch="both">HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\SystemRestore</windows_registry>
+    <!-- Persistence: Services (T1543.003) -->
+    <windows_registry arch="both">HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services</windows_registry>
+    <!-- Persistence: Winlogon (T1547.004) -->
+    <windows_registry arch="both">HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Winlogon</windows_registry>
+    <!-- Persistence: Image File Execution Options (T1546.012) -->
+    <windows_registry arch="both">HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Image File Execution Options</windows_registry>
+    <!-- Persistence: User-level Run keys -->
+    <windows_registry arch="both">HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run</windows_registry>
+    <windows_registry arch="both">HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\RunOnce</windows_registry>
+    <!-- Security policy -->
+    <windows_registry arch="both">HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies</windows_registry>
     <registry_ignore>HKEY_LOCAL_MACHINE\Security\Policy\Secrets</registry_ignore>
     <registry_ignore>HKEY_LOCAL_MACHINE\Security\SAM\Domains\Account\Users</registry_ignore>
     <registry_ignore type="sregex">\Enum$</registry_ignore>
@@ -137,6 +148,58 @@
 
   <localfile>
     <location>Microsoft-Windows-Windows Firewall With Advanced Security/Firewall</location>
+    <log_format>eventchannel</log_format>
+  </localfile>
+
+  <!-- Windows Defender / Antimalware (T1562.001 - Disable or Modify Tools) -->
+  <localfile>
+    <location>Microsoft-Windows-Windows Defender/Operational</location>
+    <log_format>eventchannel</log_format>
+  </localfile>
+
+  <!-- WMI Activity (T1047 - Windows Management Instrumentation) -->
+  <localfile>
+    <location>Microsoft-Windows-WMI-Activity/Operational</location>
+    <log_format>eventchannel</log_format>
+  </localfile>
+
+  <!-- Task Scheduler (T1053.005 - Scheduled Task) -->
+  <localfile>
+    <location>Microsoft-Windows-TaskScheduler/Operational</location>
+    <log_format>eventchannel</log_format>
+  </localfile>
+
+  <!-- Remote Desktop (T1021.001 - Remote Desktop Protocol) -->
+  <localfile>
+    <location>Microsoft-Windows-TerminalServices-LocalSessionManager/Operational</location>
+    <log_format>eventchannel</log_format>
+  </localfile>
+
+  <localfile>
+    <location>Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational</location>
+    <log_format>eventchannel</log_format>
+  </localfile>
+
+  <!-- DNS Client (T1071.004 - DNS) -->
+  <localfile>
+    <location>Microsoft-Windows-DNS-Client/Operational</location>
+    <log_format>eventchannel</log_format>
+  </localfile>
+
+  <!-- Windows bits transfer (T1197 - BITS Jobs) -->
+  <localfile>
+    <location>Microsoft-Windows-Bits-Client/Operational</location>
+    <log_format>eventchannel</log_format>
+  </localfile>
+
+  <!-- AppLocker (application whitelisting) -->
+  <localfile>
+    <location>Microsoft-Windows-AppLocker/EXE and DLL</location>
+    <log_format>eventchannel</log_format>
+  </localfile>
+
+  <localfile>
+    <location>Microsoft-Windows-AppLocker/MSI and Script</location>
     <log_format>eventchannel</log_format>
   </localfile>
 {% endif %}

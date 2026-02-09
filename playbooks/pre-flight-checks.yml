@@ -295,6 +295,110 @@
         label: "{{ item.item.port | default('N/A') }}"
       when: dashboard_ports.results is defined
 
+- name: Pre-Flight Checks - Network Segmentation Validation
+  hosts: all
+  gather_facts: false
+  tags: [network, segmentation]
+  tasks:
+    - name: "Segmentation: Agent -> Manager (port 1514/tcp)"
+      ansible.builtin.wait_for:
+        host: "{{ item.ip }}"
+        port: 1514
+        timeout: 5
+        state: started
+      loop: "{{ wazuh_manager_nodes | default([]) }}"
+      loop_control:
+        label: "{{ inventory_hostname }} -> {{ item.ip }}:1514"
+      register: agent_to_manager_1514
+      ignore_errors: true
+      when: inventory_hostname in groups.get('wazuh_agents', [])
+
+    - name: "Segmentation: Agent -> Manager enrollment (port 1515/tcp)"
+      ansible.builtin.wait_for:
+        host: "{{ item.ip }}"
+        port: 1515
+        timeout: 5
+        state: started
+      loop: "{{ wazuh_manager_nodes | default([]) }}"
+      loop_control:
+        label: "{{ inventory_hostname }} -> {{ item.ip }}:1515"
+      register: agent_to_manager_1515
+      ignore_errors: true
+      when: inventory_hostname in groups.get('wazuh_agents', [])
+
+    - name: "Segmentation: Manager -> Indexer (port {{ wazuh_indexer_http_port | default(9200) }}/tcp)"
+      ansible.builtin.wait_for:
+        host: "{{ item.ip }}"
+        port: "{{ wazuh_indexer_http_port | default(9200) }}"
+        timeout: 5
+        state: started
+      loop: "{{ wazuh_indexer_nodes | default([]) }}"
+      loop_control:
+        label: "{{ inventory_hostname }} -> {{ item.ip }}:{{ wazuh_indexer_http_port | default(9200) }}"
+      register: manager_to_indexer
+      ignore_errors: true
+      when: inventory_hostname in groups.get('wazuh_managers', [])
+
+    - name: "Segmentation: Dashboard -> Indexer (port {{ wazuh_indexer_http_port | default(9200) }}/tcp)"
+      ansible.builtin.wait_for:
+        host: "{{ item.ip }}"
+        port: "{{ wazuh_indexer_http_port | default(9200) }}"
+        timeout: 5
+        state: started
+      loop: "{{ wazuh_indexer_nodes | default([]) }}"
+      loop_control:
+        label: "{{ inventory_hostname }} -> {{ item.ip }}:{{ wazuh_indexer_http_port | default(9200) }}"
+      register: dashboard_to_indexer
+      ignore_errors: true
+      when: inventory_hostname in groups.get('wazuh_dashboards', [])
+
+    - name: "Segmentation: Dashboard -> Manager API (port {{ wazuh_manager_api_port | default(55000) }}/tcp)"
+      ansible.builtin.wait_for:
+        host: "{{ item.ip }}"
+        port: "{{ wazuh_manager_api_port | default(55000) }}"
+        timeout: 5
+        state: started
+      loop: "{{ wazuh_manager_nodes | default([]) }}"
+      loop_control:
+        label: "{{ inventory_hostname }} -> {{ item.ip }}:{{ wazuh_manager_api_port | default(55000) }}"
+      register: dashboard_to_manager_api
+      ignore_errors: true
+      when: inventory_hostname in groups.get('wazuh_dashboards', [])
+
+    - name: "Segmentation: Indexer -> Indexer transport (port {{ wazuh_indexer_transport_port | default(9300) }}/tcp)"
+      ansible.builtin.wait_for:
+        host: "{{ item.ip }}"
+        port: "{{ wazuh_indexer_transport_port | default(9300) }}"
+        timeout: 5
+        state: started
+      loop: "{{ wazuh_indexer_nodes | default([]) }}"
+      loop_control:
+        label: "{{ inventory_hostname }} -> {{ item.ip }}:{{ wazuh_indexer_transport_port | default(9300) }}"
+      register: indexer_to_indexer
+      ignore_errors: true
+      when:
+        - inventory_hostname in groups.get('wazuh_indexers', [])
+        - item.ip != ansible_default_ipv4.address | default('')
+
+    - name: Report network segmentation results
+      ansible.builtin.debug:
+        msg: |
+          Network Segmentation Validation for {{ inventory_hostname }}:
+          {% if inventory_hostname in groups.get('wazuh_agents', []) %}
+          Agent -> Manager (1514): {{ 'OK' if agent_to_manager_1514 is not failed else 'BLOCKED' }}
+          Agent -> Manager (1515): {{ 'OK' if agent_to_manager_1515 is not failed else 'BLOCKED' }}
+          {% endif %}
+          {% if inventory_hostname in groups.get('wazuh_managers', []) %}
+          Manager -> Indexer ({{ wazuh_indexer_http_port | default(9200) }}): {{ 'OK' if manager_to_indexer is not failed else 'BLOCKED' }}
+          {% endif %}
+          {% if inventory_hostname in groups.get('wazuh_dashboards', []) %}
+          Dashboard -> Indexer ({{ wazuh_indexer_http_port | default(9200) }}): {{ 'OK' if dashboard_to_indexer is not failed else 'BLOCKED' }}
+          Dashboard -> Manager API ({{ wazuh_manager_api_port | default(55000) }}): {{ 'OK' if dashboard_to_manager_api is not failed else 'BLOCKED' }}
+          {% endif %}
+          {% if inventory_hostname in groups.get('wazuh_indexers', []) %}
+          Indexer -> Indexer transport ({{ wazuh_indexer_transport_port | default(9300) }}): {{ 'OK' if indexer_to_indexer is not failed else 'BLOCKED/Single node' }}
+          {% endif %}
+
 - name: Pre-Flight Checks - DNS Resolution
   hosts: all
   gather_facts: false
