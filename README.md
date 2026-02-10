@@ -616,27 +616,66 @@ wazuh_custom_rules:
 
 ## Agent Groups
 
-Define agent groups with custom configurations:
+Agent groups are **pre-created during deployment** so they appear in the Wazuh Dashboard immediately, ready for agent assignment. Group configurations are pushed from the Manager to agents and are **additive** to the agent's local `ossec.conf` - they add role-specific monitoring on top of the platform-specific base config.
+
+### Default Groups
+
+| Group | OS | Description | Key Additions |
+|-------|-----|-------------|---------------|
+| `linux-servers` | Linux | General-purpose servers | FIM on `/opt`, `/root/.ssh`, cron directories |
+| `linux-web-servers` | Linux | Nginx, Apache, HAProxy | Web logs, `/var/www` FIM with change tracking |
+| `linux-db-servers` | Linux | MySQL, PostgreSQL, MongoDB | Database logs, config FIM, data dir ignores |
+| `linux-docker-hosts` | Linux | Docker/container hosts | Docker listener wodle, `/etc/docker` FIM |
+| `windows-servers` | Windows | General-purpose servers | IIS FIM, server baseline labels |
+| `windows-dc` | Windows | Domain Controllers | AD event channels, NTDS/SYSVOL/GPO FIM, AD registry |
+| `windows-workstations` | Windows | End-user desktops | User startup FIM, Downloads monitoring (executables) |
+| `macos-endpoints` | macOS | Workstations/laptops | User preferences, shell profile FIM |
+
+### Assigning Agents to Groups
+
+After agents enroll, assign them to groups via:
+
+```bash
+# CLI (on the Manager)
+/var/ossec/bin/agent_groups -a -i <agent_id> -g linux-web-servers
+
+# API
+curl -k -X PUT "https://manager:55000/agents/<agent_id>/group/linux-web-servers" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Or use the Wazuh Dashboard UI: Agents → Select agent → Groups
+```
+
+### Customizing Groups
+
+Override in `group_vars/all.yml` to add custom groups or modify defaults:
 
 ```yaml
 wazuh_agent_groups:
-  - name: "linux-servers"
-    description: "Linux production servers"
+  - name: "linux-web-servers"
+    os: "Linux"
+    description: "Web servers with custom paths"
     config:
       syscheck:
-        enabled: true
         directories:
-          - path: "/etc"
-            realtime: true
           - path: "/var/www"
+            realtime: true
             report_changes: true
       localfile:
-        - location: "/var/log/syslog"
+        - location: "/var/log/nginx/access.log"
           format: "syslog"
+        - location: "Security"              # Windows event channels also supported
+          format: "eventchannel"
+          query: "Event/System[EventID=4625]"
+      wodle:
+        - name: "docker-listener"
+          enabled: true
       labels:
-        - key: "environment"
-          value: "production"
+        - key: "group.role"
+          value: "web-server"
 ```
+
+Custom files per group can be placed in `files/agent_groups/<group_name>/` and will be deployed to the Manager's shared directory for that group.
 
 ## Deployment Modes
 

@@ -372,3 +372,56 @@ wazuh_grafana_provisioning_dir: "/etc/grafana/provisioning/dashboards"
 #   - job_name: 'wazuh-manager'
 #     static_configs:
 #       - targets: ['manager1:9115']
+
+# ═══════════════════════════════════════════════════════════════
+# Agent Groups
+# ═══════════════════════════════════════════════════════════════
+# Agent groups are pre-created during deployment so they appear
+# in the Wazuh Dashboard UI immediately. Agents are assigned to
+# groups after enrollment via Dashboard, API, or CLI:
+#
+#   /var/ossec/bin/agent_groups -a -i <agent_id> -g <group_name>
+#
+# Group configs are ADDITIVE to the agent's local ossec.conf.
+# The base agent templates already handle platform-specific log
+# sources, so groups only add role-specific extras.
+#
+# Default groups (defined in roles/wazuh-manager/defaults/main.yml):
+#   - linux-servers         General-purpose Linux servers
+#   - linux-web-servers     Nginx, Apache, HAProxy (adds web logs + /var/www FIM)
+#   - linux-db-servers      MySQL, PostgreSQL, MongoDB (adds DB logs + config FIM)
+#   - linux-docker-hosts    Docker/container hosts (enables docker-listener wodle)
+#   - windows-servers       General-purpose Windows servers
+#   - windows-dc            Domain Controllers (adds AD event channels + NTDS/SYSVOL FIM)
+#   - windows-workstations  End-user desktops/laptops (adds user profile FIM)
+#   - macos-endpoints       macOS workstations/laptops
+#
+# To add custom groups, override wazuh_agent_groups entirely:
+# wazuh_agent_groups:
+#   - name: "linux-servers"
+#     os: "Linux"
+#     description: "General-purpose Linux servers"
+#     config:
+#       syscheck:
+#         directories:
+#           - path: "/opt"
+#             check_all: true
+#           - path: "/var/www"
+#             realtime: true
+#             report_changes: true
+#       localfile:
+#         - location: "/var/log/nginx/access.log"
+#           format: "syslog"
+#         - location: "Security"
+#           format: "eventchannel"    # Windows event channels
+#           query: "Event/System[EventID=4625]"  # Optional XPath filter
+#       wodle:
+#         - name: "docker-listener"
+#           enabled: true
+#           interval: "60s"
+#       labels:
+#         - key: "group.role"
+#           value: "web-server"
+#
+# To disable default groups entirely:
+# wazuh_agent_groups: []
