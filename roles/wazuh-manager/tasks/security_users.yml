@@ -137,6 +137,66 @@
 
 - name: Password was already changed (using current password)
   ansible.builtin.debug:
-    msg: "API credentials already configured (default password was changed previously)"
+    msg: "Default API password was already changed, trying configured password..."
   when: auth_response is defined and auth_response is not skipped and auth_response.status != 200
+  run_once: true
+
+# On re-runs, authenticate with the configured password to ensure credentials file exists
+- name: Authenticate with configured password (re-run)
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}/security/user/authenticate"
+    method: POST
+    user: "{{ wazuh_api_user }}"
+    password: "{{ wazuh_api_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    return_content: true
+    status_code: [200, 401]
+  register: rerun_auth_response
+  when:
+    - auth_response is defined
+    - auth_response.status | default(0) != 200
+  run_once: true
+  no_log: true
+  failed_when: false
+
+- name: Save API password to file on controller (re-run)
+  ansible.builtin.copy:
+    content: |
+      # Wazuh Manager API Credentials
+      # Generated: {{ ansible_date_time.iso8601 }}
+      # Host: {{ inventory_hostname }}
+
+      Username: {{ wazuh_api_user }}
+      Password: {{ wazuh_api_password }}
+
+      API URL: https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}
+
+      # IMPORTANT: Keep this file secure and delete after noting the password!
+    dest: "{{ playbook_dir }}/credentials/api_password.txt"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+  when:
+    - rerun_auth_response is defined
+    - rerun_auth_response is not skipped
+    - rerun_auth_response.status | default(0) == 200
+  vars:
+    ansible_become: false
+
+- name: Warn if no credentials are working
+  ansible.builtin.debug:
+    msg: |
+      WARNING: Neither the default nor vault API password worked.
+      The API password may have been changed manually.
+      Agent groups and other API-dependent tasks may fail.
+      To fix, update wazuh_api_password in your vault to match the current API password.
+  when:
+    - auth_response is defined
+    - auth_response.status | default(0) != 200
+    - rerun_auth_response is defined
+    - rerun_auth_response is not skipped
+    - rerun_auth_response.status | default(0) != 200
   run_once: true
