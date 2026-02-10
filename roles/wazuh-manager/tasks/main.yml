@@ -33,10 +33,6 @@
   ansible.builtin.include_tasks: custom_rules.yml
   when: wazuh_custom_content_enabled | default(false)
 
-- name: Configure agent groups
-  ansible.builtin.include_tasks: agent_groups.yml
-  when: wazuh_agent_groups | default([]) | length > 0
-
 - name: Configure Wazuh API
   ansible.builtin.include_tasks: api.yml
 
@@ -99,6 +95,13 @@
 - name: Configure secure API password
   ansible.builtin.include_tasks: security_users.yml
   when: manager_node_type | default('master') == 'master'
+
+# Agent groups require the API to be running with the final password
+- name: Configure agent groups
+  ansible.builtin.include_tasks: agent_groups.yml
+  when:
+    - wazuh_agent_groups | default([]) | length > 0
+    - manager_node_type | default('master') == 'master'
 
 - name: Install and configure Filebeat for alert forwarding
   ansible.builtin.include_tasks: filebeat.yml

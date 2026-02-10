@@ -41,6 +41,9 @@
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     return_content: true
   register: api_auth
+  until: api_auth.status | default(0) == 200
+  retries: 6
+  delay: 10
   no_log: true
   run_once: true
 

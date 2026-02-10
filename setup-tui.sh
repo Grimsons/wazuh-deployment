@@ -858,6 +858,9 @@ wazuh_manager_api_port: ${MANAGER_API_PORT:-55000}
 wazuh_manager_agent_port: ${AGENT_PORT:-1514}
 wazuh_api_user: "${API_USER:-wazuh}"
 wazuh_api_password: "{{ vault_wazuh_api_password }}"
+
+# Agent enrollment password loaded from Ansible Vault
+wazuh_agent_enrollment_password: "{{ vault_wazuh_agent_enrollment_password }}"
 EOF
 
     if (( MANAGER_COUNT > 1 )); then

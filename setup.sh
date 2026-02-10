@@ -1184,6 +1184,9 @@ EOF
 # API password loaded from Ansible Vault
 # SECURITY: Password encrypted in group_vars/all/vault.yml
 wazuh_api_password: "{{ vault_wazuh_api_password }}"
+
+# Agent enrollment password loaded from Ansible Vault
+wazuh_agent_enrollment_password: "{{ vault_wazuh_agent_enrollment_password }}"
 EOF
 
     # Build per-host SSH credentials string for vault (format: host1:user1:pass1,host2:user2:pass2)
