@@ -397,6 +397,48 @@ wazuh_grafana_provisioning_dir: "/etc/grafana/provisioning/dashboards"
 # wazuh_analysisd_decode_queue_size: 16384 # Increase for 1000+ agents
 # wazuh_remoted_worker_pool: 4             # 1 per ~250 agents
 
+# ── Windows Event Channel Filtering ──
+# XPath queries filter noisy EventIDs at the source, preventing them
+# from consuming agent bandwidth. Set per-host in host_vars/.
+#
+# Standard filter (default - all Windows hosts):
+# wazuh_agent_windows_security_query: >-
+#   Event/System[EventID != 5145 and EventID != 5156 and EventID != 5447
+#   and EventID != 4656 and EventID != 4658 and EventID != 4663
+#   and EventID != 4660 and EventID != 4670 and EventID != 4690
+#   and EventID != 4703 and EventID != 4907 and EventID != 5152
+#   and EventID != 5157]
+#
+# DC-optimized filter (set in host_vars/dc-hostname.yml):
+# Adds: logoff (4634), WFP bind (5158), privilege use (4673/4674),
+# Kerberos renewal (4770). Keeps 4768/4769/4776/4662 for attack detection.
+# wazuh_agent_windows_security_query: >-
+#   Event/System[EventID != 5145 and EventID != 5156 and EventID != 5447
+#   and EventID != 4656 and EventID != 4658 and EventID != 4663
+#   and EventID != 4660 and EventID != 4670 and EventID != 4690
+#   and EventID != 4703 and EventID != 4907 and EventID != 5152
+#   and EventID != 5157 and EventID != 4634 and EventID != 5158
+#   and EventID != 4673 and EventID != 4674 and EventID != 4770]
+#
+# Sysmon filter for noisy workstations (network, process access, DNS):
+# wazuh_agent_windows_sysmon_query: >-
+#   Event/System[EventID != 3 and EventID != 10 and EventID != 22]
+#
+# ── Per-Host DC/Workstation Tuning ──
+# DCs and high-volume workstations need higher limits. Set in host_vars/:
+#
+# host_vars/dc01.yml:
+#   wazuh_agent_buffer_queue_size: 10000
+#   wazuh_agent_buffer_events_per_second: 1000
+#   wazuh_agent_logcollector_max_eps: 1000
+#   wazuh_agent_windows_security_query: >-    # DC-optimized query above
+#     ...
+#
+# host_vars/busy-workstation.yml:
+#   wazuh_agent_logcollector_max_eps: 300     # Lower for endpoint
+#   wazuh_agent_windows_sysmon_query: >-      # Filter noisy Sysmon
+#     Event/System[EventID != 3 and EventID != 10 and EventID != 22]
+
 # ═══════════════════════════════════════════════════════════════
 # Agent Groups
 # ═══════════════════════════════════════════════════════════════
