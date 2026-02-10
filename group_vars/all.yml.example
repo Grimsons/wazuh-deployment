@@ -374,6 +374,30 @@ wazuh_grafana_provisioning_dir: "/etc/grafana/provisioning/dashboards"
 #       - targets: ['manager1:9115']
 
 # ═══════════════════════════════════════════════════════════════
+# Anti-Flooding / Event Rate Limiting
+# ═══════════════════════════════════════════════════════════════
+# Controls event processing rates to prevent agent storms from
+# overwhelming the manager. Tune based on deployment size.
+
+# Agent-side: Max events per second sent to manager (per agent)
+# wazuh_agent_buffer_events_per_second: 500
+# wazuh_agent_buffer_queue_size: 5000
+# wazuh_agent_logcollector_max_eps: 500    # Log collection rate limit
+
+# Manager-side: Analysis engine EPS limit (0 = unlimited)
+# For 500+ agents, consider setting to 5000-10000
+# wazuh_analysisd_max_eps: 0
+
+# Manager remote queue (incoming events from all agents)
+# Default 131072 handles ~500 agents. For 1000+, use 262144
+# wazuh_remote_queue_size: 131072
+
+# Internal daemon tuning (local_internal_options.conf)
+# wazuh_analysisd_event_threads: 0         # 0 = auto
+# wazuh_analysisd_decode_queue_size: 16384 # Increase for 1000+ agents
+# wazuh_remoted_worker_pool: 4             # 1 per ~250 agents
+
+# ═══════════════════════════════════════════════════════════════
 # Agent Groups
 # ═══════════════════════════════════════════════════════════════
 # Agent groups are pre-created during deployment so they appear

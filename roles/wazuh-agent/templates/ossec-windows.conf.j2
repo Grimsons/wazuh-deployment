@@ -236,6 +236,12 @@
     <ca_verification>yes</ca_verification>
   </active-response>
 
+  <!-- Anti-flooding: Logcollector rate limiting -->
+  <!-- Prevents log collection storms from overwhelming the manager -->
+  <logcollector>
+    <max_eps>{{ wazuh_agent_logcollector_max_eps | default(500) }}</max_eps>
+  </logcollector>
+
   <!-- Agent log format -->
   <logging>
     <log_format>plain</log_format>

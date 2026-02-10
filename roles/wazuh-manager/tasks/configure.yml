@@ -13,6 +13,17 @@
   register: manager_config_deployed
   notify: restart wazuh-manager
 
+- name: Deploy local_internal_options.conf for performance tuning
+  ansible.builtin.template:
+    src: local_internal_options.conf.j2
+    dest: /var/ossec/etc/local_internal_options.conf
+    owner: root
+    group: wazuh
+    mode: '0640'
+  become: true
+  when: wazuh_internal_options_enabled | default(true)
+  notify: restart wazuh-manager
+
 - name: Validate manager configuration before restart
   block:
     - name: Run Wazuh configuration test

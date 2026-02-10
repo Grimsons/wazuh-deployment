@@ -69,9 +69,17 @@ wazuh_agent_sca_enabled: true
 # Active response
 wazuh_agent_active_response_disabled: false
 
-# Client buffer settings
+# Client buffer settings (anti-flooding)
+# queue_size: Max events the agent can buffer before dropping (per agent)
 wazuh_agent_buffer_queue_size: 5000
+# events_per_second: Max events sent to manager per second (per agent)
 wazuh_agent_buffer_events_per_second: 500
+
+# Logcollector rate limiting (anti-flooding)
+# Max events per second the log collector will read from all sources
+# Prevents log storms (e.g., rapid Windows Security events) from flooding the manager
+# 500 eps is safe for most agents. Reduce to 200-300 for low-resource endpoints.
+wazuh_agent_logcollector_max_eps: 500
 
 # Agent Labels
 # Auto-generate labels from Ansible facts (os.type, os.family, environment, etc.)

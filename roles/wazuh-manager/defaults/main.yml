@@ -309,6 +309,70 @@ wazuh_command_monitoring_enabled: false
 #     interval: "30m"
 wazuh_command_monitoring_commands: []
 
+# ═══════════════════════════════════════════════════════════════
+# Anti-Flooding / Performance Tuning
+# ═══════════════════════════════════════════════════════════════
+# These settings control event rate limiting and queue sizes to prevent
+# agent flooding from overwhelming the manager. Tune based on your
+# deployment size and hardware.
+
+# -- Manager Global EPS Limit (analysisd) --
+# Maximum events per second the analysis engine will process
+# 0 = unlimited (default). Set to a value if you need to cap processing.
+# For large deployments (500+ agents), consider 5000-10000
+wazuh_analysisd_max_eps: 0
+# Timeframe in seconds for EPS calculation (default: 10)
+wazuh_analysisd_eps_timeframe: 10
+
+# -- Remote Agent Queue --
+# Incoming event queue from agents (remoted daemon)
+# If this fills up, agent events are dropped until space is available
+# Default 131072 is fine for most deployments (up to ~500 agents)
+# For 1000+ agents, consider 262144 or 524288
+wazuh_remote_queue_size: 131072
+# How long to wait before closing idle agent sessions
+wazuh_remote_rids_closing_time: "5m"
+
+# -- FIM Rate Limits --
+# File integrity monitoring event processing rate (events/second)
+wazuh_fim_max_eps: 200
+# FIM database synchronization rate limit
+wazuh_fim_sync_max_eps: 10
+
+# -- Internal Options (local_internal_options.conf) --
+# Enable deployment of local_internal_options.conf for daemon tuning
+wazuh_internal_options_enabled: true
+
+# Analysisd thread counts (0 = auto based on CPU cores)
+wazuh_analysisd_event_threads: 0
+wazuh_analysisd_rule_matching_threads: 0
+wazuh_analysisd_dbsync_threads: 0
+
+# Analysisd internal queue sizes (increase for high-throughput)
+# Default 16384 handles ~500 agents. For 1000+ agents, use 32768-65536
+wazuh_analysisd_decode_queue_size: 16384
+wazuh_analysisd_process_queue_size: 16384
+wazuh_analysisd_dbsync_queue_size: 16384
+
+# Remoted daemon tuning
+# Worker threads: 1 thread per ~250 active agents (default: 4)
+wazuh_remoted_worker_pool: 4
+wazuh_remoted_recv_timeout: 1
+
+# Wazuh DB worker threads (0 = auto)
+wazuh_db_worker_pool: 0
+
+# Logcollector max files
+wazuh_logcollector_max_files: 256
+
+# Additional internal options (advanced - list of key/value pairs)
+# Example:
+# wazuh_internal_options:
+#   - key: "analysisd.min_rotate_interval"
+#     value: "600"
+#   - key: "remoted.guess_agent_group"
+#     value: "0"
+
 # Indexer connection
 wazuh_indexer_connection_enabled: true
 

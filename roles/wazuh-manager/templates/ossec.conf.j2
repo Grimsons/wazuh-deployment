@@ -27,6 +27,15 @@
     <!-- GeoIP database for IP geolocation -->
     <geoip_db_path>{{ wazuh_geoip_database }}</geoip_db_path>
 {% endif %}
+    <!-- Anti-flooding: Analysisd event processing rate limit -->
+    <!-- Limits the maximum events per second the analysis engine will process -->
+    <!-- 0 = unlimited (not recommended for large deployments) -->
+    <limits>
+      <eps>
+        <maximum>{{ wazuh_analysisd_max_eps | default(0) }}</maximum>
+        <timeframe>{{ wazuh_analysisd_eps_timeframe | default(10) }}</timeframe>
+      </eps>
+    </limits>
   </global>
 
   <alerts>
@@ -136,11 +145,12 @@
 
     <!-- Nice value for Syscheck process -->
     <process_priority>10</process_priority>
-    <max_eps>200</max_eps>
+    <!-- Anti-flooding: FIM event processing rate limit -->
+    <max_eps>{{ wazuh_fim_max_eps | default(200) }}</max_eps>
     <synchronization>
       <enabled>yes</enabled>
       <interval>5m</interval>
-      <max_eps>10</max_eps>
+      <max_eps>{{ wazuh_fim_sync_max_eps | default(10) }}</max_eps>
     </synchronization>
   </syscheck>
 {% endif %}
@@ -298,11 +308,16 @@
 {% endif %}
 
   <!-- Remote Syslog -->
+  <!-- Remote agent connections -->
   <remote>
     <connection>secure</connection>
     <port>{{ wazuh_manager_agent_port | default(1514) }}</port>
     <protocol>tcp</protocol>
-    <queue_size>131072</queue_size>
+    <!-- Anti-flooding: Incoming event queue from agents -->
+    <!-- If this fills up, agent events are dropped until space is available -->
+    <queue_size>{{ wazuh_remote_queue_size | default(131072) }}</queue_size>
+    <!-- How long to wait before closing idle agent sessions (frees resources) -->
+    <rids_closing_time>{{ wazuh_remote_rids_closing_time | default('5m') }}</rids_closing_time>
   </remote>
 
   <!-- Authentication - Agent Enrollment Security -->
