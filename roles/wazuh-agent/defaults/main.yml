@@ -5,6 +5,11 @@
 wazuh_agent_package_name: "wazuh-agent"
 wazuh_agent_service_name: "wazuh-agent"
 
+# Repository settings
+wazuh_repo_gpg_key: "https://packages.wazuh.com/key/GPG-KEY-WAZUH"
+wazuh_repo_url_apt: "https://packages.wazuh.com/4.x/apt/"
+wazuh_repo_url_yum: "https://packages.wazuh.com/4.x/yum/"
+
 # Agent configuration
 wazuh_agent_config_path: /var/ossec/etc/ossec.conf
 

@@ -7,6 +7,11 @@
 wazuh_dashboard_package_name: "wazuh-dashboard"
 wazuh_dashboard_service_name: "wazuh-dashboard"
 
+# Repository settings
+wazuh_repo_gpg_key: "https://packages.wazuh.com/key/GPG-KEY-WAZUH"
+wazuh_repo_url_apt: "https://packages.wazuh.com/4.x/apt/"
+wazuh_repo_url_yum: "https://packages.wazuh.com/4.x/yum/"
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Path Settings
 # ═══════════════════════════════════════════════════════════════════════════════

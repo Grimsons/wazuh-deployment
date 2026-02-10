@@ -5,6 +5,11 @@
 wazuh_manager_package_name: "wazuh-manager"
 wazuh_manager_service_name: "wazuh-manager"
 
+# Repository settings
+wazuh_repo_gpg_key: "https://packages.wazuh.com/key/GPG-KEY-WAZUH"
+wazuh_repo_url_apt: "https://packages.wazuh.com/4.x/apt/"
+wazuh_repo_url_yum: "https://packages.wazuh.com/4.x/yum/"
+
 # Manager configuration
 wazuh_manager_config_path: /var/ossec/etc/ossec.conf
 wazuh_manager_log_path: /var/ossec/logs
