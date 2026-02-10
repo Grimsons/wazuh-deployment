@@ -20,11 +20,11 @@
 - name: Dearmor Wazuh GPG key if needed (Debian/Ubuntu)
   ansible.builtin.shell: |
     set -o pipefail
-    if file /etc/apt/keyrings/wazuh.gpg | grep -q 'PGP public key block Public-Key (old)'; then
-      echo "Key already in binary format"
-    else
+    if head -c 5 /etc/apt/keyrings/wazuh.gpg | grep -q '^\-\-\-\-\-'; then
       gpg --dearmor < /etc/apt/keyrings/wazuh.gpg > /etc/apt/keyrings/wazuh.gpg.tmp && mv /etc/apt/keyrings/wazuh.gpg.tmp /etc/apt/keyrings/wazuh.gpg
       echo "Key dearmored"
+    else
+      echo "Key already in binary format"
     fi
   args:
     executable: /bin/bash
