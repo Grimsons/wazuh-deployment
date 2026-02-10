@@ -49,5 +49,7 @@ remoted.worker_pool={{ wazuh_remoted_worker_pool | default(4) }}
 logcollector.max_files={{ wazuh_logcollector_max_files | default(256) }}
 
 # ── Wazuh DB (Agent State Database) ─────────────────────────────
-# Worker threads for database operations (default: 0 = auto)
-wazuh_db.worker_pool_size={{ wazuh_db_worker_pool | default(0) }}
+# Worker threads for database operations (omit to use Wazuh default)
+{% if wazuh_db_worker_pool | default(0) | int > 0 %}
+wazuh_db.worker_pool_size={{ wazuh_db_worker_pool }}
+{% endif %}

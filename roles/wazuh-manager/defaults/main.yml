@@ -364,7 +364,7 @@ wazuh_analysisd_dbsync_queue_size: 16384
 wazuh_remoted_worker_pool: 4
 wazuh_remoted_recv_timeout: 1
 
-# Wazuh DB worker threads (0 = auto)
+# Wazuh DB worker threads (0 = use Wazuh default, must be > 0 if set)
 wazuh_db_worker_pool: 0
 
 # Logcollector max files
