@@ -90,9 +90,21 @@
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     status_code: [200]
   register: password_update
+  until: password_update.status | default(0) == 200
+  retries: 6
+  delay: 10
   when: wazuh_user_id is defined
   run_once: true
   no_log: true
+
+- name: Display password update error details
+  ansible.builtin.debug:
+    msg: "API password update failed with status {{ password_update.status | default('unknown') }}. Response: {{ password_update.json | default(password_update.msg | default('no details')) }}"
+  when:
+    - password_update is defined
+    - password_update is not skipped
+    - password_update.status | default(0) != 200
+  run_once: true
 
 - name: Save API password to file on controller
   ansible.builtin.copy:
