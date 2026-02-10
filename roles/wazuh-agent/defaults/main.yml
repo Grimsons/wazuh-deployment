@@ -5,6 +5,11 @@
 wazuh_agent_package_name: "wazuh-agent"
 wazuh_agent_service_name: "wazuh-agent"
 
+# Repository settings
+wazuh_repo_gpg_key: "https://packages.wazuh.com/key/GPG-KEY-WAZUH"
+wazuh_repo_url_apt: "https://packages.wazuh.com/4.x/apt/"
+wazuh_repo_url_yum: "https://packages.wazuh.com/4.x/yum/"
+
 # Agent configuration
 wazuh_agent_config_path: /var/ossec/etc/ossec.conf
 
@@ -99,6 +104,55 @@ wazuh_agent_labels: []
 # Agent group assignment (used in auto-labels)
 # wazuh_agent_group: "default"
 
+# ═══════════════════════════════════════════════════════════════
+# Windows Event Channel Filtering (anti-flooding)
+# ═══════════════════════════════════════════════════════════════
+# XPath queries filter noisy EventIDs AT THE SOURCE before they
+# consume agent bandwidth or manager processing capacity.
+#
+# Override per-host in host_vars for DCs and high-volume endpoints.
+
 # Windows specific settings (for Windows agents)
 wazuh_agent_windows_audit_enabled: true
 wazuh_agent_windows_eventchannel_enabled: true
+
+# Security channel XPath query - filters noisy file/object audit events
+# This is the STANDARD filter, safe for all Windows hosts.
+# For DCs, set the DC-optimized variant (see below) in host_vars.
+wazuh_agent_windows_security_query: >-
+  Event/System[EventID != 5145 and EventID != 5156 and EventID != 5447
+  and EventID != 4656 and EventID != 4658 and EventID != 4663
+  and EventID != 4660 and EventID != 4670 and EventID != 4690
+  and EventID != 4703 and EventID != 4907 and EventID != 5152
+  and EventID != 5157]
+
+# DC-OPTIMIZED Security query - use this for Domain Controllers:
+# Additionally filters logoff (4634), WFP bind (5158), sensitive privilege
+# use (4673/4674), and Kerberos renewals (4770) which flood DCs at 1000+ eps.
+# Keeps 4768/4769/4776/4662 for Kerberos attack & DCSync detection.
+#
+# Set in host_vars/dc-hostname.yml:
+# wazuh_agent_windows_security_query: >-
+#   Event/System[EventID != 5145 and EventID != 5156 and EventID != 5447
+#   and EventID != 4656 and EventID != 4658 and EventID != 4663
+#   and EventID != 4660 and EventID != 4670 and EventID != 4690
+#   and EventID != 4703 and EventID != 4907 and EventID != 5152
+#   and EventID != 5157 and EventID != 4634 and EventID != 5158
+#   and EventID != 4673 and EventID != 4674 and EventID != 4770]
+
+# Sysmon channel XPath query (empty string = collect ALL Sysmon events)
+# On high-volume workstations with Sysmon, EventIDs 3 (network), 10 (process
+# access), and 22 (DNS query) can produce thousands of events/second.
+# Filter them if Sysmon is flooding the agent:
+#
+# wazuh_agent_windows_sysmon_query: >-
+#   Event/System[EventID != 3 and EventID != 10 and EventID != 22]
+wazuh_agent_windows_sysmon_query: ""
+
+# ── Per-host DC/Workstation buffer overrides ──
+# DCs and high-volume workstations should increase buffer limits.
+# Set these in host_vars/dc-hostname.yml:
+#
+#   wazuh_agent_buffer_queue_size: 10000     # default: 5000
+#   wazuh_agent_buffer_events_per_second: 1000  # default: 500
+#   wazuh_agent_logcollector_max_eps: 1000   # default: 500

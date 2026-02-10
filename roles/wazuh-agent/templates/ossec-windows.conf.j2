@@ -128,7 +128,7 @@
   <localfile>
     <location>Security</location>
     <log_format>eventchannel</log_format>
-    <query>Event/System[EventID != 5145 and EventID != 5156 and EventID != 5447 and EventID != 4656 and EventID != 4658 and EventID != 4663 and EventID != 4660 and EventID != 4670 and EventID != 4690 and EventID != 4703 and EventID != 4907 and EventID != 5152 and EventID != 5157]</query>
+    <query>{{ wazuh_agent_windows_security_query }}</query>
   </localfile>
 
   <localfile>
@@ -139,6 +139,9 @@
   <localfile>
     <location>Microsoft-Windows-Sysmon/Operational</location>
     <log_format>eventchannel</log_format>
+{% if wazuh_agent_windows_sysmon_query | default('') | length > 0 %}
+    <query>{{ wazuh_agent_windows_sysmon_query }}</query>
+{% endif %}
   </localfile>
 
   <localfile>

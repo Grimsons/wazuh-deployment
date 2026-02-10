@@ -5,6 +5,11 @@
 wazuh_manager_package_name: "wazuh-manager"
 wazuh_manager_service_name: "wazuh-manager"
 
+# Repository settings
+wazuh_repo_gpg_key: "https://packages.wazuh.com/key/GPG-KEY-WAZUH"
+wazuh_repo_url_apt: "https://packages.wazuh.com/4.x/apt/"
+wazuh_repo_url_yum: "https://packages.wazuh.com/4.x/yum/"
+
 # Manager configuration
 wazuh_manager_config_path: /var/ossec/etc/ossec.conf
 wazuh_manager_log_path: /var/ossec/logs
@@ -588,15 +593,22 @@ wazuh_agent_groups:
           - key: "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System\\Kerberos"
             arch: "both"
       localfile:
+        # Directory Service - filter routine internal processing events (1-8)
+        # Keep replication errors (1000+), NTDS events, and security-relevant entries
         - location: "Directory Service"
           format: "eventchannel"
+          query: "Event/System[EventID != 1 and EventID != 2 and EventID != 3 and EventID != 4 and EventID != 5 and EventID != 6 and EventID != 7 and EventID != 8]"
+        # DNS Server - filter routine query/response events (256-260) that produce
+        # thousands of eps on busy DCs. Keep zone transfer, dynamic update, and errors.
         - location: "DNS Server"
           format: "eventchannel"
+          query: "Event/System[EventID != 256 and EventID != 257 and EventID != 258 and EventID != 259 and EventID != 260]"
         - location: "DFS Replication"
           format: "eventchannel"
         - location: "Microsoft-Windows-ActiveDirectory_DomainService/Diagnostic"
           format: "eventchannel"
-        - location: "Microsoft-Windows-LDAP-Client/Debug"
+        # Group Policy operational - track GPO application changes
+        - location: "Microsoft-Windows-GroupPolicy/Operational"
           format: "eventchannel"
       labels:
         - key: "group.type"

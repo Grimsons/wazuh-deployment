@@ -5,6 +5,11 @@
 wazuh_indexer_package_name: "wazuh-indexer"
 wazuh_indexer_service_name: "wazuh-indexer"
 
+# Repository settings
+wazuh_repo_gpg_key: "https://packages.wazuh.com/key/GPG-KEY-WAZUH"
+wazuh_repo_url_apt: "https://packages.wazuh.com/4.x/apt/"
+wazuh_repo_url_yum: "https://packages.wazuh.com/4.x/yum/"
+
 # Indexer configuration
 wazuh_indexer_config_path: /etc/wazuh-indexer
 wazuh_indexer_data_path: /var/lib/wazuh-indexer
