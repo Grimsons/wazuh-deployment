@@ -213,9 +213,9 @@ wazuh-deployment/
 │
 ├── files/
 │   ├── certs/                  # Generated certificates
-│   ├── custom_rules/           # Custom detection rules (*.xml)
-│   ├── custom_decoders/        # Custom log decoders (*.xml)
-│   ├── cdb_lists/              # Threat intelligence lists
+│   ├── custom_rules/           # Detection rules - project-specific + SOCFortress community
+│   ├── custom_decoders/        # Log decoders - project-specific + SOCFortress community
+│   ├── cdb_lists/              # Threat intelligence lists (e.g., malicious-powershell)
 │   └── agent_groups/           # Agent group config files
 │
 ├── backups/                    # Backup storage (created by backup.yml)
@@ -508,16 +508,94 @@ All integrations are configurable via `setup.sh` or `group_vars/all.yml`:
 
 ## Custom Rules and Decoders
 
+This deployment includes an extensive set of detection rules from multiple sources, deployed automatically to the Wazuh Manager.
+
+### Included Detection Rules
+
+#### Custom Rules (Project-Specific)
+
+Rules developed specifically for this deployment (ID range `800100-800299`):
+
+| File | Description | Rules |
+|------|-------------|-------|
+| `0800-attack-detection.xml` | Linux attack detection: reverse shells, credential dumping, container escape, SSH tunneling, ransomware indicators, persistence mechanisms | ~20 |
+| `800200-win_powershell_rules.xml` | Windows PowerShell event log detection with malicious command matching | 12 |
+
+#### Community Rules ([SOCFortress Wazuh-Rules](https://github.com/socfortress/Wazuh-Rules))
+
+The following rules are sourced from the [SOCFortress Wazuh-Rules](https://github.com/socfortress/Wazuh-Rules) community repository, which provides MITRE ATT&CK-mapped detection rules for Wazuh:
+
+**Windows Sysmon** (requires [Sysmon](https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon) deployed on Windows agents):
+
+| File | Sysmon Event | Description | Rules |
+|------|-------------|-------------|-------|
+| `100100-..._SYSMON_EVENT1.xml` | Event 1 | Process creation | 864+ |
+| `102101-..._SYSMON_EVENT3.xml` | Event 3 | Network connections | ~50 |
+| `106101-..._SYSMON_EVENT7.xml` | Event 7 | Image loaded (DLL) | ~40 |
+| `109101-..._SYSMON_EVENT10.xml` | Event 10 | Process access | ~20 |
+| `110101-..._SYSMON_EVENT11.xml` | Event 11 | File create | ~25 |
+| `111101-..._SYSMON_EVENT12.xml` | Event 12 | Registry add/delete | ~80 |
+| `112101-..._SYSMON_EVENT13.xml` | Event 13 | Registry value set | ~100 |
+| `113101-..._SYSMON_EVENT14.xml` | Event 14 | Registry rename | ~70 |
+| `114101-..._SYSMON_EVENT15.xml` | Event 15 | File create stream hash | ~10 |
+| `116101-..._SYSMON_EVENT17.xml` | Event 17 | Pipe created | ~20 |
+| `117101-..._SYSMON_EVENT18.xml` | Event 18 | Pipe connected | ~15 |
+| `121101-..._SYSMON_EVENT22.xml` | Event 22 | DNS query | ~15 |
+| `121201-..._SYSMON_EVENT6.xml` | Event 6 | Driver loaded | ~10 |
+
+**Linux Detection:**
+
+| File | Description | Rules |
+|------|-------------|-------|
+| `200110-auditd.xml` | Linux auditd syscall monitoring (file access, privilege escalation, persistence) | 64 |
+| `200150-sysmon_for_linux_rules.xml` | Sysmon for Linux detection | 14 |
+
+**Infrastructure & Other:**
+
+| File | Description | Rules |
+|------|-------------|-------|
+| `100002-suricata.xml` | Suricata IDS/IPS alert enrichment | 8 |
+| `500010-manager_logs.xml` | Wazuh Manager health monitoring | ~5 |
+| `200990-healthcheck.xml` | Wazuh infrastructure health checks | 7 |
+| `200100-yara_rules.xml` | YARA malware scan result detection | 4 |
+| `600000-active_response.xml` | Active response action alerts | 3 |
+| `200070-sysmon_reload.xml` | Sysmon configuration reload detection | ~2 |
+
+#### Custom Decoders
+
+| File | Source | Description |
+|------|--------|-------------|
+| `auditd_decoders.xml` | [SOCFortress](https://github.com/socfortress/Wazuh-Rules) | Enhanced auditd log parsing |
+| `decoder-linux-sysmon.xml` | [SOCFortress](https://github.com/socfortress/Wazuh-Rules) | Sysmon for Linux event decoding |
+| `decoder-manager-logs.xml` | [SOCFortress](https://github.com/socfortress/Wazuh-Rules) | Wazuh Manager log parsing |
+| `yara_decoders.xml` | [SOCFortress](https://github.com/socfortress/Wazuh-Rules) | YARA scan result decoding |
+
+#### CDB Lists (Threat Intelligence)
+
+| File | Source | Description |
+|------|--------|-------------|
+| `malicious-powershell` | [SOCFortress](https://github.com/socfortress/Wazuh-Rules) | Known malicious PowerShell command patterns |
+
 ### File-based Deployment
-Place custom content in the `files/` directory:
+
+All rules are automatically deployed from the `files/` directory:
 ```
 files/
-├── custom_rules/
-│   └── my_rules.xml
-├── custom_decoders/
-│   └── my_decoders.xml
-└── cdb_lists/
-    └── malicious-ips
+├── custom_rules/           # Detection rules (*.xml)
+│   ├── 0800-*.xml          # Project-specific rules (800xxx IDs)
+│   ├── 100xxx-*.xml        # SOCFortress Windows Sysmon rules
+│   ├── 200xxx-*.xml        # SOCFortress Linux/infra rules
+│   ├── 500xxx-*.xml        # SOCFortress manager rules
+│   ├── 600xxx-*.xml        # SOCFortress active response rules
+│   └── 800200-*.xml        # Project-specific PowerShell rules
+├── custom_decoders/        # Log decoders (*.xml)
+│   ├── auditd_decoders.xml
+│   ├── decoder-linux-sysmon.xml
+│   ├── decoder-manager-logs.xml
+│   └── yara_decoders.xml
+├── cdb_lists/              # Threat intelligence lookup lists
+│   └── malicious-powershell
+└── agent_groups/           # Agent group config files
 ```
 
 ### Inline Rules (group_vars/all.yml)
@@ -827,3 +905,5 @@ WAZUH - Copyright (C) 2016, Wazuh Inc. (License GPLv2)
 - [Wazuh Documentation](https://documentation.wazuh.com)
 - [Wazuh Ansible Docs](https://documentation.wazuh.com/current/deploying-with-ansible/index.html)
 - [Wazuh GitHub](https://github.com/wazuh)
+- [SOCFortress Wazuh-Rules](https://github.com/socfortress/Wazuh-Rules) - Community detection rules (MITRE ATT&CK mapped)
+- [SOCFortress](https://www.socfortress.co/) - Open-source security operations community
