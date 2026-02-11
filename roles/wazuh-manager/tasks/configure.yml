@@ -50,36 +50,6 @@
         msg: "Aborting: Wazuh manager configuration is invalid. Fix the errors shown above."
   when: manager_config_deployed.changed
 
-# Read indexer password from credentials file if not defined
-- name: Check for indexer credentials file
-  ansible.builtin.stat:
-    path: "{{ playbook_dir }}/credentials/indexer_admin_password.txt"
-  delegate_to: localhost
-  become: false
-  register: indexer_creds_file
-  vars:
-    ansible_become: false
-
-- name: Read indexer password from credentials file
-  ansible.builtin.slurp:
-    src: "{{ playbook_dir }}/credentials/indexer_admin_password.txt"
-  delegate_to: localhost
-  become: false
-  register: indexer_creds_content
-  when:
-    - indexer_creds_file.stat.exists
-    - wazuh_indexer_admin_password is not defined
-  vars:
-    ansible_become: false
-
-- name: Extract indexer password from credentials file
-  ansible.builtin.set_fact:
-    wazuh_indexer_admin_password: "{{ indexer_creds_content.content | b64decode | regex_search('Password: (.+)', '\\1') | first }}"
-  when:
-    - indexer_creds_content is defined
-    - indexer_creds_content.content is defined
-  no_log: true
-
 - name: Configure Wazuh keystore for indexer username
   ansible.builtin.shell: |
     set -o pipefail

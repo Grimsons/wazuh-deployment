@@ -119,7 +119,7 @@
       ═══════════════════════════════════════════════════════════════
       Wazuh Manager is ready!
       API URL: https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}
-      Credentials saved to: {{ playbook_dir }}/credentials/api_password.txt
+      Credentials: Managed by Ansible Vault (group_vars/all/vault.yml)
       ═══════════════════════════════════════════════════════════════
   when: manager_node_type | default('master') == 'master'
   run_once: true

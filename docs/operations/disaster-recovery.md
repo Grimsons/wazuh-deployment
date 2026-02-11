@@ -84,9 +84,8 @@ This DR plan covers:
 - `/etc/wazuh-dashboard/certs/` - SSL certificates
 
 #### Credentials
-- `./credentials/indexer_admin_password.txt`
-- `./credentials/api_password.txt`
-- `./credentials/manager_cluster_key.txt` (if clustered)
+- `./group_vars/all/vault.yml` (encrypted - all passwords)
+- `./.vault_password` (vault decryption key - BACKUP THIS!)
 
 ### Backup Locations
 
@@ -105,7 +104,7 @@ This DR plan covers:
 │   ├── dashboard/
 │   │   ├── opensearch_dashboards.yml
 │   │   └── certs/
-│   └── credentials/
+│   └── vault.yml.backup
 ├── 20240116_020000/
 └── checksums.sha256
 ```

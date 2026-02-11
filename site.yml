@@ -347,11 +347,11 @@
 
           Credentials:
             Dashboard User: {{ wazuh_dashboard_admin_user | default('admin') }}
-            Dashboard Pass: [STORED IN ./credentials/indexer_admin_password.txt]
+            Dashboard Pass: [ANSIBLE VAULT - group_vars/all/vault.yml]
 
           Wazuh API URL: https://{{ groups['wazuh_managers'][0] }}:{{ wazuh_manager_api_port | default(55000) }}
             API User: {{ wazuh_api_user | default('wazuh') }}
-            API Pass: [STORED IN ./credentials/api_password.txt]
+            API Pass: [ANSIBLE VAULT - group_vars/all/vault.yml]
 
           Manager Nodes:
           {% for host in groups['wazuh_managers'] %}
@@ -381,7 +381,7 @@
           - Logs: ./logs/backup-cron.log, ./logs/log-cleanup-cron.log
 
           SECURITY NOTES:
-          - Passwords are stored in ./credentials/ (mode 0600)
+          - All passwords are managed by Ansible Vault (group_vars/all/vault.yml)
           - Deployment user has been LOCKED DOWN on all hosts
           - Before next deployment, run: ansible-playbook unlock-deploy-user.yml
 
