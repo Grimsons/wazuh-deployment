@@ -78,7 +78,7 @@
           - index_patterns:
               - "wazuh-alerts-*"
             priority: 100
-    status_code: [200, 201]
+    status_code: [200, 201, 409]
     headers:
       Content-Type: "application/json"
   register: alerts_policy_result
@@ -138,7 +138,7 @@
           - index_patterns:
               - "wazuh-archives-*"
             priority: 100
-    status_code: [200, 201]
+    status_code: [200, 201, 409]
     headers:
       Content-Type: "application/json"
   register: archives_policy_result
@@ -190,7 +190,7 @@
           - index_patterns:
               - "wazuh-monitoring-*"
             priority: 100
-    status_code: [200, 201]
+    status_code: [200, 201, 409]
     headers:
       Content-Type: "application/json"
   register: monitoring_policy_result
@@ -239,7 +239,7 @@
           - index_patterns:
               - "wazuh-statistics-*"
             priority: 100
-    status_code: [200, 201]
+    status_code: [200, 201, 409]
     headers:
       Content-Type: "application/json"
   register: statistics_policy_result
