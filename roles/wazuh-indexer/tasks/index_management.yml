@@ -37,12 +37,13 @@
     force_basic_auth: true
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     status_code: [200, 404]
+    return_content: true
   register: alerts_policy_check
   when: wazuh_retention_enabled | default(true)
 
-- name: Create ISM policy for wazuh-alerts with rollover
+- name: Create or update ISM policy for wazuh-alerts with rollover
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_plugins/_ism/policies/wazuh-alerts-policy"
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_plugins/_ism/policies/wazuh-alerts-policy{{ '?if_seq_no=' ~ alerts_policy_check.json._seq_no ~ '&if_primary_term=' ~ alerts_policy_check.json._primary_term if alerts_policy_check.status == 200 else '' }}"
     method: PUT
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
@@ -97,7 +98,6 @@
   changed_when: alerts_policy_result.status in [200, 201]
   when:
     - wazuh_retention_enabled | default(true)
-    - alerts_policy_check.status == 404
 
 # ═══════════════════════════════════════════════════════════════
 # ISM Policy with Rollover (Archives)
@@ -111,12 +111,13 @@
     force_basic_auth: true
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     status_code: [200, 404]
+    return_content: true
   register: archives_policy_check
   when: wazuh_retention_enabled | default(true)
 
-- name: Create ISM policy for wazuh-archives with rollover
+- name: Create or update ISM policy for wazuh-archives with rollover
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_plugins/_ism/policies/wazuh-archives-policy"
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_plugins/_ism/policies/wazuh-archives-policy{{ '?if_seq_no=' ~ archives_policy_check.json._seq_no ~ '&if_primary_term=' ~ archives_policy_check.json._primary_term if archives_policy_check.status == 200 else '' }}"
     method: PUT
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
@@ -171,7 +172,6 @@
   changed_when: archives_policy_result.status in [200, 201]
   when:
     - wazuh_retention_enabled | default(true)
-    - archives_policy_check.status == 404
 
 # ═══════════════════════════════════════════════════════════════
 # ISM Policy for Monitoring/Statistics (Shorter retention)
@@ -185,12 +185,13 @@
     force_basic_auth: true
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     status_code: [200, 404]
+    return_content: true
   register: monitoring_policy_check
   when: wazuh_retention_enabled | default(true)
 
-- name: Create ISM policy for wazuh-monitoring with rollover
+- name: Create or update ISM policy for wazuh-monitoring with rollover
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_plugins/_ism/policies/wazuh-monitoring-policy"
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_plugins/_ism/policies/wazuh-monitoring-policy{{ '?if_seq_no=' ~ monitoring_policy_check.json._seq_no ~ '&if_primary_term=' ~ monitoring_policy_check.json._primary_term if monitoring_policy_check.status == 200 else '' }}"
     method: PUT
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
@@ -237,7 +238,6 @@
   changed_when: monitoring_policy_result.status in [200, 201]
   when:
     - wazuh_retention_enabled | default(true)
-    - monitoring_policy_check.status == 404
 
 - name: Check if wazuh-statistics ISM policy exists
   ansible.builtin.uri:
@@ -248,12 +248,13 @@
     force_basic_auth: true
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     status_code: [200, 404]
+    return_content: true
   register: statistics_policy_check
   when: wazuh_retention_enabled | default(true)
 
-- name: Create ISM policy for wazuh-statistics with rollover
+- name: Create or update ISM policy for wazuh-statistics with rollover
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_plugins/_ism/policies/wazuh-statistics-policy"
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_plugins/_ism/policies/wazuh-statistics-policy{{ '?if_seq_no=' ~ statistics_policy_check.json._seq_no ~ '&if_primary_term=' ~ statistics_policy_check.json._primary_term if statistics_policy_check.status == 200 else '' }}"
     method: PUT
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
@@ -300,7 +301,6 @@
   changed_when: statistics_policy_result.status in [200, 201]
   when:
     - wazuh_retention_enabled | default(true)
-    - statistics_policy_check.status == 404
 
 # ═══════════════════════════════════════════════════════════════
 # Index Templates with Aliases for Rollover
