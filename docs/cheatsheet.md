@@ -160,7 +160,7 @@ curl -k -u wazuh:PASS https://MANAGER:55000/agents?pretty
 | `group_vars/all/main.yml` | Configuration |
 | `group_vars/all/vault.yml` | Encrypted credentials |
 | `keys/wazuh_ansible_key` | SSH private key |
-| `credentials/` | Generated password files |
+| `backups/` | Vault backups from credential rotation |
 
 ## Environment Variables
 

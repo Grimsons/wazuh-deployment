@@ -1,37 +1,7 @@
 ---
 # Wazuh Manager - Filebeat Installation and Configuration
 # Filebeat forwards alerts from the manager to the Wazuh Indexer
-
-# Read indexer admin password from credentials file if not already set
-- name: Check if indexer credentials file exists
-  ansible.builtin.stat:
-    path: "{{ playbook_dir }}/credentials/indexer_admin_password.txt"
-  delegate_to: localhost
-  become: false
-  register: indexer_creds_file_fb
-  vars:
-    ansible_become: false
-
-- name: Read indexer password from credentials file
-  ansible.builtin.slurp:
-    src: "{{ playbook_dir }}/credentials/indexer_admin_password.txt"
-  delegate_to: localhost
-  become: false
-  register: indexer_creds_content_fb
-  when:
-    - indexer_creds_file_fb.stat.exists
-    - wazuh_indexer_admin_password is not defined
-  vars:
-    ansible_become: false
-
-- name: Extract indexer password from credentials file
-  ansible.builtin.set_fact:
-    wazuh_indexer_admin_password: "{{ indexer_creds_content_fb.content | b64decode | regex_search('Password: (.+)', '\\1') | first | trim }}"
-  when:
-    - indexer_creds_content_fb is defined
-    - indexer_creds_content_fb is not skipped
-    - indexer_creds_content_fb.content is defined
-  no_log: true
+# Indexer credentials are sourced from Ansible Vault via group_vars
 
 - name: Check if Filebeat is already installed
   ansible.builtin.command: dpkg -l filebeat

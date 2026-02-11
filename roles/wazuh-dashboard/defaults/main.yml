@@ -57,7 +57,7 @@ wazuh_dashboard_cookie_same_site: "Strict"
 # ═══════════════════════════════════════════════════════════════════════════════
 # Dashboard uses indexer admin credentials - auto-generated if not set
 wazuh_dashboard_admin_user: "admin"
-# wazuh_dashboard_admin_password: auto-read from credentials/indexer_admin_password.txt
+# wazuh_dashboard_admin_password: sourced from Ansible Vault via wazuh_indexer_admin_password
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HTTP Security Headers

@@ -1,34 +1,7 @@
 ---
 # Wazuh Manager - Agent Groups Configuration
 # Creates and configures agent groups with custom configuration
-
-# Read API password for group management
-- name: Check if API credentials file exists
-  ansible.builtin.stat:
-    path: "{{ playbook_dir }}/credentials/api_password.txt"
-  delegate_to: localhost
-  become: false
-  register: api_creds_file_ag
-  vars:
-    ansible_become: false
-
-- name: Read API password from credentials file
-  ansible.builtin.slurp:
-    src: "{{ playbook_dir }}/credentials/api_password.txt"
-  delegate_to: localhost
-  become: false
-  register: api_creds_content_ag
-  when: api_creds_file_ag.stat.exists
-  vars:
-    ansible_become: false
-
-- name: Set API password fact
-  ansible.builtin.set_fact:
-    wazuh_api_password_groups: "{{ api_creds_content_ag.content | b64decode | regex_search('Password: (.+)', '\\1') | first | trim }}"
-  when:
-    - api_creds_content_ag is defined
-    - api_creds_content_ag is not skipped
-  no_log: true
+# API credentials are sourced from Ansible Vault via group_vars
 
 # Get API token for authentication
 - name: Authenticate to Wazuh API
@@ -36,7 +9,7 @@
     url: "https://127.0.0.1:{{ wazuh_manager_api_port | default(55000) }}/security/user/authenticate"
     method: POST
     user: "{{ wazuh_api_user | default('wazuh') }}"
-    password: "{{ wazuh_api_password_groups | default(wazuh_api_password) | default('wazuh') }}"
+    password: "{{ wazuh_api_password }}"
     force_basic_auth: true
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     return_content: true
