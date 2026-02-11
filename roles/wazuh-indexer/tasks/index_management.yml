@@ -380,10 +380,7 @@
     force_basic_auth: true
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     body_format: json
-    body:
-      aliases:
-        "{{ wazuh_alerts_alias | default('wazuh-alerts') }}":
-          is_write_index: true
+    body: "{{ {'aliases': {(wazuh_alerts_alias | default('wazuh-alerts')): {'is_write_index': true}}} }}"
     status_code: [200]
     headers:
       Content-Type: "application/json"
@@ -412,10 +409,7 @@
     force_basic_auth: true
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     body_format: json
-    body:
-      aliases:
-        "{{ wazuh_archives_alias | default('wazuh-archives') }}":
-          is_write_index: true
+    body: "{{ {'aliases': {(wazuh_archives_alias | default('wazuh-archives')): {'is_write_index': true}}} }}"
     status_code: [200]
     headers:
       Content-Type: "application/json"
@@ -444,10 +438,7 @@
     force_basic_auth: true
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     body_format: json
-    body:
-      aliases:
-        "{{ wazuh_monitoring_alias | default('wazuh-monitoring') }}":
-          is_write_index: true
+    body: "{{ {'aliases': {(wazuh_monitoring_alias | default('wazuh-monitoring')): {'is_write_index': true}}} }}"
     status_code: [200]
     headers:
       Content-Type: "application/json"
@@ -476,10 +467,7 @@
     force_basic_auth: true
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     body_format: json
-    body:
-      aliases:
-        "{{ wazuh_statistics_alias | default('wazuh-statistics') }}":
-          is_write_index: true
+    body: "{{ {'aliases': {(wazuh_statistics_alias | default('wazuh-statistics')): {'is_write_index': true}}} }}"
     status_code: [200]
     headers:
       Content-Type: "application/json"
