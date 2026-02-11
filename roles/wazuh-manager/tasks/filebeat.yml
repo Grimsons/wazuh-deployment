@@ -96,46 +96,75 @@
     daemon_reload: true
   become: true
 
-- name: Reset Filebeat failed state (if rate-limited from previous failures)
-  ansible.builtin.command: systemctl reset-failed filebeat
+- name: Validate Filebeat configuration
+  ansible.builtin.command: filebeat test config -c /etc/filebeat/filebeat.yml
   become: true
+  register: filebeat_config_test
   changed_when: false
-  failed_when: false
 
-- name: Restart Filebeat service
-  ansible.builtin.systemd:
-    name: filebeat
-    state: restarted
-  become: true
+- name: Start Filebeat and verify
+  block:
+    - name: Reset Filebeat failed state (if rate-limited from previous failures)
+      ansible.builtin.command: systemctl reset-failed filebeat
+      become: true
+      changed_when: false
+      failed_when: false
 
-- name: Verify Filebeat service is running
-  ansible.builtin.systemd:
-    name: filebeat
-  become: true
-  register: filebeat_service_status
-  until: filebeat_service_status.status.ActiveState == "active"
-  retries: 12
-  delay: 5
+    - name: Restart Filebeat service
+      ansible.builtin.systemd:
+        name: filebeat
+        state: restarted
+      become: true
 
-- name: Show Filebeat logs on failure
-  ansible.builtin.command: journalctl -u filebeat --no-pager -n 30
-  become: true
-  register: filebeat_journal
-  changed_when: false
-  when: filebeat_service_status.status.ActiveState != "active"
+    - name: Verify Filebeat service is running
+      ansible.builtin.systemd:
+        name: filebeat
+      become: true
+      register: filebeat_service_status
+      until: filebeat_service_status.status.ActiveState == "active"
+      retries: 12
+      delay: 5
+  rescue:
+    - name: Collect Filebeat journal logs
+      ansible.builtin.command: journalctl -u filebeat --no-pager -n 50
+      become: true
+      register: filebeat_journal
+      changed_when: false
 
-- name: Fail with diagnostic info if Filebeat is not running
-  ansible.builtin.fail:
-    msg: |
-      Filebeat failed to start. Recent journal output:
-      {{ filebeat_journal.stdout | default('No journal output available') }}
+    - name: Collect Filebeat config test output
+      ansible.builtin.command: filebeat test config -c /etc/filebeat/filebeat.yml
+      become: true
+      register: filebeat_config_retest
+      changed_when: false
+      failed_when: false
 
-      Common causes:
-      - Invalid YAML in /etc/filebeat/filebeat.yml (run: filebeat test config)
-      - Missing certificates in /etc/filebeat/certs/
-      - Indexer unreachable (check connectivity to {{ wazuh_indexer_nodes | map(attribute='ip') | join(', ') }}:{{ wazuh_indexer_http_port }})
-      - Missing wazuh-template.json (check: ls -la /etc/filebeat/wazuh-template.json)
-  when: filebeat_service_status.status.ActiveState != "active"
+    - name: Show rendered Filebeat config (redacted)
+      ansible.builtin.command: grep -n -v password /etc/filebeat/filebeat.yml
+      become: true
+      register: filebeat_config_content
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with diagnostic info
+      ansible.builtin.fail:
+        msg: |
+          Filebeat failed to start on {{ inventory_hostname }}.
+
+          === CONFIG TEST ===
+          {{ filebeat_config_retest.stdout | default('') }}
+          {{ filebeat_config_retest.stderr | default('') }}
+
+          === JOURNAL LOGS (last 50 lines) ===
+          {{ filebeat_journal.stdout | default('No journal output available') }}
+
+          === CONFIG FILE (password redacted) ===
+          {{ filebeat_config_content.stdout | default('Could not read config') }}
+
+          === TROUBLESHOOTING ===
+          - Check: filebeat test config -c /etc/filebeat/filebeat.yml
+          - Check: ls -la /etc/filebeat/certs/
+          - Check: ls -la /etc/filebeat/wazuh-template.json
+          - Check: ls -la /usr/share/filebeat/module/wazuh/
 
 - name: Wait for Filebeat to start sending data
   ansible.builtin.pause:
