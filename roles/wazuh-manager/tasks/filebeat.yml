@@ -79,6 +79,24 @@
     mode: '0600'
   become: true
 
+- name: Verify Filebeat certificate files
+  ansible.builtin.command: openssl x509 -noout -subject -issuer -dates -in /etc/filebeat/certs/{{ item }}
+  become: true
+  register: filebeat_cert_verify
+  changed_when: false
+  loop:
+    - root-ca.pem
+    - filebeat.pem
+
+- name: Verify Filebeat key matches certificate
+  ansible.builtin.shell: |
+    CERT_MOD=$(openssl x509 -noout -modulus -in /etc/filebeat/certs/filebeat.pem 2>&1 | openssl md5)
+    KEY_MOD=$(openssl rsa -noout -modulus -in /etc/filebeat/certs/filebeat-key.pem 2>&1 | openssl md5)
+    if [ "$CERT_MOD" = "$KEY_MOD" ]; then echo "MATCH: cert and key modulus match"; else echo "MISMATCH: cert=$CERT_MOD key=$KEY_MOD"; exit 1; fi
+  become: true
+  register: filebeat_key_match
+  changed_when: false
+
 - name: Configure Filebeat
   ansible.builtin.template:
     src: filebeat.yml.j2
@@ -125,16 +143,43 @@
       retries: 12
       delay: 5
   rescue:
-    - name: Collect Filebeat journal logs
-      ansible.builtin.command: journalctl -u filebeat --no-pager -n 50
+    - name: Collect Filebeat journal logs (full crash output)
+      ansible.builtin.command: journalctl -u filebeat --no-pager -n 200
       become: true
       register: filebeat_journal
       changed_when: false
+
+    - name: Collect Filebeat version info
+      ansible.builtin.command: filebeat version
+      become: true
+      register: filebeat_version_info
+      changed_when: false
+      failed_when: false
+
+    - name: Collect system info
+      ansible.builtin.shell: |
+        echo "=== OS ===" && cat /etc/os-release | head -5
+        echo "=== GLIBC ===" && ldd --version 2>&1 | head -1
+        echo "=== OPENSSL ===" && openssl version
+        echo "=== CERTS ===" && ls -la /etc/filebeat/certs/
+        echo "=== MODULE ===" && ls -la /usr/share/filebeat/module/wazuh/ 2>&1 | head -5
+        echo "=== TEMPLATE ===" && ls -la /etc/filebeat/wazuh-template.json
+      become: true
+      register: system_info
+      changed_when: false
+      failed_when: false
 
     - name: Collect Filebeat config test output
       ansible.builtin.command: filebeat test config -c /etc/filebeat/filebeat.yml
       become: true
       register: filebeat_config_retest
+      changed_when: false
+      failed_when: false
+
+    - name: Collect Filebeat test output
+      ansible.builtin.command: filebeat test output -c /etc/filebeat/filebeat.yml
+      become: true
+      register: filebeat_output_test
       changed_when: false
       failed_when: false
 
@@ -150,21 +195,25 @@
         msg: |
           Filebeat failed to start on {{ inventory_hostname }}.
 
+          === FILEBEAT VERSION ===
+          {{ filebeat_version_info.stdout | default('unknown') }}
+
+          === SYSTEM INFO ===
+          {{ system_info.stdout | default('unknown') }}
+
           === CONFIG TEST ===
           {{ filebeat_config_retest.stdout | default('') }}
           {{ filebeat_config_retest.stderr | default('') }}
 
-          === JOURNAL LOGS (last 50 lines) ===
+          === OUTPUT TEST ===
+          {{ filebeat_output_test.stdout | default('') }}
+          {{ filebeat_output_test.stderr | default('') }}
+
+          === JOURNAL LOGS (last 200 lines) ===
           {{ filebeat_journal.stdout | default('No journal output available') }}
 
           === CONFIG FILE (password redacted) ===
           {{ filebeat_config_content.stdout | default('Could not read config') }}
-
-          === TROUBLESHOOTING ===
-          - Check: filebeat test config -c /etc/filebeat/filebeat.yml
-          - Check: ls -la /etc/filebeat/certs/
-          - Check: ls -la /etc/filebeat/wazuh-template.json
-          - Check: ls -la /usr/share/filebeat/module/wazuh/
 
 - name: Wait for Filebeat to start sending data
   ansible.builtin.pause:
