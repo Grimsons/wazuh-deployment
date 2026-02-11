@@ -126,11 +126,16 @@
     daemon_reload: true
   become: true
 
-- name: Start Filebeat service (non-blocking)
+- name: Reset Filebeat failed state (if rate-limited from previous failures)
+  ansible.builtin.command: systemctl reset-failed filebeat
+  become: true
+  changed_when: false
+  failed_when: false
+
+- name: Restart Filebeat service
   ansible.builtin.systemd:
     name: filebeat
-    state: started
-    no_block: true
+    state: restarted
   become: true
 
 - name: Verify Filebeat service is running
@@ -139,8 +144,28 @@
   become: true
   register: filebeat_service_status
   until: filebeat_service_status.status.ActiveState == "active"
-  retries: 30
+  retries: 12
   delay: 5
+
+- name: Show Filebeat logs on failure
+  ansible.builtin.command: journalctl -u filebeat --no-pager -n 30
+  become: true
+  register: filebeat_journal
+  changed_when: false
+  when: filebeat_service_status.status.ActiveState != "active"
+
+- name: Fail with diagnostic info if Filebeat is not running
+  ansible.builtin.fail:
+    msg: |
+      Filebeat failed to start. Recent journal output:
+      {{ filebeat_journal.stdout | default('No journal output available') }}
+
+      Common causes:
+      - Invalid YAML in /etc/filebeat/filebeat.yml (run: filebeat test config)
+      - Missing certificates in /etc/filebeat/certs/
+      - Indexer unreachable (check connectivity to {{ wazuh_indexer_nodes | map(attribute='ip') | join(', ') }}:{{ wazuh_indexer_http_port }})
+      - Missing wazuh-template.json (check: ls -la /etc/filebeat/wazuh-template.json)
+  when: filebeat_service_status.status.ActiveState != "active"
 
 - name: Wait for Filebeat to start sending data
   ansible.builtin.pause:
