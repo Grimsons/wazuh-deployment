@@ -67,9 +67,9 @@
   ansible.builtin.uri:
     url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/api/status"
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
-    status_code: [200, 302]
+    status_code: [200, 302, 401]
   register: dashboard_health
-  until: dashboard_health.status | default(0) in [200, 302]
+  until: dashboard_health.status | default(0) in [200, 302, 401]
   retries: "{{ wazuh_dashboard_health_check_retries }}"
   delay: "{{ wazuh_dashboard_health_check_delay }}"
   failed_when: false
@@ -80,7 +80,7 @@
   register: dashboard_status
   changed_when: false
   failed_when: false
-  when: dashboard_health.status is not defined or dashboard_health.status not in [200, 302]
+  when: dashboard_health.status | default(0) not in [200, 302, 401]
 
 - name: Get dashboard journal logs if health check failed
   ansible.builtin.command: journalctl -u wazuh-dashboard --no-pager -n 50
@@ -88,7 +88,7 @@
   register: dashboard_journal
   changed_when: false
   failed_when: false
-  when: dashboard_health.status is not defined or dashboard_health.status not in [200, 302]
+  when: dashboard_health.status | default(0) not in [200, 302, 401]
 
 - name: Display dashboard diagnostic info
   ansible.builtin.debug:
@@ -98,7 +98,7 @@
 
       === Journal Logs ===
       {{ dashboard_journal.stdout | default('No logs available') }}
-  when: dashboard_health.status is not defined or dashboard_health.status not in [200, 302]
+  when: dashboard_health.status | default(0) not in [200, 302, 401]
 
 - name: Fail if dashboard is not healthy
   ansible.builtin.fail:
@@ -115,7 +115,7 @@
         curl -k https://<indexer-ip>:9200 -u admin:<password>
 
       See diagnostic info above for service status and logs.
-  when: dashboard_health.status is not defined or dashboard_health.status not in [200, 302]
+  when: dashboard_health.status | default(0) not in [200, 302, 401]
 
 - name: Setup index patterns
   ansible.builtin.include_tasks: index_patterns.yml
