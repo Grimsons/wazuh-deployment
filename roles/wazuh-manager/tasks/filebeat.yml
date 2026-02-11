@@ -114,6 +114,37 @@
     daemon_reload: true
   become: true
 
+- name: Create Filebeat systemd override directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/filebeat.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+# Filebeat 7.10.2 was compiled with Go ~1.15 which uses async preemption
+# via signals. On newer Linux kernels (6.x+), this causes a crash in the
+# Go runtime (runtime: unknown pc, reflect.Value.Set panic during JSON
+# template loading). Disabling async preemption fixes this.
+- name: Fix Filebeat Go runtime crash on newer kernels
+  ansible.builtin.copy:
+    content: |
+      [Service]
+      Environment="GODEBUG=asyncpreemptoff=1"
+    dest: /etc/systemd/system/filebeat.service.d/go-compat.conf
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  register: filebeat_godebug
+
+- name: Reload systemd after override
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+  when: filebeat_godebug.changed
+
 - name: Validate Filebeat configuration
   ansible.builtin.command: filebeat test config -c /etc/filebeat/filebeat.yml
   become: true
