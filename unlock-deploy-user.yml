@@ -5,47 +5,48 @@
 # Usage:
 #   ansible-playbook unlock-deploy-user.yml
 #
-# This playbook connects as the bootstrap user (the initial SSH user
-# specified during setup) which retains full sudo access even after
-# the deployment user is locked down. It then restores the deployment
-# user's sudo access by running the unlock script.
+# This playbook uses the 'raw' module to bypass Ansible's Python module
+# system entirely. This is necessary because:
+# - The locked-down sudoers only allows specific commands (not bare python3)
+# - Ansible's pipelining runs 'sudo python3' without a file path, which
+#   doesn't match the restricted sudoers rules
+# - The 'raw' module sends commands directly over SSH, so 'sudo <command>'
+#   in the raw command matches the sudoers rules exactly
 
 - name: Unlock Wazuh Deployment User
   hosts: all
   gather_facts: false
-  become: true
-  vars:
-    # Connect as the bootstrap user instead of the locked-down wazuh-deploy user.
-    # The bootstrap user (specified during setup.sh/setup-tui.sh) retains full
-    # sudo access and can run the unlock script on behalf of the deploy user.
-    ansible_user: "{{ wazuh_bootstrap_user | default('root') }}"
-    ansible_ssh_pass: "{{ vault_ansible_connection_password | default(wazuh_bootstrap_password) | default(omit) }}"
-    ansible_ssh_private_key_file: "{{ wazuh_bootstrap_ssh_key | default(omit) }}"
+  # Explicitly disable become - we handle sudo directly in raw commands
+  # to match the locked-down sudoers rules exactly
+  become: false
   tasks:
     - name: Check if user is locked down
-      ansible.builtin.stat:
-        path: /var/lib/wazuh-deploy/.locked
+      ansible.builtin.raw: test -f /var/lib/wazuh-deploy/.locked && echo "LOCKED" || echo "UNLOCKED"
       register: lock_flag
+      changed_when: false
 
     - name: Display current status
       ansible.builtin.debug:
-        msg: "{{ 'User is LOCKED - unlocking...' if lock_flag.stat.exists else 'User is already UNLOCKED' }}"
+        msg: "{{ 'User is LOCKED on ' + inventory_hostname + ' - unlocking...' if 'LOCKED' in lock_flag.stdout else 'User is already UNLOCKED on ' + inventory_hostname }}"
 
     - name: Run unlock script
-      ansible.builtin.command:
-        cmd: /usr/local/bin/wazuh-unlock-deploy
+      ansible.builtin.raw: sudo /usr/local/bin/wazuh-unlock-deploy
       register: unlock_result
       changed_when: unlock_result.rc == 0
-      when: lock_flag.stat.exists
+      when: "'LOCKED' in lock_flag.stdout"
 
     - name: Verify unlock was successful
-      ansible.builtin.stat:
-        path: /var/lib/wazuh-deploy/.locked
+      ansible.builtin.raw: test -f /var/lib/wazuh-deploy/.locked && echo "STILL_LOCKED" || echo "UNLOCKED"
       register: lock_check
+      changed_when: false
+      when: "'LOCKED' in lock_flag.stdout"
 
     - name: Confirm unlock status
       ansible.builtin.debug:
-        msg: "{{ 'SUCCESS: User unlocked on ' + inventory_hostname if not lock_check.stat.exists else 'WARNING: User may still be locked on ' + inventory_hostname }}"
+        msg: >-
+          {{ 'SUCCESS: User unlocked on ' + inventory_hostname
+             if (lock_check is skipped or 'UNLOCKED' in (lock_check.stdout | default('')))
+             else 'WARNING: User may still be locked on ' + inventory_hostname }}
 
 - name: Unlock Summary
   hosts: localhost
