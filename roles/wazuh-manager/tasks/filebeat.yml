@@ -135,10 +135,7 @@
       [Service]
       Type=simple
       Environment="GODEBUG=asyncpreemptoff=1"
-      Environment="BEAT_LOG_OPTS="
-      Environment="BEAT_CONFIG_OPTS=-c /etc/filebeat/filebeat.yml"
-      Environment="BEAT_PATH_OPTS=--path.home /usr/share/filebeat --path.config /etc/filebeat --path.data /var/lib/filebeat --path.logs /var/log/filebeat"
-      ExecStart=/usr/share/filebeat/bin/filebeat-god -f -r / -n -p /var/run/filebeat.pid -- /usr/share/filebeat/bin/filebeat $BEAT_LOG_OPTS $BEAT_CONFIG_OPTS $BEAT_PATH_OPTS
+      ExecStart=/usr/share/filebeat/bin/filebeat-god -f -r / -n -- /usr/share/filebeat/bin/filebeat -c /etc/filebeat/filebeat.yml --path.home /usr/share/filebeat --path.config /etc/filebeat --path.data /var/lib/filebeat --path.logs /var/log/filebeat
       Restart=always
       RestartSec=5
 
@@ -209,6 +206,12 @@
           Filebeat will crash-loop if started without indexer connectivity.
           ══════════════════════════════════════════════════════════════
 
+- name: Clean up stale Filebeat PID file from previous crashes
+  ansible.builtin.file:
+    path: /var/run/filebeat.pid
+    state: absent
+  become: true
+
 - name: Start Filebeat and verify
   block:
     - name: Reset Filebeat failed state (if rate-limited from previous failures)
@@ -231,7 +234,7 @@
       until: >-
         filebeat_service_status.status.ActiveState == "active"
         and filebeat_service_status.status.SubState == "running"
-      retries: 12
+      retries: 30
       delay: 5
   rescue:
     - name: Collect Filebeat journal logs (full crash output)
