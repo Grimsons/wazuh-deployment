@@ -1,0 +1,207 @@
+# Wazuh Prometheus Alerting Rules
+# Deploy to your Prometheus rules directory
+#
+# Usage with Prometheus:
+#   rule_files:
+#     - /etc/prometheus/rules/wazuh-alerts.yml
+
+groups:
+  - name: wazuh_cluster_health
+    interval: 30s
+    rules:
+      - alert: WazuhIndexerClusterRed
+        expr: wazuh_indexer_cluster_status == 2
+        for: 5m
+        labels:
+          severity: critical
+          component: indexer
+        annotations:
+          summary: "Wazuh Indexer cluster status is RED"
+          description: "The OpenSearch cluster has been RED for more than 5 minutes. Data loss may be occurring."
+
+      - alert: WazuhIndexerClusterYellow
+        expr: wazuh_indexer_cluster_status == 1
+        for: 15m
+        labels:
+          severity: warning
+          component: indexer
+        annotations:
+          summary: "Wazuh Indexer cluster status is YELLOW"
+          description: "The OpenSearch cluster has been YELLOW for more than 15 minutes. Some replicas are unassigned."
+
+      - alert: WazuhIndexerNodeDown
+        expr: up{job="wazuh-indexer"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: indexer
+        annotations:
+          summary: "Wazuh Indexer node {{ $labels.instance }} is down"
+          description: "Cannot reach indexer metrics endpoint for more than 2 minutes."
+
+  - name: wazuh_manager_health
+    interval: 30s
+    rules:
+      - alert: WazuhManagerDown
+        expr: up{job="wazuh-manager"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: manager
+        annotations:
+          summary: "Wazuh Manager exporter {{ $labels.instance }} is down"
+          description: "Cannot reach manager metrics endpoint for more than 2 minutes."
+
+      - alert: WazuhManagerNotRunning
+        expr: wazuh_manager_status == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: manager
+        annotations:
+          summary: "Wazuh Manager daemons are not all running"
+          description: "One or more Wazuh Manager daemons are not in running state."
+
+      - alert: WazuhManagerAPIDown
+        expr: wazuh_manager_api_reachable == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: manager
+        annotations:
+          summary: "Wazuh Manager API is unreachable"
+          description: "The Wazuh API has been unreachable for more than 5 minutes."
+
+  - name: wazuh_agent_health
+    interval: 60s
+    rules:
+      - alert: WazuhAgentDisconnectionSpike
+        expr: |
+          (wazuh_manager_agents_disconnected - wazuh_manager_agents_disconnected offset 5m) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: agents
+        annotations:
+          summary: "Spike in disconnected Wazuh agents"
+          description: "More than 5 agents disconnected in the last 5 minutes. Current disconnected: {{ $value }}."
+
+      - alert: WazuhHighDisconnectedAgents
+        expr: |
+          (wazuh_manager_agents_disconnected / (wazuh_manager_agents_active + wazuh_manager_agents_disconnected)) > 0.2
+        for: 10m
+        labels:
+          severity: critical
+          component: agents
+        annotations:
+          summary: "High percentage of disconnected Wazuh agents"
+          description: "More than 20% of agents have been disconnected for over 10 minutes."
+
+      - alert: WazuhNoActiveAgents
+        expr: wazuh_manager_agents_active == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: agents
+        annotations:
+          summary: "No active Wazuh agents"
+          description: "Zero agents are connected to the Wazuh Manager."
+
+  - name: wazuh_resource_health
+    interval: 60s
+    rules:
+      - alert: WazuhIndexerDiskHigh
+        expr: wazuh_indexer_fs_used_percent > 80
+        for: 10m
+        labels:
+          severity: warning
+          component: indexer
+        annotations:
+          summary: "Wazuh Indexer disk usage above 80%"
+          description: "Disk usage on {{ $labels.instance }} is {{ $value }}%. Consider cleaning old indices."
+
+      - alert: WazuhIndexerDiskCritical
+        expr: wazuh_indexer_fs_used_percent > 90
+        for: 5m
+        labels:
+          severity: critical
+          component: indexer
+        annotations:
+          summary: "Wazuh Indexer disk usage above 90%"
+          description: "Disk usage on {{ $labels.instance }} is {{ $value }}%. Indexer may stop accepting data."
+
+      - alert: WazuhIndexerJVMHeapHigh
+        expr: wazuh_indexer_jvm_heap_used_percent > 85
+        for: 10m
+        labels:
+          severity: warning
+          component: indexer
+        annotations:
+          summary: "Wazuh Indexer JVM heap usage above 85%"
+          description: "JVM heap on {{ $labels.instance }} is {{ $value }}%. Consider increasing heap size."
+
+      - alert: WazuhIndexerJVMHeapCritical
+        expr: wazuh_indexer_jvm_heap_used_percent > 95
+        for: 5m
+        labels:
+          severity: critical
+          component: indexer
+        annotations:
+          summary: "Wazuh Indexer JVM heap usage above 95%"
+          description: "JVM heap on {{ $labels.instance }} is {{ $value }}%. OOM kill is imminent."
+
+      - alert: WazuhManagerEventQueueFilling
+        expr: wazuh_manager_events_dropped > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: manager
+        annotations:
+          summary: "Wazuh Manager is dropping events"
+          description: "Events are being dropped on {{ $labels.instance }}. The analysis engine cannot keep up with incoming event volume."
+
+  - name: wazuh_certificate_health
+    interval: 6h
+    rules:
+      - alert: WazuhCertificateExpiringSoon
+        expr: wazuh_indexer_cert_days_remaining < 30
+        for: 1h
+        labels:
+          severity: warning
+          component: certificates
+        annotations:
+          summary: "Wazuh certificate expiring within 30 days"
+          description: "Certificate on {{ $labels.instance }} expires in {{ $value }} days. Run certificate rotation."
+
+      - alert: WazuhCertificateExpired
+        expr: wazuh_indexer_cert_days_remaining <= 0
+        for: 0m
+        labels:
+          severity: critical
+          component: certificates
+        annotations:
+          summary: "Wazuh certificate has EXPIRED"
+          description: "Certificate on {{ $labels.instance }} has expired. Services may stop working. Immediate rotation required."
+
+  - name: wazuh_events
+    interval: 60s
+    rules:
+      - alert: WazuhHighAlertRate
+        expr: rate(wazuh_manager_events_total[5m]) > 1000
+        for: 10m
+        labels:
+          severity: warning
+          component: manager
+        annotations:
+          summary: "Wazuh alert rate is unusually high"
+          description: "Alert rate on {{ $labels.instance }} is {{ $value }}/s. This may indicate an active attack or misconfiguration."
+
+      - alert: WazuhNoEventsReceived
+        expr: rate(wazuh_manager_events_total[15m]) == 0
+        for: 15m
+        labels:
+          severity: warning
+          component: manager
+        annotations:
+          summary: "No events received by Wazuh Manager"
+          description: "The Wazuh Manager on {{ $labels.instance }} has not received any events for 15 minutes. Check agent connectivity."

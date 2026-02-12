@@ -70,8 +70,21 @@ Single server deployment suitable for small environments (< 50 agents).
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Deployment command:**
+**Production deployment:**
 ```bash
+# 1. Run setup wizard (generates inventory with single host for all components)
+./setup.sh          # or ./setup-tui.sh for TUI version
+
+# 2. Deploy with bootstrap (first time)
+ansible-playbook site.yml --tags bootstrap,all
+
+# 3. Subsequent deployments
+ansible-playbook site.yml
+```
+
+**Quick test only (not for production):**
+```bash
+# Minimal test deployment - no credential management, no index policies
 ansible-playbook wazuh-aio.yml -e "target_host=192.168.1.10"
 ```
 
@@ -402,8 +415,12 @@ Multi-node cluster for production environments (500+ agents).
           │  1 server     │  │  3 servers    │  │  7+ servers   │
           │  8GB RAM      │  │  8GB each     │  │  Varies       │
           │               │  │               │  │               │
-          │  wazuh-aio.yml│  │  site.yml     │  │  Custom inv.  │
+          │  site.yml     │  │  site.yml     │  │  site.yml     │
+          │  (1 host inv) │  │  (3 host inv) │  │  (custom inv) │
           └───────────────┘  └───────────────┘  └───────────────┘
+
+    All deployments use: ./setup.sh → ansible-playbook site.yml
+    The setup wizard generates the appropriate inventory for your scale.
 ```
 
 ---

@@ -33,6 +33,51 @@
     log_cleanup_cron_id: "wazuh-log-cleanup"
 
   tasks:
+    - name: Check if crontab is available
+      ansible.builtin.command: which crontab
+      register: crontab_check
+      changed_when: false
+      failed_when: false
+
+    - name: Install cron if not available (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name: cron
+        state: present
+      become: true
+      when:
+        - crontab_check.rc != 0
+        - ansible_os_family | default('') == 'Debian'
+
+    - name: Install cron if not available (RedHat/CentOS)
+      ansible.builtin.yum:
+        name: cronie
+        state: present
+      become: true
+      when:
+        - crontab_check.rc != 0
+        - ansible_os_family | default('') == 'RedHat'
+
+    - name: Re-check crontab after install attempt
+      ansible.builtin.command: which crontab
+      register: crontab_recheck
+      changed_when: false
+      failed_when: false
+      when: crontab_check.rc != 0
+
+    - name: Set cron availability flag
+      ansible.builtin.set_fact:
+        cron_available: "{{ (crontab_check.rc == 0) or (crontab_recheck.rc | default(1) == 0) }}"
+
+    - name: Warn if cron is not available
+      ansible.builtin.debug:
+        msg: |
+          WARNING: crontab is not available on this system.
+          Skipping cron job setup. Install cron manually:
+            Debian/Ubuntu: sudo apt install cron
+            RHEL/CentOS:   sudo dnf install cronie
+            Then re-run: ansible-playbook playbooks/setup-maintenance-cron.yml
+      when: not cron_available
+
     - name: Display maintenance configuration
       ansible.builtin.debug:
         msg: |
@@ -75,16 +120,21 @@
       ansible.builtin.cron:
         name: "{{ backup_cron_id }}"
         state: absent
+      when: cron_available
 
     - name: Create backup wrapper script
-      when: wazuh_backup_schedule | default('daily') != 'disabled'
+      when:
+        - cron_available
+        - wazuh_backup_schedule | default('daily') != 'disabled'
       ansible.builtin.template:
         src: maintenance/run-scheduled-backup.sh.j2
         dest: "{{ scripts_dir }}/run-scheduled-backup.sh"
         mode: '0755'
 
     - name: Setup daily backup cron job
-      when: wazuh_backup_schedule | default('daily') == 'daily'
+      when:
+        - cron_available
+        - wazuh_backup_schedule | default('daily') == 'daily'
       ansible.builtin.cron:
         name: "{{ backup_cron_id }}"
         minute: "0"
@@ -92,7 +142,9 @@
         job: "{{ scripts_dir }}/run-scheduled-backup.sh"
 
     - name: Setup weekly backup cron job
-      when: wazuh_backup_schedule | default('daily') == 'weekly'
+      when:
+        - cron_available
+        - wazuh_backup_schedule | default('daily') == 'weekly'
       ansible.builtin.cron:
         name: "{{ backup_cron_id }}"
         minute: "0"
@@ -108,9 +160,11 @@
       ansible.builtin.cron:
         name: "{{ log_cleanup_cron_id }}"
         state: absent
+      when: cron_available
 
     - name: Setup daily log cleanup cron job
       when:
+        - cron_available
         - wazuh_log_cleanup_enabled | default(true) | bool
         - wazuh_log_cleanup_schedule | default('daily') == 'daily'
       ansible.builtin.cron:
@@ -121,6 +175,7 @@
 
     - name: Setup weekly log cleanup cron job
       when:
+        - cron_available
         - wazuh_log_cleanup_enabled | default(true) | bool
         - wazuh_log_cleanup_schedule | default('daily') == 'weekly'
       ansible.builtin.cron:
@@ -139,6 +194,7 @@
         crontab -l 2>/dev/null | grep -E "(wazuh-scheduled-backup|wazuh-log-cleanup)" || echo "No Wazuh maintenance cron jobs found"
       register: cron_output
       changed_when: false
+      when: cron_available
 
     - name: Show configured cron jobs
       ansible.builtin.debug:
@@ -146,7 +202,7 @@
           ═══════════════════════════════════════════════════════════════
           MAINTENANCE CRON JOBS CONFIGURED
           ═══════════════════════════════════════════════════════════════
-          {{ cron_output.stdout }}
+          {{ cron_output.stdout | default('Cron not available - skipped') }}
 
           Log files:
             - Backup logs: {{ logs_dir }}/backup-cron.log

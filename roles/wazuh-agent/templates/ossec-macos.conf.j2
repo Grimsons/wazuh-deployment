@@ -4,13 +4,13 @@
 -->
 <ossec_config>
   <client>
-    <server>
 {% for node in wazuh_manager_nodes %}
+    <server>
       <address>{{ node.ip }}</address>
-{% endfor %}
       <port>{{ wazuh_manager_agent_port | default(1514) }}</port>
       <protocol>{{ wazuh_agent_protocol | default('tcp') }}</protocol>
     </server>
+{% endfor %}
     <config-profile>macos, macos{{ ansible_distribution_major_version }}</config-profile>
     <notify_time>{{ wazuh_agent_notify_time | default(10) }}</notify_time>
     <time-reconnect>{{ wazuh_agent_time_reconnect | default(60) }}</time-reconnect>
@@ -54,7 +54,7 @@
   <!-- Agent Enrollment -->
   <enrollment>
     <enabled>yes</enabled>
-    <manager_address>{{ wazuh_manager_address | default(wazuh_manager_nodes[0].ip) }}</manager_address>
+    <manager_address>{{ wazuh_manager_address | default(wazuh_manager_nodes[0].ip, true) }}</manager_address>
     <port>1515</port>
     <agent_name>{{ ansible_hostname }}</agent_name>
 {% if wazuh_authd_use_password | default(true) %}
@@ -79,6 +79,24 @@
     <directories check_all="yes" realtime="yes">/usr/local/bin</directories>
     <directories check_all="yes" realtime="yes">/usr/local/sbin</directories>
     <directories check_all="yes" realtime="yes">/Applications</directories>
+    <!-- Persistence: Launch Agents/Daemons (T1543.004, T1547.011) -->
+    <directories check_all="yes" realtime="yes">/Library/LaunchAgents</directories>
+    <directories check_all="yes" realtime="yes">/Library/LaunchDaemons</directories>
+    <directories check_all="yes" realtime="yes">/System/Library/LaunchAgents</directories>
+    <directories check_all="yes" realtime="yes">/System/Library/LaunchDaemons</directories>
+    <!-- User-level persistence -->
+    <directories check_all="yes" realtime="yes">/Users/*/Library/LaunchAgents</directories>
+    <!-- Privacy/TCC database (T1562 - Impair Defenses) -->
+    <directories check_all="yes">/Library/Application Support/com.apple.TCC</directories>
+    <!-- Authorization plugins -->
+    <directories check_all="yes" realtime="yes">/Library/Security/SecurityAgentPlugins</directories>
+    <!-- Login/Logout hooks -->
+    <directories check_all="yes" realtime="yes">/private/var/root/Library/Preferences/com.apple.loginwindow.plist</directories>
+    <!-- Sudoers -->
+    <directories check_all="yes" realtime="yes">/etc/sudoers.d</directories>
+    <directories check_all="yes" realtime="yes">/private/etc/sudoers</directories>
+    <!-- SSH keys -->
+    <directories check_all="yes" realtime="yes">/Users/*/.ssh/authorized_keys</directories>
     <ignore>/etc/hosts.deny</ignore>
     <ignore>/etc/mail/statistics</ignore>
     <skip_nfs>yes</skip_nfs>
@@ -130,6 +148,46 @@
     <command>last -n 20</command>
     <frequency>360</frequency>
   </localfile>
+
+  <!-- Gatekeeper/XProtect events (T1553 - Subvert Trust Controls) -->
+  <localfile>
+    <log_format>command</log_format>
+    <command>log show --style syslog --predicate 'subsystem == "com.apple.ManagedClient" OR subsystem == "com.apple.syspolicy.exec"' --last 5m 2>/dev/null | tail -50</command>
+    <alias>gatekeeper_events</alias>
+    <frequency>300</frequency>
+  </localfile>
+
+  <!-- Authorization and authentication events -->
+  <localfile>
+    <log_format>command</log_format>
+    <command>log show --style syslog --predicate 'category == "authorization" OR subsystem == "com.apple.Authorization"' --last 5m 2>/dev/null | tail -50</command>
+    <alias>authorization_events</alias>
+    <frequency>300</frequency>
+  </localfile>
+
+  <!-- Process execution events -->
+  <localfile>
+    <log_format>command</log_format>
+    <command>log show --style syslog --predicate 'subsystem == "com.apple.endpointsecurity"' --last 5m 2>/dev/null | tail -50</command>
+    <alias>endpoint_security</alias>
+    <frequency>300</frequency>
+  </localfile>
+
+  <!-- Login window / screensaver events -->
+  <localfile>
+    <log_format>command</log_format>
+    <command>log show --style syslog --predicate 'subsystem == "com.apple.loginwindow"' --last 5m 2>/dev/null | tail -50</command>
+    <alias>loginwindow_events</alias>
+    <frequency>300</frequency>
+  </localfile>
+
+  <!-- OpenSSH events -->
+  <localfile>
+    <log_format>command</log_format>
+    <command>log show --style syslog --predicate 'process == "sshd"' --last 5m 2>/dev/null | tail -50</command>
+    <alias>sshd_events</alias>
+    <frequency>300</frequency>
+  </localfile>
 {% endif %}
 
 {% if wazuh_agent_syscollector_enabled | default(true) %}
@@ -163,6 +221,12 @@
     <ca_store>etc/wpk_root.pem</ca_store>
     <ca_verification>yes</ca_verification>
   </active-response>
+
+  <!-- Anti-flooding: Logcollector rate limiting -->
+  <!-- Prevents log collection storms from overwhelming the manager -->
+  <logcollector>
+    <max_eps>{{ wazuh_agent_logcollector_max_eps | default(500) }}</max_eps>
+  </logcollector>
 
   <!-- Agent log format -->
   <logging>

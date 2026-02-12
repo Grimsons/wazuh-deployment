@@ -1,0 +1,246 @@
+---
+# Wazuh Compliance Report Generation
+# Collects SCA, vulnerability, and agent status data to generate compliance reports
+#
+# Usage:
+#   Full compliance report:
+#     ansible-playbook playbooks/compliance-report.yml
+#
+#   SCA-only report:
+#     ansible-playbook playbooks/compliance-report.yml --tags sca
+#
+#   Vulnerability-only report:
+#     ansible-playbook playbooks/compliance-report.yml --tags vulnerability
+#
+#   Output to specific directory:
+#     ansible-playbook playbooks/compliance-report.yml -e "report_dir=/path/to/reports"
+#
+#   JSON output (for integration with other tools):
+#     ansible-playbook playbooks/compliance-report.yml -e "report_format=json"
+
+- name: "Compliance Report: Gather Data from Manager"
+  hosts: wazuh_managers[0]
+  become: true
+  gather_facts: true
+  vars:
+    report_dir: "{{ playbook_dir }}/../reports"
+    report_format: "{{ report_format | default('text') }}"
+    api_url: "https://127.0.0.1:{{ wazuh_manager_api_port | default(55000) }}"
+
+  tasks:
+    # ═══════════════════════════════════════════════════════════════
+    # API Authentication
+    # ═══════════════════════════════════════════════════════════════
+    - name: Authenticate to Wazuh API
+      ansible.builtin.uri:
+        url: "{{ api_url }}/security/user/authenticate"
+        method: POST
+        user: "{{ wazuh_api_user | default('wazuh') }}"
+        password: "{{ wazuh_api_password | default(vault_wazuh_api_password) }}"
+        validate_certs: false
+        return_content: true
+        status_code: [200]
+      register: api_auth
+      no_log: true
+      tags: [always]
+
+    - name: Set API token
+      ansible.builtin.set_fact:
+        api_token: "{{ api_auth.json.data.token }}"
+      no_log: true
+      tags: [always]
+
+    # ═══════════════════════════════════════════════════════════════
+    # Agent Status Collection
+    # ═══════════════════════════════════════════════════════════════
+    - name: Get agent summary
+      ansible.builtin.uri:
+        url: "{{ api_url }}/agents/summary/status"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ api_token }}"
+        validate_certs: false
+        return_content: true
+      register: agent_summary
+      tags: [agents, sca, vulnerability]
+
+    - name: Get agent list
+      ansible.builtin.uri:
+        url: "{{ api_url }}/agents?limit=500&select=id,name,status,os.name,os.version,version,dateAdd,lastKeepAlive"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ api_token }}"
+        validate_certs: false
+        return_content: true
+      register: agent_list
+      tags: [agents, sca, vulnerability]
+
+    # ═══════════════════════════════════════════════════════════════
+    # SCA (Security Configuration Assessment) Collection
+    # ═══════════════════════════════════════════════════════════════
+    - name: Get SCA results for each active agent
+      ansible.builtin.uri:
+        url: "{{ api_url }}/sca/{{ item.id }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ api_token }}"
+        validate_certs: false
+        return_content: true
+      loop: "{{ agent_list.json.data.affected_items | selectattr('status', 'equalto', 'active') | list }}"
+      loop_control:
+        label: "{{ item.name }} ({{ item.id }})"
+      register: sca_results
+      failed_when: false
+      tags: [sca]
+
+    - name: Compile SCA summary
+      ansible.builtin.set_fact:
+        sca_summary: >-
+          {% set results = [] %}
+          {% for result in sca_results.results | default([]) %}
+          {% if result.json is defined and result.json.data is defined %}
+          {% for policy in result.json.data.affected_items | default([]) %}
+          {% set _ = results.append({
+            'agent': result.item.name,
+            'agent_id': result.item.id,
+            'policy': policy.name | default('Unknown'),
+            'pass': policy.pass | default(0),
+            'fail': policy.fail | default(0),
+            'invalid': policy.invalid | default(0),
+            'score': policy.score | default(0)
+          }) %}
+          {% endfor %}
+          {% endif %}
+          {% endfor %}
+          {{ results }}
+      tags: [sca]
+
+    # ═══════════════════════════════════════════════════════════════
+    # Vulnerability Assessment Collection
+    # ═══════════════════════════════════════════════════════════════
+    - name: Get vulnerability summary for active agents
+      ansible.builtin.uri:
+        url: "{{ api_url }}/vulnerability/{{ item.id }}/summary/cve"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ api_token }}"
+        validate_certs: false
+        return_content: true
+      loop: "{{ agent_list.json.data.affected_items | selectattr('status', 'equalto', 'active') | list }}"
+      loop_control:
+        label: "{{ item.name }} ({{ item.id }})"
+      register: vuln_results
+      failed_when: false
+      tags: [vulnerability]
+
+    - name: Compile vulnerability summary
+      ansible.builtin.set_fact:
+        vuln_summary: >-
+          {% set results = [] %}
+          {% for result in vuln_results.results | default([]) %}
+          {% if result.json is defined and result.json.data is defined %}
+          {% set _ = results.append({
+            'agent': result.item.name,
+            'agent_id': result.item.id,
+            'critical': result.json.data.Critical | default(0),
+            'high': result.json.data.High | default(0),
+            'medium': result.json.data.Medium | default(0),
+            'low': result.json.data.Low | default(0)
+          }) %}
+          {% endif %}
+          {% endfor %}
+          {{ results }}
+      tags: [vulnerability]
+
+    # ═══════════════════════════════════════════════════════════════
+    # Report Generation
+    # ═══════════════════════════════════════════════════════════════
+    - name: Create report directory
+      ansible.builtin.file:
+        path: "{{ report_dir }}"
+        state: directory
+        mode: '0750'
+      delegate_to: localhost
+      become: false
+      tags: [always]
+
+    - name: Generate text compliance report
+      ansible.builtin.copy:
+        content: |
+          ══════════════════════════════════════════════════════════════════════
+          WAZUH COMPLIANCE REPORT
+          Generated: {{ ansible_date_time.iso8601 }}
+          Manager: {{ inventory_hostname }}
+          ══════════════════════════════════════════════════════════════════════
+
+          AGENT STATUS SUMMARY
+          ──────────────────────────────────────────────────────────────────────
+          Active:        {{ agent_summary.json.data.active | default(0) }}
+          Disconnected:  {{ agent_summary.json.data.disconnected | default(0) }}
+          Never connected: {{ agent_summary.json.data.never_connected | default(0) }}
+          Pending:       {{ agent_summary.json.data.pending | default(0) }}
+          Total:         {{ agent_summary.json.data.total | default(0) }}
+
+          SECURITY CONFIGURATION ASSESSMENT (SCA)
+          ──────────────────────────────────────────────────────────────────────
+          {% for entry in sca_summary | default([]) %}
+          Agent: {{ entry.agent }} (ID: {{ entry.agent_id }})
+            Policy: {{ entry.policy }}
+            Score:  {{ entry.score }}%  |  Pass: {{ entry.pass }}  |  Fail: {{ entry.fail }}  |  Invalid: {{ entry.invalid }}
+          {% endfor %}
+          {% if sca_summary | default([]) | length == 0 %}
+          No SCA data available.
+          {% endif %}
+
+          VULNERABILITY ASSESSMENT
+          ──────────────────────────────────────────────────────────────────────
+          {% for entry in vuln_summary | default([]) %}
+          Agent: {{ entry.agent }} (ID: {{ entry.agent_id }})
+            Critical: {{ entry.critical }}  |  High: {{ entry.high }}  |  Medium: {{ entry.medium }}  |  Low: {{ entry.low }}
+          {% endfor %}
+          {% if vuln_summary | default([]) | length == 0 %}
+          No vulnerability data available.
+          {% endif %}
+
+          ══════════════════════════════════════════════════════════════════════
+          END OF REPORT
+          ══════════════════════════════════════════════════════════════════════
+        dest: "{{ report_dir }}/compliance-report-{{ ansible_date_time.date }}.txt"
+        mode: '0640'
+      delegate_to: localhost
+      become: false
+      when: report_format == 'text'
+      tags: [always]
+
+    - name: Generate JSON compliance report
+      ansible.builtin.copy:
+        content: |
+          {{ {
+            'report_date': ansible_date_time.iso8601,
+            'manager': inventory_hostname,
+            'agent_summary': agent_summary.json.data | default({}),
+            'agents': agent_list.json.data.affected_items | default([]),
+            'sca': sca_summary | default([]),
+            'vulnerabilities': vuln_summary | default([])
+          } | to_nice_json }}
+        dest: "{{ report_dir }}/compliance-report-{{ ansible_date_time.date }}.json"
+        mode: '0640'
+      delegate_to: localhost
+      become: false
+      when: report_format == 'json'
+      tags: [always]
+
+    - name: Display report location
+      ansible.builtin.debug:
+        msg: |
+          ══════════════════════════════════════════════════════════════
+          Compliance report generated:
+            {{ report_dir }}/compliance-report-{{ ansible_date_time.date }}.{{ report_format }}
+
+          Agent coverage:
+            Active: {{ agent_summary.json.data.active | default(0) }} / {{ agent_summary.json.data.total | default(0) }}
+
+          SCA policies evaluated: {{ sca_summary | default([]) | length }}
+          Vulnerability scans:    {{ vuln_summary | default([]) | length }}
+          ══════════════════════════════════════════════════════════════
+      tags: [always]

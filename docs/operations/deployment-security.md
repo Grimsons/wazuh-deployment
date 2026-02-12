@@ -288,6 +288,37 @@ Wazuh includes rules and dashboards for:
 - TSC (SOC 2)
 - GPG13
 
+## Detection Rules
+
+### Included Rulesets
+
+This deployment ships with detection rules from two sources:
+
+1. **Project-specific rules** (ID range `800100-800299`) - Custom rules for Linux attack detection, PowerShell monitoring, and threat hunting
+2. **[SOCFortress Wazuh-Rules](https://github.com/socfortress/Wazuh-Rules)** - Community-maintained detection rules with MITRE ATT&CK mapping, covering:
+   - Windows Sysmon (13 event types, 1000+ rules)
+   - Linux auditd (64 rules)
+   - Sysmon for Linux (14 rules)
+   - Suricata IDS, YARA, and infrastructure health
+
+All rules are deployed to the Manager at `/var/ossec/etc/rules/` and `/var/ossec/etc/decoders/` during the manager role execution. No additional agent configuration is needed for rules to take effect - agents send events, and the manager evaluates them against all loaded rules.
+
+### Rule ID Ranges
+
+| Range | Source | Description |
+|-------|--------|-------------|
+| `1-99999` | Wazuh built-in | Default rules shipped with Wazuh |
+| `100000-199999` | [SOCFortress](https://github.com/socfortress/Wazuh-Rules) | Community detection rules |
+| `200000-699999` | [SOCFortress](https://github.com/socfortress/Wazuh-Rules) | Linux, infra, and response rules |
+| `800100-800299` | Project-specific | Custom attack detection and PowerShell rules |
+
+### Prerequisites for Full Detection Coverage
+
+- **Windows Sysmon rules**: Requires [Sysmon](https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon) installed on Windows agents with a comprehensive configuration (e.g., [SwiftOnSecurity/sysmon-config](https://github.com/SwiftOnSecurity/sysmon-config))
+- **Auditd rules**: Requires auditd configured on Linux agents (enabled by default in this deployment)
+- **Suricata rules**: Requires Suricata IDS/IPS forwarding logs to Wazuh
+- **YARA rules**: Requires YARA integration configured on agents
+
 ## Security Checklist
 
 ### Pre-Deployment

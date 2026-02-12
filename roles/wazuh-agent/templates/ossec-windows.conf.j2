@@ -4,13 +4,13 @@
 -->
 <ossec_config>
   <client>
-    <server>
 {% for node in wazuh_manager_nodes %}
+    <server>
       <address>{{ node.ip }}</address>
-{% endfor %}
       <port>{{ wazuh_manager_agent_port | default(1514) }}</port>
       <protocol>{{ wazuh_agent_protocol | default('tcp') }}</protocol>
     </server>
+{% endfor %}
     <config-profile>windows, windows{{ ansible_distribution_major_version }}</config-profile>
     <notify_time>{{ wazuh_agent_notify_time | default(10) }}</notify_time>
     <time-reconnect>{{ wazuh_agent_time_reconnect | default(60) }}</time-reconnect>
@@ -54,7 +54,7 @@
   <!-- Agent Enrollment -->
   <enrollment>
     <enabled>yes</enabled>
-    <manager_address>{{ wazuh_manager_address | default(wazuh_manager_nodes[0].ip) }}</manager_address>
+    <manager_address>{{ wazuh_manager_address | default(wazuh_manager_nodes[0].ip, true) }}</manager_address>
     <port>1515</port>
     <agent_name>{{ ansible_hostname }}</agent_name>
 {% if wazuh_authd_use_password | default(true) %}
@@ -90,6 +90,17 @@
     <windows_registry>HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\RunOnce</windows_registry>
     <windows_registry arch="both">HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\RunOnceEx</windows_registry>
     <windows_registry arch="both">HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\SystemRestore</windows_registry>
+    <!-- Persistence: Services (T1543.003) -->
+    <windows_registry arch="both">HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services</windows_registry>
+    <!-- Persistence: Winlogon (T1547.004) -->
+    <windows_registry arch="both">HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Winlogon</windows_registry>
+    <!-- Persistence: Image File Execution Options (T1546.012) -->
+    <windows_registry arch="both">HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Image File Execution Options</windows_registry>
+    <!-- Persistence: User-level Run keys -->
+    <windows_registry arch="both">HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run</windows_registry>
+    <windows_registry arch="both">HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\RunOnce</windows_registry>
+    <!-- Security policy -->
+    <windows_registry arch="both">HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies</windows_registry>
     <registry_ignore>HKEY_LOCAL_MACHINE\Security\Policy\Secrets</registry_ignore>
     <registry_ignore>HKEY_LOCAL_MACHINE\Security\SAM\Domains\Account\Users</registry_ignore>
     <registry_ignore type="sregex">\Enum$</registry_ignore>
@@ -117,7 +128,7 @@
   <localfile>
     <location>Security</location>
     <log_format>eventchannel</log_format>
-    <query>Event/System[EventID != 5145 and EventID != 5156 and EventID != 5447 and EventID != 4656 and EventID != 4658 and EventID != 4663 and EventID != 4660 and EventID != 4670 and EventID != 4690 and EventID != 4703 and EventID != 4907 and EventID != 5152 and EventID != 5157]</query>
+    <query>{{ wazuh_agent_windows_security_query }}</query>
   </localfile>
 
   <localfile>
@@ -128,6 +139,9 @@
   <localfile>
     <location>Microsoft-Windows-Sysmon/Operational</location>
     <log_format>eventchannel</log_format>
+{% if wazuh_agent_windows_sysmon_query | default('') | length > 0 %}
+    <query>{{ wazuh_agent_windows_sysmon_query }}</query>
+{% endif %}
   </localfile>
 
   <localfile>
@@ -137,6 +151,58 @@
 
   <localfile>
     <location>Microsoft-Windows-Windows Firewall With Advanced Security/Firewall</location>
+    <log_format>eventchannel</log_format>
+  </localfile>
+
+  <!-- Windows Defender / Antimalware (T1562.001 - Disable or Modify Tools) -->
+  <localfile>
+    <location>Microsoft-Windows-Windows Defender/Operational</location>
+    <log_format>eventchannel</log_format>
+  </localfile>
+
+  <!-- WMI Activity (T1047 - Windows Management Instrumentation) -->
+  <localfile>
+    <location>Microsoft-Windows-WMI-Activity/Operational</location>
+    <log_format>eventchannel</log_format>
+  </localfile>
+
+  <!-- Task Scheduler (T1053.005 - Scheduled Task) -->
+  <localfile>
+    <location>Microsoft-Windows-TaskScheduler/Operational</location>
+    <log_format>eventchannel</log_format>
+  </localfile>
+
+  <!-- Remote Desktop (T1021.001 - Remote Desktop Protocol) -->
+  <localfile>
+    <location>Microsoft-Windows-TerminalServices-LocalSessionManager/Operational</location>
+    <log_format>eventchannel</log_format>
+  </localfile>
+
+  <localfile>
+    <location>Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational</location>
+    <log_format>eventchannel</log_format>
+  </localfile>
+
+  <!-- DNS Client (T1071.004 - DNS) -->
+  <localfile>
+    <location>Microsoft-Windows-DNS-Client/Operational</location>
+    <log_format>eventchannel</log_format>
+  </localfile>
+
+  <!-- Windows bits transfer (T1197 - BITS Jobs) -->
+  <localfile>
+    <location>Microsoft-Windows-Bits-Client/Operational</location>
+    <log_format>eventchannel</log_format>
+  </localfile>
+
+  <!-- AppLocker (application whitelisting) -->
+  <localfile>
+    <location>Microsoft-Windows-AppLocker/EXE and DLL</location>
+    <log_format>eventchannel</log_format>
+  </localfile>
+
+  <localfile>
+    <location>Microsoft-Windows-AppLocker/MSI and Script</location>
     <log_format>eventchannel</log_format>
   </localfile>
 {% endif %}
@@ -172,6 +238,12 @@
     <ca_store>wpk_root.pem</ca_store>
     <ca_verification>yes</ca_verification>
   </active-response>
+
+  <!-- Anti-flooding: Logcollector rate limiting -->
+  <!-- Prevents log collection storms from overwhelming the manager -->
+  <logcollector>
+    <max_eps>{{ wazuh_agent_logcollector_max_eps | default(500) }}</max_eps>
+  </logcollector>
 
   <!-- Agent log format -->
   <logging>

@@ -25,11 +25,10 @@
       ansible.builtin.stat:
         path: /var/lib/wazuh-deploy/.locked
       register: lock_flag
-      become: false
 
     - name: Display current status
       ansible.builtin.debug:
-        msg: "{{ 'User is LOCKED - unlocking...' if lock_flag.stat.exists else 'User is already UNLOCKED' }}"
+        msg: "{{ 'User is LOCKED on ' + inventory_hostname + ' - unlocking...' if lock_flag.stat.exists else 'User is already UNLOCKED on ' + inventory_hostname }}"
 
     - name: Run unlock script
       ansible.builtin.command:
@@ -42,7 +41,6 @@
       ansible.builtin.stat:
         path: /var/lib/wazuh-deploy/.locked
       register: lock_check
-      become: false
 
     - name: Confirm unlock status
       ansible.builtin.debug:

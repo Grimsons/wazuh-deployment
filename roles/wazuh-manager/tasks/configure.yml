@@ -1,7 +1,7 @@
 ---
 # Wazuh Manager - Configuration
 
-- name: Configure ossec.conf from template
+- name: Deploy ossec.conf from template
   ansible.builtin.template:
     src: ossec.conf.j2
     dest: /var/ossec/etc/ossec.conf
@@ -10,37 +10,45 @@
     mode: '0640'
     backup: true
   become: true
+  register: manager_config_deployed
   notify: restart wazuh-manager
 
-# Read indexer password from credentials file if not defined
-- name: Check for indexer credentials file
-  ansible.builtin.stat:
-    path: "{{ playbook_dir }}/credentials/indexer_admin_password.txt"
-  delegate_to: localhost
-  become: false
-  register: indexer_creds_file
-  vars:
-    ansible_become: false
+- name: Deploy local_internal_options.conf for performance tuning
+  ansible.builtin.template:
+    src: local_internal_options.conf.j2
+    dest: /var/ossec/etc/local_internal_options.conf
+    owner: root
+    group: wazuh
+    mode: '0640'
+  become: true
+  when: wazuh_internal_options_enabled | default(true)
+  notify: restart wazuh-manager
 
-- name: Read indexer password from credentials file
-  ansible.builtin.slurp:
-    src: "{{ playbook_dir }}/credentials/indexer_admin_password.txt"
-  delegate_to: localhost
-  become: false
-  register: indexer_creds_content
-  when:
-    - indexer_creds_file.stat.exists
-    - wazuh_indexer_admin_password is not defined
-  vars:
-    ansible_become: false
+- name: Validate manager configuration before restart
+  block:
+    - name: Run Wazuh configuration test
+      ansible.builtin.command: /var/ossec/bin/wazuh-logtest-legacy -t
+      become: true
+      register: config_validation
+      changed_when: false
 
-- name: Extract indexer password from credentials file
-  ansible.builtin.set_fact:
-    wazuh_indexer_admin_password: "{{ indexer_creds_content.content | b64decode | regex_search('Password: (.+)', '\\1') | first }}"
-  when:
-    - indexer_creds_content is defined
-    - indexer_creds_content.content is defined
-  no_log: true
+    - name: Configuration validation passed
+      ansible.builtin.debug:
+        msg: "Manager configuration validation: PASSED"
+      when: config_validation.rc == 0
+  rescue:
+    - name: Configuration validation failed
+      ansible.builtin.debug:
+        msg: |
+          WARNING: Manager configuration validation FAILED.
+          Error output: {{ config_validation.stderr | default('Unknown error') }}
+          A backup of the previous config has been preserved by Ansible.
+          Please review the configuration and fix any errors.
+
+    - name: Abort due to invalid configuration
+      ansible.builtin.fail:
+        msg: "Aborting: Wazuh manager configuration is invalid. Fix the errors shown above."
+  when: manager_config_deployed.changed
 
 - name: Configure Wazuh keystore for indexer username
   ansible.builtin.shell: |
@@ -84,11 +92,18 @@
     mode: '0750'
   become: true
 
-- name: Set correct permissions on /var/ossec
+- name: Set correct permissions on /var/ossec writable directories
   ansible.builtin.file:
-    path: /var/ossec
+    path: "{{ item }}"
     state: directory
     owner: wazuh
     group: wazuh
     recurse: true
+  loop:
+    - /var/ossec/etc
+    - /var/ossec/logs
+    - /var/ossec/queue
+    - /var/ossec/var
+    - /var/ossec/tmp
+    - /var/ossec/stats
   become: true

@@ -1,37 +1,7 @@
 ---
 # Wazuh Manager - Filebeat Installation and Configuration
 # Filebeat forwards alerts from the manager to the Wazuh Indexer
-
-# Read indexer admin password from credentials file if not already set
-- name: Check if indexer credentials file exists
-  ansible.builtin.stat:
-    path: "{{ playbook_dir }}/credentials/indexer_admin_password.txt"
-  delegate_to: localhost
-  become: false
-  register: indexer_creds_file_fb
-  vars:
-    ansible_become: false
-
-- name: Read indexer password from credentials file
-  ansible.builtin.slurp:
-    src: "{{ playbook_dir }}/credentials/indexer_admin_password.txt"
-  delegate_to: localhost
-  become: false
-  register: indexer_creds_content_fb
-  when:
-    - indexer_creds_file_fb.stat.exists
-    - wazuh_indexer_admin_password is not defined
-  vars:
-    ansible_become: false
-
-- name: Extract indexer password from credentials file
-  ansible.builtin.set_fact:
-    wazuh_indexer_admin_password: "{{ indexer_creds_content_fb.content | b64decode | regex_search('Password: (.+)', '\\1') | first | trim }}"
-  when:
-    - indexer_creds_content_fb is defined
-    - indexer_creds_content_fb is not skipped
-    - indexer_creds_content_fb.content is defined
-  no_log: true
+# Indexer credentials are sourced from Ansible Vault via group_vars
 
 - name: Check if Filebeat is already installed
   ansible.builtin.command: dpkg -l filebeat
@@ -109,6 +79,24 @@
     mode: '0600'
   become: true
 
+- name: Verify Filebeat certificate files
+  ansible.builtin.command: openssl x509 -noout -subject -issuer -dates -in /etc/filebeat/certs/{{ item }}
+  become: true
+  register: filebeat_cert_verify
+  changed_when: false
+  loop:
+    - root-ca.pem
+    - filebeat.pem
+
+- name: Verify Filebeat key matches certificate
+  ansible.builtin.shell: |
+    CERT_MOD=$(openssl x509 -noout -modulus -in /etc/filebeat/certs/filebeat.pem 2>&1 | openssl md5)
+    KEY_MOD=$(openssl rsa -noout -modulus -in /etc/filebeat/certs/filebeat-key.pem 2>&1 | openssl md5)
+    if [ "$CERT_MOD" = "$KEY_MOD" ]; then echo "MATCH: cert and key modulus match"; else echo "MISMATCH: cert=$CERT_MOD key=$KEY_MOD"; exit 1; fi
+  become: true
+  register: filebeat_key_match
+  changed_when: false
+
 - name: Configure Filebeat
   ansible.builtin.template:
     src: filebeat.yml.j2
@@ -119,6 +107,35 @@
   become: true
   notify: restart filebeat
 
+# The filebeat-oss deb package only ships a SysV init script (/etc/init.d/filebeat),
+# not a native systemd unit. Without this, systemd generates a wrapper service that:
+# - Shows "active (exited)" instead of "active (running)" (no daemon supervision)
+# - Does NOT apply drop-in overrides from filebeat.service.d/ (e.g. GODEBUG fix)
+# - Cannot properly restart Filebeat on crash
+# A unit file at /etc/systemd/system/ takes precedence over the SysV wrapper.
+- name: Deploy native systemd unit file for Filebeat
+  ansible.builtin.copy:
+    content: |
+      [Unit]
+      Description=Filebeat sends log files to Logstash or directly to Elasticsearch.
+      Documentation=https://www.elastic.co/products/beats/filebeat
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/share/filebeat/bin/filebeat --environment systemd -c /etc/filebeat/filebeat.yml --path.home /usr/share/filebeat --path.config /etc/filebeat --path.data /var/lib/filebeat --path.logs /var/log/filebeat
+      ExecReload=/bin/kill -HUP $MAINPID
+      Restart=always
+
+      [Install]
+      WantedBy=multi-user.target
+    dest: /etc/systemd/system/filebeat.service
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
 - name: Enable Filebeat service
   ansible.builtin.systemd:
     name: filebeat
@@ -126,21 +143,139 @@
     daemon_reload: true
   become: true
 
-- name: Start Filebeat service (non-blocking)
-  ansible.builtin.systemd:
-    name: filebeat
-    state: started
-    no_block: true
+- name: Create Filebeat systemd override directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/filebeat.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
   become: true
 
-- name: Verify Filebeat service is running
-  ansible.builtin.systemd:
-    name: filebeat
+# Filebeat 7.10.2 was compiled with Go ~1.15 which uses async preemption
+# via signals. On newer Linux kernels (6.x+), this causes a crash in the
+# Go runtime (runtime: unknown pc, reflect.Value.Set panic during JSON
+# template loading). Disabling async preemption fixes this.
+- name: Fix Filebeat Go runtime crash on newer kernels
+  ansible.builtin.copy:
+    content: |
+      [Service]
+      Environment="GODEBUG=asyncpreemptoff=1"
+    dest: /etc/systemd/system/filebeat.service.d/go-compat.conf
+    owner: root
+    group: root
+    mode: '0644'
   become: true
-  register: filebeat_service_status
-  until: filebeat_service_status.status.ActiveState == "active"
-  retries: 30
-  delay: 5
+  register: filebeat_godebug
+
+- name: Reload systemd after override
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+  when: filebeat_godebug.changed
+
+- name: Validate Filebeat configuration
+  ansible.builtin.command: filebeat test config -c /etc/filebeat/filebeat.yml
+  become: true
+  register: filebeat_config_test
+  changed_when: false
+
+- name: Start Filebeat and verify
+  block:
+    - name: Reset Filebeat failed state (if rate-limited from previous failures)
+      ansible.builtin.command: systemctl reset-failed filebeat
+      become: true
+      changed_when: false
+      failed_when: false
+
+    - name: Restart Filebeat service
+      ansible.builtin.systemd:
+        name: filebeat
+        state: restarted
+      become: true
+
+    - name: Verify Filebeat service is running
+      ansible.builtin.systemd:
+        name: filebeat
+      become: true
+      register: filebeat_service_status
+      until: >-
+        filebeat_service_status.status.ActiveState == "active"
+        and filebeat_service_status.status.SubState == "running"
+      retries: 12
+      delay: 5
+  rescue:
+    - name: Collect Filebeat journal logs (full crash output)
+      ansible.builtin.command: journalctl -u filebeat --no-pager -n 200
+      become: true
+      register: filebeat_journal
+      changed_when: false
+
+    - name: Collect Filebeat version info
+      ansible.builtin.command: filebeat version
+      become: true
+      register: filebeat_version_info
+      changed_when: false
+      failed_when: false
+
+    - name: Collect system info
+      ansible.builtin.shell: |
+        echo "=== OS ===" && cat /etc/os-release | head -5
+        echo "=== GLIBC ===" && ldd --version 2>&1 | head -1
+        echo "=== OPENSSL ===" && openssl version
+        echo "=== CERTS ===" && ls -la /etc/filebeat/certs/
+        echo "=== MODULE ===" && ls -la /usr/share/filebeat/module/wazuh/ 2>&1 | head -5
+        echo "=== TEMPLATE ===" && ls -la /etc/filebeat/wazuh-template.json
+      become: true
+      register: system_info
+      changed_when: false
+      failed_when: false
+
+    - name: Collect Filebeat config test output
+      ansible.builtin.command: filebeat test config -c /etc/filebeat/filebeat.yml
+      become: true
+      register: filebeat_config_retest
+      changed_when: false
+      failed_when: false
+
+    - name: Collect Filebeat test output
+      ansible.builtin.command: filebeat test output -c /etc/filebeat/filebeat.yml
+      become: true
+      register: filebeat_output_test
+      changed_when: false
+      failed_when: false
+
+    - name: Show rendered Filebeat config (redacted)
+      ansible.builtin.command: grep -n -v password /etc/filebeat/filebeat.yml
+      become: true
+      register: filebeat_config_content
+      changed_when: false
+      failed_when: false
+
+    - name: Fail with diagnostic info
+      ansible.builtin.fail:
+        msg: |
+          Filebeat failed to start on {{ inventory_hostname }}.
+
+          === FILEBEAT VERSION ===
+          {{ filebeat_version_info.stdout | default('unknown') }}
+
+          === SYSTEM INFO ===
+          {{ system_info.stdout | default('unknown') }}
+
+          === CONFIG TEST ===
+          {{ filebeat_config_retest.stdout | default('') }}
+          {{ filebeat_config_retest.stderr | default('') }}
+
+          === OUTPUT TEST ===
+          {{ filebeat_output_test.stdout | default('') }}
+          {{ filebeat_output_test.stderr | default('') }}
+
+          === JOURNAL LOGS (last 200 lines) ===
+          {{ filebeat_journal.stdout | default('No journal output available') }}
+
+          === CONFIG FILE (password redacted) ===
+          {{ filebeat_config_content.stdout | default('Could not read config') }}
 
 - name: Wait for Filebeat to start sending data
   ansible.builtin.pause:

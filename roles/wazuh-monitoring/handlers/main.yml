@@ -1,0 +1,24 @@
+---
+# Wazuh Monitoring Role - Handlers
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart opensearch exporter
+  ansible.builtin.systemd:
+    name: wazuh-opensearch-exporter
+    state: restarted
+  ignore_errors: true
+
+- name: Restart wazuh manager exporter
+  ansible.builtin.systemd:
+    name: wazuh-manager-exporter
+    state: restarted
+  ignore_errors: true
+
+- name: Restart grafana
+  ansible.builtin.systemd:
+    name: grafana-server
+    state: restarted
+  ignore_errors: true

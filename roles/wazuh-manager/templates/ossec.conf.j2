@@ -27,6 +27,15 @@
     <!-- GeoIP database for IP geolocation -->
     <geoip_db_path>{{ wazuh_geoip_database }}</geoip_db_path>
 {% endif %}
+    <!-- Anti-flooding: Analysisd event processing rate limit -->
+    <!-- Limits the maximum events per second the analysis engine will process -->
+    <!-- 0 = unlimited (not recommended for large deployments) -->
+    <limits>
+      <eps>
+        <maximum>{{ wazuh_analysisd_max_eps | default(0) }}</maximum>
+        <timeframe>{{ wazuh_analysisd_eps_timeframe | default(10) }}</timeframe>
+      </eps>
+    </limits>
   </global>
 
   <alerts>
@@ -136,11 +145,12 @@
 
     <!-- Nice value for Syscheck process -->
     <process_priority>10</process_priority>
-    <max_eps>200</max_eps>
+    <!-- Anti-flooding: FIM event processing rate limit -->
+    <max_eps>{{ wazuh_fim_max_eps | default(200) }}</max_eps>
     <synchronization>
       <enabled>yes</enabled>
       <interval>5m</interval>
-      <max_eps>10</max_eps>
+      <max_eps>{{ wazuh_fim_sync_max_eps | default(10) }}</max_eps>
     </synchronization>
   </syscheck>
 {% endif %}
@@ -226,14 +236,88 @@
     <executable>route-null</executable>
     <timeout_allowed>yes</timeout_allowed>
   </command>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       Active Response Rules
+       These rules are COMMENTED OUT by default. To enable, uncomment
+       the desired <active-response> blocks below.
+
+       IMPORTANT: Test in a staging environment before enabling in production.
+       Active responses can block legitimate traffic if rules are too aggressive.
+       ═══════════════════════════════════════════════════════════════ -->
+
+  <!-- SSH Brute Force Protection (Rule 5763 = multiple auth failures)
+       Action: Block attacking IP via firewall for 30 minutes
+  <active-response>
+    <command>firewall-drop</command>
+    <location>local</location>
+    <rules_id>5763</rules_id>
+    <timeout>1800</timeout>
+  </active-response>
+  -->
+
+  <!-- Repeated SSH Auth Failures - Disable Account (Rule 5720 = multiple failures same user)
+       Action: Disable the targeted user account for 1 hour
+  <active-response>
+    <command>disable-account</command>
+    <location>local</location>
+    <rules_id>5720</rules_id>
+    <timeout>3600</timeout>
+  </active-response>
+  -->
+
+  <!-- Web Application Attack Protection (Rule group web_attack)
+       Action: Block attacking IP via firewall for 10 minutes
+  <active-response>
+    <command>firewall-drop</command>
+    <location>local</location>
+    <rules_group>web_attack</rules_group>
+    <timeout>600</timeout>
+  </active-response>
+  -->
+
+  <!-- SQL Injection Attempt (Rule group sql_injection)
+       Action: Block via host-deny for 1 hour
+  <active-response>
+    <command>host-deny</command>
+    <location>local</location>
+    <rules_group>sql_injection</rules_group>
+    <timeout>3600</timeout>
+  </active-response>
+  -->
+
+  <!-- Network Scan Detection (Rule 581 = port scan)
+       Action: Null-route scanning IP for 30 minutes
+  <active-response>
+    <command>route-null</command>
+    <location>local</location>
+    <rules_id>581</rules_id>
+    <timeout>1800</timeout>
+  </active-response>
+  -->
+
+  <!-- High-Severity Alert Auto-Response (level >= 12)
+       Action: Block IP via firewall for 1 hour
+  <active-response>
+    <command>firewall-drop</command>
+    <location>all</location>
+    <level>12</level>
+    <timeout>3600</timeout>
+  </active-response>
+  -->
 {% endif %}
 
   <!-- Remote Syslog -->
+  <!-- Remote agent connections -->
   <remote>
     <connection>secure</connection>
     <port>{{ wazuh_manager_agent_port | default(1514) }}</port>
     <protocol>tcp</protocol>
-    <queue_size>131072</queue_size>
+    <!-- Anti-flooding: Incoming event queue from agents -->
+    <!-- If this fills up, agent events are dropped until space is available -->
+    <queue_size>{{ wazuh_remote_queue_size | default(131072) }}</queue_size>
+    <!-- How long to wait before closing idle agent sessions (frees resources) -->
+    <rids_closing_time>{{ wazuh_remote_rids_closing_time | default('5m') }}</rids_closing_time>
   </remote>
 
   <!-- Authentication - Agent Enrollment Security -->

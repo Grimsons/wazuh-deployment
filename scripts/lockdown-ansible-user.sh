@@ -90,9 +90,11 @@ cat > "$SUDOERS_FILE" << EOF
 # Allow unlocking for next deployment
 ${ANSIBLE_USER} ALL=(ALL) NOPASSWD: ${UNLOCK_SCRIPT}
 
-# Allow basic Ansible connectivity checks (gather_facts)
-${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/bin/python3, /usr/bin/python
-${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /bin/sh -c echo*
+# NOTE: Ansible's Python module system (gather_facts, stat, etc.) requires
+# 'sudo python3' which is equivalent to root shell access. We intentionally
+# do NOT allow this. Playbooks that need to work on locked-down hosts
+# (e.g. unlock-deploy-user.yml, health checks) must use the 'raw' module
+# with explicit sudo commands that match the rules above.
 
 # Allow checking Wazuh service status (read-only)
 ${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl status wazuh-*

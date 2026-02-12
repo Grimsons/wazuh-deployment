@@ -212,19 +212,48 @@
         msg: "Certificates backed up to: {{ backup_created.path }}"
       tags: [rotate, renew]
 
+    # Idempotency check - skip regeneration if certs are still valid
+    - name: Rotate (Idempotency) - Check if regeneration is needed
+      ansible.builtin.shell: |
+        needs_regen=false
+        for cert in {{ cert_dir }}/*.pem; do
+          [ -f "$cert" ] || continue
+          [[ "$cert" == *"-key.pem" ]] && continue
+          if ! openssl x509 -in "$cert" -noout -checkend {{ (cert_renewal_threshold_days | int * 86400) | int }} 2>/dev/null; then
+            needs_regen=true
+            break
+          fi
+        done
+        echo "$needs_regen"
+      register: needs_regeneration
+      changed_when: false
+      tags: [rotate]
+
+    - name: Rotate (Idempotency) - Skip if all certs are valid
+      ansible.builtin.debug:
+        msg: "All certificates are valid for at least {{ cert_renewal_threshold_days }} more days. Use -e 'force_rotate=true' to force regeneration."
+      when:
+        - needs_regeneration.stdout | trim == 'false'
+        - not (force_rotate | default(false) | bool)
+      tags: [rotate]
+
     # Self-signed rotation
     - name: Rotate (Self-Signed) - Regenerate certificates
       ansible.builtin.command:
         cmd: "{{ playbook_dir }}/../generate-certs.sh"
         chdir: "{{ playbook_dir }}/.."
-      when: not external_ca | bool
+      when:
+        - not external_ca | bool
+        - needs_regeneration.stdout | trim == 'true' or (force_rotate | default(false) | bool)
       register: cert_generation
       tags: [rotate]
 
     - name: Rotate (Self-Signed) - Display generation results
       ansible.builtin.debug:
         msg: "{{ cert_generation.stdout }}"
-      when: not external_ca | bool
+      when:
+        - not external_ca | bool
+        - cert_generation.changed | default(false)
       tags: [rotate]
 
     # External CA rotation

@@ -134,8 +134,9 @@ curl -k -u admin:PASSWORD https://INDEXER_IP:9200/_cluster/health?pretty
 1. **Check Java heap size:**
    ```bash
    # Edit /etc/wazuh-indexer/jvm.options
-   # Ensure heap size is appropriate for available RAM
-   # Recommended: 50% of RAM, max 32GB
+   # Recommended: 50% of RAM, min 1GB, max 32GB
+   # Default "auto" calculates this at deployment
+   # Example for 8GB RAM system:
    -Xms4g
    -Xmx4g
    ```

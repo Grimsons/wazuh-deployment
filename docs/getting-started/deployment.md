@@ -33,11 +33,39 @@ ansible-galaxy collection install community.general
 
 ### 1. Run Interactive Setup
 
+Choose your preferred setup method:
+
 ```bash
+# Option A: Beautiful TUI (recommended, requires gum)
+./setup-tui.sh
+
+# Option B: Traditional CLI wizard
 ./setup.sh
 ```
 
-The wizard guides you through:
+#### TUI Setup (setup-tui.sh)
+
+The TUI provides a visual experience with [gum](https://github.com/charmbracelet/gum):
+
+**Deployment Profiles:**
+- **Minimal**: Single-node development/testing deployment
+- **Production**: Multi-node cluster with high availability
+- **Custom**: Full control over every setting
+
+Install gum first:
+```bash
+# Debian/Ubuntu
+sudo apt install gum
+
+# macOS
+brew install gum
+
+# Or download from https://github.com/charmbracelet/gum/releases
+```
+
+#### CLI Setup (setup.sh)
+
+The traditional wizard guides you through:
 - Wazuh version selection (default: 4.14.2)
 - Node IP addresses (indexer, manager, dashboard)
 - Agent hosts (optional)
@@ -47,26 +75,50 @@ The wizard guides you through:
 - Integrations (Slack, VirusTotal)
 - **Automatic certificate generation**
 
-Generated files:
-- `inventory/hosts.yml` - Ansible inventory
+#### Generated Files
+
+Both setup methods generate:
+- `inventory/hosts.yml` - Main Ansible inventory (connects as wazuh-deploy)
+- `inventory/bootstrap.yml` - Bootstrap inventory (connects as root)
 - `group_vars/all/main.yml` - Configuration variables
 - `group_vars/all/vault.yml` - Encrypted credentials (Ansible Vault)
 - `.vault_password` - Vault encryption key (keep secure!)
 - `ansible.cfg` - Ansible settings
-- `keys/` - SSH keypair for deployment
-- `files/certs/` - SSL/TLS certificates
+- `keys/wazuh_ansible_key` - SSH keypair for deployment
 - `client-prep/` - Host preparation package
+- `wazuh-client-prep.sh` - Self-extracting installer
 
-### 2. Prepare Target Machines
+### 2. Deploy (First Time - Bootstrap + Full Deploy)
 
-The setup script creates a client preparation package that:
-- Detects the OS (Ubuntu, Debian, RHEL, Rocky, Fedora, SUSE, Arch Linux)
-- Removes unnecessary packages (desktop environments, office suites, games)
-- Installs required packages (Python, SSH, etc.)
-- Creates an Ansible deployment user with sudo access
-- Deploys the SSH public key for passwordless authentication
-- Configures firewall rules for Wazuh
-- Optimizes system settings
+For first-time deployments, use the **bootstrap** workflow. This:
+1. Connects as root (or your initial SSH user)
+2. Creates the `wazuh-deploy` user with SSH key authentication
+3. Configures passwordless sudo for deployment
+4. Deploys the complete Wazuh stack
+
+```bash
+# If using password authentication for initial root access:
+ansible-playbook site.yml --tags bootstrap,all --ask-pass
+
+# If root already has your SSH key:
+ansible-playbook site.yml --tags bootstrap,all
+```
+
+The bootstrap play runs first, then continues with the full deployment using the newly created `wazuh-deploy` user.
+
+### 3. Deploy (Subsequent Runs)
+
+After the initial bootstrap, subsequent deployments use `wazuh-deploy` automatically:
+
+```bash
+ansible-playbook site.yml
+```
+
+No bootstrap needed — just run the playbook.
+
+### Alternative: Manual Host Preparation
+
+If you prefer to prepare hosts manually instead of using bootstrap:
 
 **Method A: Copy folder to target machine**
 ```bash
@@ -94,24 +146,42 @@ ssh root@TARGET_HOST 'sudo bash /tmp/wazuh-client-prep.sh'
 ssh root@TARGET_HOST 'sudo bash /tmp/wazuh-client-prep.sh --minimal'
 ```
 
-### 3. Test Connectivity
-
+Then deploy without the bootstrap tag:
 ```bash
-ansible all -m ping
+ansible-playbook site.yml
 ```
 
-### 4. Deploy Wazuh Stack
+### 4. Deploy Individual Components (Optional)
 
 ```bash
-# Deploy everything
-ansible-playbook site.yml
-
-# Or deploy components individually
+# Deploy components individually
 ansible-playbook playbooks/wazuh-indexer.yml
 ansible-playbook playbooks/wazuh-manager.yml
 ansible-playbook playbooks/wazuh-dashboard.yml
 ansible-playbook playbooks/wazuh-agents.yml
 ```
+
+### Alternative Quick Playbooks (Testing Only)
+
+The repository includes `wazuh-aio.yml` and `wazuh-distributed.yml` for quick testing:
+
+```bash
+# Single-server test deployment
+ansible-playbook wazuh-aio.yml -e "target_host=192.168.1.10"
+
+# Multi-node test deployment (requires manual inventory)
+ansible-playbook wazuh-distributed.yml
+```
+
+> **Warning:** These playbooks are minimal and use role defaults only. They do **NOT** include:
+> - Encrypted credentials (Ansible Vault)
+> - SSH key generation or bootstrap workflow
+> - Index management (rollover, retention policies)
+> - Certificate generation
+> - Client preparation package
+> - Post-deployment security lockdown
+>
+> **For production deployments, always use `setup.sh` or `setup-tui.sh` followed by `site.yml`.**
 
 ### 5. Access the Dashboard
 
@@ -252,6 +322,12 @@ wazuh_manager_nodes:
 Use tags for selective deployment:
 
 ```bash
+# First-time deployment (bootstrap + everything)
+ansible-playbook site.yml --tags bootstrap,all
+
+# Bootstrap only (create wazuh-deploy user)
+ansible-playbook site.yml --tags bootstrap
+
 # Deploy only indexers
 ansible-playbook site.yml --tags indexer
 
@@ -263,6 +339,9 @@ ansible-playbook site.yml --tags dashboard
 
 # Deploy only agents
 ansible-playbook site.yml --tags agent
+
+# Enable Prometheus monitoring
+ansible-playbook site.yml --tags monitoring -e wazuh_monitoring_enabled=true
 
 # Skip lockdown
 ansible-playbook site.yml --skip-tags lockdown

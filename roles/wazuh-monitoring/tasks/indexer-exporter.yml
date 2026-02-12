@@ -1,0 +1,106 @@
+---
+# Wazuh Indexer (OpenSearch) Prometheus Exporter Setup
+# ═══════════════════════════════════════════════════════════════
+#
+# Two options:
+# 1. Native OpenSearch metrics endpoint (preferred, no plugin needed)
+# 2. External prometheus-opensearch-exporter for richer metrics
+
+- name: Ensure Python dependencies for metrics scripts
+  ansible.builtin.package:
+    name:
+      - python3
+      - python3-pip
+    state: present
+
+# ─────────────────────────────────────────────────────────────────
+# Option 1: OpenSearch native metrics (simpler, always available)
+# ─────────────────────────────────────────────────────────────────
+# OpenSearch exposes /_cluster/health, /_nodes/stats, /_cat/indices
+# We create a simple exporter that converts these to Prometheus format
+
+- name: Create exporter directory
+  ansible.builtin.file:
+    path: "{{ wazuh_exporter_install_dir }}"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Install Python prometheus_client library
+  ansible.builtin.pip:
+    name: prometheus_client
+    state: present
+    executable: pip3
+
+- name: Create exporter service user
+  ansible.builtin.user:
+    name: "{{ wazuh_exporter_user }}"
+    group: "{{ wazuh_exporter_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Create exporter service group
+  ansible.builtin.group:
+    name: "{{ wazuh_exporter_group }}"
+    system: true
+
+- name: Deploy OpenSearch exporter environment file with credentials
+  ansible.builtin.copy:
+    content: |
+      OPENSEARCH_USER={{ wazuh_indexer_admin_user | default('admin') }}
+      OPENSEARCH_PASS={{ wazuh_indexer_admin_password }}
+      OPENSEARCH_CA_CERT={{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') }}/root-ca.pem
+    dest: "{{ wazuh_exporter_install_dir }}/opensearch-exporter.env"
+    mode: "0600"
+    owner: "{{ wazuh_exporter_user }}"
+    group: "{{ wazuh_exporter_group }}"
+  no_log: true
+  notify: Restart opensearch exporter
+
+- name: Deploy OpenSearch metrics exporter script
+  ansible.builtin.template:
+    src: opensearch-exporter.py.j2
+    dest: "{{ wazuh_exporter_install_dir }}/opensearch-exporter.py"
+    mode: "0755"
+    owner: root
+    group: root
+  notify: Restart opensearch exporter
+
+- name: Deploy OpenSearch exporter systemd service
+  ansible.builtin.template:
+    src: opensearch-exporter.service.j2
+    dest: /etc/systemd/system/wazuh-opensearch-exporter.service
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart opensearch exporter
+
+- name: Ensure OpenSearch exporter is started and enabled
+  ansible.builtin.systemd:
+    name: wazuh-opensearch-exporter
+    state: started
+    enabled: true
+    daemon_reload: true
+
+# ─────────────────────────────────────────────────────────────────
+# Firewall rules for metrics port
+# ─────────────────────────────────────────────────────────────────
+- name: Allow Prometheus to scrape indexer metrics (firewalld)
+  ansible.posix.firewalld:
+    port: "{{ wazuh_indexer_metrics_port }}/tcp"
+    permanent: true
+    state: enabled
+    immediate: true
+  when: ansible_facts.services['firewalld.service'] is defined
+  ignore_errors: true
+
+- name: Allow Prometheus to scrape indexer metrics (ufw)
+  community.general.ufw:
+    rule: allow
+    port: "{{ wazuh_indexer_metrics_port }}"
+    proto: tcp
+    comment: "Wazuh indexer Prometheus metrics"
+  when: ansible_facts.services['ufw.service'] is defined
+  ignore_errors: true

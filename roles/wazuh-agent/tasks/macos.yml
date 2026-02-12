@@ -3,7 +3,7 @@
 
 - name: Set Wazuh Manager address for agent enrollment
   ansible.builtin.set_fact:
-    wazuh_manager_address: "{{ wazuh_agent_registration_address | default(wazuh_manager_nodes[0].ip) }}"
+    wazuh_manager_address: "{{ wazuh_agent_registration_address | default(wazuh_manager_nodes[0].ip, true) }}"
 
 - name: Create temp directory for Wazuh installer
   ansible.builtin.file:
@@ -36,28 +36,18 @@
   become: true
   notify: restart wazuh-agent-macos
 
-- name: Read enrollment password from credentials file
-  ansible.builtin.slurp:
-    src: "{{ playbook_dir }}/credentials/agent_enrollment_password.txt"
-  delegate_to: localhost
-  become: false
-  register: agent_enrollment_password_content
+- name: Fail if enrollment password is required but not in vault
+  ansible.builtin.fail:
+    msg: |
+      Agent enrollment password is required but not defined in Ansible vault.
+
+      Please add 'wazuh_agent_enrollment_password' to your Ansible vault:
+        ansible-vault edit group_vars/all/vault.yml
+
+      Or set 'wazuh_authd_use_password: false' to disable password-based enrollment.
   when:
     - wazuh_authd_use_password | default(true)
-    - wazuh_agent_enrollment_password is not defined
-  vars:
-    ansible_become: false
-  ignore_errors: true
-
-- name: Extract enrollment password
-  ansible.builtin.set_fact:
-    wazuh_agent_enrollment_password: "{{ agent_enrollment_password_content.content | b64decode | regex_search('Password:\\s*(.+)', '\\1') | first | trim }}"
-  when:
-    - agent_enrollment_password_content is defined
-    - agent_enrollment_password_content is not skipped
-    - agent_enrollment_password_content.content is defined
-    - not agent_enrollment_password_content.failed | default(false)
-  no_log: true
+    - wazuh_agent_enrollment_password is not defined or wazuh_agent_enrollment_password | length == 0
 
 - name: Deploy enrollment password file to macOS agent
   ansible.builtin.copy:
@@ -70,6 +60,7 @@
   when:
     - wazuh_authd_use_password | default(true)
     - wazuh_agent_enrollment_password is defined
+    - wazuh_agent_enrollment_password | length > 0
 
 - name: Load Wazuh Agent service
   ansible.builtin.command: /Library/Ossec/bin/wazuh-control start

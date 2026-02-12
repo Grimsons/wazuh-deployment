@@ -19,7 +19,9 @@ path.logs: {{ wazuh_indexer_log_path }}
 bootstrap.memory_lock: {{ wazuh_indexer_memory_lock | default(true) | lower }}
 
 # Discovery settings
-discovery.type: {% if wazuh_indexer_nodes | length == 1 %}single-node{% else %}zen{% endif %}
+{% if wazuh_indexer_nodes | length == 1 %}
+discovery.type: single-node
+{% endif %}
 
 {% if wazuh_indexer_nodes | length > 1 %}
 # Cluster discovery
@@ -66,11 +68,11 @@ plugins.security.ssl.http.enabled_protocols:
 
 plugins.security.nodes_dn:
 {% for node in wazuh_indexer_nodes %}
-  - CN={{ node.name }},OU=Wazuh,O=Wazuh,L=California,ST=California,C=US
+  - "CN={{ node.name }},OU={{ wazuh_cert_ou | default('Wazuh') }},O={{ wazuh_cert_org | default('Wazuh') }},L={{ wazuh_cert_location | default('California') }},ST={{ wazuh_cert_state | default('California') }},C={{ wazuh_cert_country | default('US') }}"
 {% endfor %}
 
 plugins.security.authcz.admin_dn:
-  - CN=admin,OU=Wazuh,O=Wazuh,L=California,ST=California,C=US
+  - "CN=admin,OU={{ wazuh_cert_ou | default('Wazuh') }},O={{ wazuh_cert_org | default('Wazuh') }},L={{ wazuh_cert_location | default('California') }},ST={{ wazuh_cert_state | default('California') }},C={{ wazuh_cert_country | default('US') }}"
 
 plugins.security.allow_unsafe_democertificates: false
 plugins.security.allow_default_init_securityindex: true
