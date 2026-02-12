@@ -107,6 +107,35 @@
   become: true
   notify: restart filebeat
 
+# The filebeat-oss deb package only ships a SysV init script (/etc/init.d/filebeat),
+# not a native systemd unit. Without this, systemd generates a wrapper service that:
+# - Shows "active (exited)" instead of "active (running)" (no daemon supervision)
+# - Does NOT apply drop-in overrides from filebeat.service.d/ (e.g. GODEBUG fix)
+# - Cannot properly restart Filebeat on crash
+# A unit file at /etc/systemd/system/ takes precedence over the SysV wrapper.
+- name: Deploy native systemd unit file for Filebeat
+  ansible.builtin.copy:
+    content: |
+      [Unit]
+      Description=Filebeat sends log files to Logstash or directly to Elasticsearch.
+      Documentation=https://www.elastic.co/products/beats/filebeat
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/share/filebeat/bin/filebeat --environment systemd -c /etc/filebeat/filebeat.yml --path.home /usr/share/filebeat --path.config /etc/filebeat --path.data /var/lib/filebeat --path.logs /var/log/filebeat
+      ExecReload=/bin/kill -HUP $MAINPID
+      Restart=always
+
+      [Install]
+      WantedBy=multi-user.target
+    dest: /etc/systemd/system/filebeat.service
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
 - name: Enable Filebeat service
   ansible.builtin.systemd:
     name: filebeat
@@ -170,7 +199,9 @@
         name: filebeat
       become: true
       register: filebeat_service_status
-      until: filebeat_service_status.status.ActiveState == "active"
+      until: >-
+        filebeat_service_status.status.ActiveState == "active"
+        and filebeat_service_status.status.SubState == "running"
       retries: 12
       delay: 5
   rescue:
