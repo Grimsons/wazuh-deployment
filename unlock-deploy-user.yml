@@ -3,24 +3,17 @@
 # Run this playbook BEFORE running site.yml to unlock the deployment user
 #
 # Usage:
-#   ansible-playbook unlock-deploy-user.yml
+#   ansible-playbook -i inventory/bootstrap.yml unlock-deploy-user.yml
 #
-# Connects as the bootstrap user (stored in vault) which has full sudo
-# access on all hosts, even after the deployment user is locked down.
+# IMPORTANT: This must use the bootstrap inventory (-i inventory/bootstrap.yml)
+# which has the original per-host SSH credentials that work even when the
+# deployment user is locked down. The main inventory (hosts.yml) connects
+# as wazuh-deploy which cannot sudo after lockdown.
 
 - name: Unlock Wazuh Deployment User
   hosts: all
   gather_facts: false
   become: true
-  vars:
-    # Override connection to use the bootstrap user instead of the
-    # locked-down wazuh-deploy user (same pattern as site.yml bootstrap play)
-    ansible_user: "{{ wazuh_bootstrap_user | default('root') }}"
-    ansible_ssh_pass: "{{ vault_ansible_connection_password | default(wazuh_bootstrap_password) | default(omit) }}"
-    ansible_ssh_private_key_file: "{{ wazuh_bootstrap_ssh_key | default(omit) }}"
-    # The bootstrap user may require a sudo password (unlike wazuh-deploy
-    # which has NOPASSWD). The become password is stored in the vault.
-    ansible_become_pass: "{{ vault_ansible_become_password | default(vault_ansible_connection_password) | default(omit) }}"
   tasks:
     - name: Check if user is locked down
       ansible.builtin.stat:
