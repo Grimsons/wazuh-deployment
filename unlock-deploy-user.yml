@@ -2,17 +2,23 @@
 # Wazuh Deployment - Unlock Deployment User
 # Run this playbook BEFORE running site.yml to unlock the deployment user
 #
-# Usage:
-#   ansible-playbook -i inventory/bootstrap.yml unlock-deploy-user.yml
+# Usage (uses hosts.yml inventory via ansible.cfg - SSH key auth):
+#   ansible-playbook unlock-deploy-user.yml
 #
-# IMPORTANT: This must use the bootstrap inventory (-i inventory/bootstrap.yml)
-# which has the original per-host SSH credentials that work even when the
-# deployment user is locked down. The main inventory (hosts.yml) connects
-# as wazuh-deploy which cannot sudo after lockdown.
+# Or explicitly specify inventory:
+#   ansible-playbook unlock-deploy-user.yml -i inventory/hosts.yml
+#
+# NOTE: Do NOT use inventory/bootstrap.yml here. The bootstrap inventory
+# is only for the initial bootstrap-hosts.yml playbook. The wazuh-deploy
+# user retains SSH key access when locked down, so hosts.yml works.
+#
+# The locked-down deployment user has NOPASSWD sudo for the unlock script,
+# so no passwords are required.
 
 - name: Unlock Wazuh Deployment User
-  hosts: all
+  hosts: all:!local
   gather_facts: false
+  # The locked-down sudoers grants NOPASSWD for the unlock script
   become: true
   tasks:
     - name: Check if user is locked down
