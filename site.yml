@@ -115,6 +115,46 @@
         msg: "{{ ansible_user_name }}@{{ inventory_hostname }} - SSH key auth OK, sudo OK"
 
 # ═══════════════════════════════════════════════════════════════
+# Pre-check: Detect Locked Deploy User
+# Uses 'raw' module (no Python/sudo needed) so it works even
+# when the deploy user account is locked/disabled.
+# Skip with: -e "skip_lock_check=true"
+# ═══════════════════════════════════════════════════════════════
+- name: "Pre-check: Detect Locked Deploy User"
+  hosts: all:!local
+  gather_facts: false
+  tags:
+    - preflight
+    - validation
+  tasks:
+    - name: Check if deploy user is locked
+      ansible.builtin.raw: test -f /var/lib/wazuh-deploy/.locked && echo DEPLOY_LOCKED || echo DEPLOY_OK
+      register: lock_check
+      changed_when: false
+      when: not (skip_lock_check | default(false) | bool)
+
+    - name: Fail if deploy user is locked
+      ansible.builtin.fail:
+        msg: |
+          ══════════════════════════════════════════════════════════════
+          DEPLOY USER IS LOCKED on {{ inventory_hostname }}
+          ══════════════════════════════════════════════════════════════
+
+          The wazuh-deploy user was locked after a previous deployment.
+          This is expected — run the unlock playbook first:
+
+            ansible-playbook unlock-deploy-user.yml
+
+          Or bypass this check (NOT recommended):
+
+            ansible-playbook site.yml -e "skip_lock_check=true"
+          ══════════════════════════════════════════════════════════════
+      when:
+        - not (skip_lock_check | default(false) | bool)
+        - lock_check.stdout is defined
+        - "'DEPLOY_LOCKED' in lock_check.stdout"
+
+# ═══════════════════════════════════════════════════════════════
 # Pre-flight Checks and Validation
 # ═══════════════════════════════════════════════════════════════
 - name: Wazuh Deployment - Pre-flight Checks
@@ -209,6 +249,74 @@
       failed_when: false
       register: port_443_check
 
+    # Kernel version warning for manager nodes — Go runtime crash
+    # Filebeat 7.10.2 (Go ~1.15) can crash on kernel 6.x+ without GODEBUG fix.
+    # The fix is auto-applied in the manager role, this just gives visibility.
+    - name: Check kernel version on manager nodes
+      ansible.builtin.shell: uname -r | cut -d. -f1
+      register: kernel_major
+      changed_when: false
+      failed_when: false
+      when: inventory_hostname in groups['wazuh_managers']
+
+    - name: Warn about kernel >= 6.x on manager nodes (Go runtime compatibility)
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: {{ inventory_hostname }} is running kernel {{ ansible_kernel }}.
+          Filebeat 7.10.2 (Go 1.15) may crash on kernel 6.x+ without the GODEBUG=asyncpreemptoff=1 fix.
+          This fix will be applied automatically during deployment.
+      when:
+        - inventory_hostname in groups['wazuh_managers']
+        - kernel_major.stdout | default('0') | int >= 6
+
+    # File descriptor limit on indexer nodes — OpenSearch requires >= 65535
+    - name: Check file descriptor limit on indexer nodes
+      ansible.builtin.shell: ulimit -n
+      register: fd_limit
+      changed_when: false
+      failed_when: false
+      when: inventory_hostname in groups['wazuh_indexers']
+
+    - name: Validate file descriptor limit for OpenSearch (>= 65535)
+      ansible.builtin.assert:
+        that:
+          - fd_limit.stdout | int >= 65535
+        fail_msg: >-
+          File descriptor limit on {{ inventory_hostname }} is {{ fd_limit.stdout }} (requires >= 65535).
+          OpenSearch will fail to start. Fix with: sysctl -w fs.file-max=65535
+          and add '* - nofile 65535' to /etc/security/limits.conf
+        success_msg: "File descriptor limit OK: {{ fd_limit.stdout }}"
+      when:
+        - inventory_hostname in groups['wazuh_indexers']
+        - fd_limit.stdout is defined
+
+    # NTP sync check — clock skew breaks TLS cert validation
+    - name: Check NTP synchronization
+      ansible.builtin.shell: |
+        if command -v timedatectl &>/dev/null; then
+          timedatectl show --property=NTPSynchronized --value 2>/dev/null || timedatectl status | grep -q 'synchronized: yes' && echo yes || echo unknown
+        elif command -v chronyc &>/dev/null; then
+          chronyc tracking 2>/dev/null | grep -q 'Leap status.*Normal' && echo yes || echo no
+        elif command -v ntpstat &>/dev/null; then
+          ntpstat &>/dev/null && echo yes || echo no
+        else
+          echo unknown
+        fi
+      register: ntp_sync
+      changed_when: false
+      failed_when: false
+      when: inventory_hostname in groups['wazuh_indexers'] or inventory_hostname in groups['wazuh_managers'] or inventory_hostname in groups['wazuh_dashboards']
+
+    - name: Warn if NTP is not synchronized
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: NTP synchronization could not be confirmed on {{ inventory_hostname }}.
+          Clock skew can cause TLS certificate validation failures between Wazuh components.
+          Ensure NTP/chrony is configured and synchronized.
+      when:
+        - inventory_hostname in groups['wazuh_indexers'] or inventory_hostname in groups['wazuh_managers'] or inventory_hostname in groups['wazuh_dashboards']
+        - ntp_sync.stdout | default('unknown') != 'yes'
+
 # ═══════════════════════════════════════════════════════════════
 # Step 1: Deploy Wazuh Indexer
 # ═══════════════════════════════════════════════════════════════
@@ -222,6 +330,52 @@
   tags:
     - indexer
     - wazuh-indexer
+
+# ═══════════════════════════════════════════════════════════════
+# Gate: Validate Indexer Before Manager Deployment
+# ═══════════════════════════════════════════════════════════════
+- name: "Validation Gate: Indexer Cluster Health"
+  hosts: wazuh_indexers[0]
+  gather_facts: false
+  tags:
+    - manager
+    - wazuh-manager
+    - validation
+  tasks:
+    - name: Check indexer cluster health
+      ansible.builtin.uri:
+        url: "https://{{ wazuh_indexer_nodes[0].ip }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health"
+        method: GET
+        user: "{{ wazuh_indexer_admin_user }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        return_content: true
+      register: indexer_health
+      retries: 3
+      delay: 10
+      until: indexer_health.status == 200
+      become: true
+
+    - name: Fail if indexer cluster is RED
+      ansible.builtin.fail:
+        msg: |
+          ══════════════════════════════════════════════════════════════
+          INDEXER CLUSTER IS RED — Aborting manager deployment
+          ══════════════════════════════════════════════════════════════
+
+          Cluster status: {{ (indexer_health.json.status | default('unknown')) | upper }}
+          Active nodes:   {{ indexer_health.json.number_of_nodes | default('?') }}
+          Unassigned:     {{ indexer_health.json.unassigned_shards | default('?') }} shards
+
+          Fix the indexer cluster before deploying the manager.
+          Bypass with: --skip-tags validation
+          ══════════════════════════════════════════════════════════════
+      when: indexer_health.json.status | default('red') == 'red'
+
+    - name: Indexer gate passed
+      ansible.builtin.debug:
+        msg: "Indexer cluster health: {{ indexer_health.json.status | upper }} ({{ indexer_health.json.number_of_nodes }} nodes)"
 
 # ═══════════════════════════════════════════════════════════════
 # Step 2: Deploy Wazuh Manager
@@ -238,6 +392,51 @@
     - wazuh-manager
 
 # ═══════════════════════════════════════════════════════════════
+# Gate: Validate Manager Before Dashboard Deployment
+# ═══════════════════════════════════════════════════════════════
+- name: "Validation Gate: Manager API Health"
+  hosts: wazuh_managers[0]
+  gather_facts: false
+  tags:
+    - dashboard
+    - wazuh-dashboard
+    - validation
+  tasks:
+    - name: Check manager API is responding
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:{{ wazuh_manager_api_port | default(55000) }}/"
+        method: GET
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        status_code: [200, 401]
+      register: manager_api
+      retries: 3
+      delay: 10
+      until: manager_api.status is defined and manager_api.status in [200, 401]
+      become: true
+
+    - name: Fail if manager API is unreachable
+      ansible.builtin.fail:
+        msg: |
+          ══════════════════════════════════════════════════════════════
+          MANAGER API IS NOT RESPONDING — Aborting dashboard deployment
+          ══════════════════════════════════════════════════════════════
+
+          Expected HTTP 200 or 401 from https://127.0.0.1:{{ wazuh_manager_api_port | default(55000) }}/
+
+          Check:
+          - systemctl status wazuh-manager
+          - journalctl -u wazuh-manager -n 50
+          - /var/ossec/logs/api.log
+
+          Bypass with: --skip-tags validation
+          ══════════════════════════════════════════════════════════════
+      when: manager_api.status is not defined or manager_api.status not in [200, 401]
+
+    - name: Manager gate passed
+      ansible.builtin.debug:
+        msg: "Manager API responding (HTTP {{ manager_api.status }})"
+
+# ═══════════════════════════════════════════════════════════════
 # Step 3: Deploy Wazuh Dashboard
 # ═══════════════════════════════════════════════════════════════
 - name: Deploy Wazuh Dashboard
@@ -249,6 +448,51 @@
   tags:
     - dashboard
     - wazuh-dashboard
+
+# ═══════════════════════════════════════════════════════════════
+# Gate: Validate Dashboard Before Agent Deployment
+# ═══════════════════════════════════════════════════════════════
+- name: "Validation Gate: Dashboard HTTP Health"
+  hosts: wazuh_dashboards[0]
+  gather_facts: false
+  tags:
+    - agent
+    - wazuh-agent
+    - validation
+  tasks:
+    - name: Check dashboard is responding
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:{{ wazuh_dashboard_port | default(443) }}/app/wazuh"
+        method: GET
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        status_code: [200, 302, 401]
+      register: dashboard_http
+      retries: 3
+      delay: 10
+      until: dashboard_http.status is defined and dashboard_http.status in [200, 302, 401]
+      become: true
+
+    - name: Fail if dashboard is unreachable
+      ansible.builtin.fail:
+        msg: |
+          ══════════════════════════════════════════════════════════════
+          DASHBOARD IS NOT RESPONDING — Aborting agent deployment
+          ══════════════════════════════════════════════════════════════
+
+          Expected HTTP 200/302/401 from https://127.0.0.1:{{ wazuh_dashboard_port | default(443) }}/app/wazuh
+
+          Check:
+          - systemctl status wazuh-dashboard
+          - journalctl -u wazuh-dashboard -n 50
+          - /var/log/wazuh-dashboard/opensearch_dashboards.log
+
+          Bypass with: --skip-tags validation
+          ══════════════════════════════════════════════════════════════
+      when: dashboard_http.status is not defined or dashboard_http.status not in [200, 302, 401]
+
+    - name: Dashboard gate passed
+      ansible.builtin.debug:
+        msg: "Dashboard responding (HTTP {{ dashboard_http.status }})"
 
 # ═══════════════════════════════════════════════════════════════
 # Step 4: Deploy Wazuh Agents (parallel deployment)
@@ -264,6 +508,124 @@
   tags:
     - agent
     - wazuh-agent
+
+# ═══════════════════════════════════════════════════════════════
+# Post-deployment: Smoke Test
+# Validates the full stack is operational before lockdown
+# ═══════════════════════════════════════════════════════════════
+- name: "Post-deployment: Full Stack Smoke Test"
+  hosts: wazuh_managers[0]
+  gather_facts: false
+  become: true
+  tags:
+    - smoketest
+    - validation
+  tasks:
+    - name: Check wazuh-manager service
+      ansible.builtin.systemd:
+        name: wazuh-manager
+      register: smoke_manager_svc
+      failed_when: false
+
+    - name: Check filebeat service
+      ansible.builtin.systemd:
+        name: filebeat
+      register: smoke_filebeat_svc
+      failed_when: false
+
+    - name: Check manager API
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:{{ wazuh_manager_api_port | default(55000) }}/"
+        method: GET
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        status_code: [200, 401]
+      register: smoke_manager_api
+      failed_when: false
+
+    - name: Check filebeat connectivity to indexer
+      ansible.builtin.command: >-
+        /usr/share/filebeat/bin/filebeat test output
+        -c /etc/filebeat/filebeat.yml
+        --path.home /usr/share/filebeat
+        --path.config /etc/filebeat
+        --path.data /var/lib/filebeat
+        --path.logs /var/log/filebeat
+      environment:
+        GODEBUG: "asyncpreemptoff=1"
+      register: smoke_filebeat_output
+      changed_when: false
+      failed_when: false
+
+    - name: Check indexer cluster health
+      ansible.builtin.uri:
+        url: "https://{{ wazuh_indexer_nodes[0].ip }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health"
+        method: GET
+        user: "{{ wazuh_indexer_admin_user }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        return_content: true
+      register: smoke_indexer_health
+      failed_when: false
+
+    - name: Check alert document count in indexer
+      ansible.builtin.uri:
+        url: "https://{{ wazuh_indexer_nodes[0].ip }}:{{ wazuh_indexer_http_port | default(9200) }}/wazuh-alerts-*/_count"
+        method: GET
+        user: "{{ wazuh_indexer_admin_user }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        return_content: true
+      register: smoke_alert_count
+      failed_when: false
+
+    - name: Set smoke test results
+      ansible.builtin.set_fact:
+        smoke_results:
+          manager_service: "{{ 'PASS' if (smoke_manager_svc.status.ActiveState | default('')) == 'active' else 'FAIL' }}"
+          filebeat_service: "{{ 'PASS' if (smoke_filebeat_svc.status.ActiveState | default('')) == 'active' else 'FAIL' }}"
+          manager_api: "{{ 'PASS' if (smoke_manager_api.status | default(0)) in [200, 401] else 'FAIL' }}"
+          filebeat_output: "{{ 'PASS' if smoke_filebeat_output.rc | default(1) == 0 else 'FAIL' }}"
+          indexer_health: "{{ smoke_indexer_health.json.status | default('UNREACHABLE') | upper }}"
+          alert_count: "{{ smoke_alert_count.json.count | default('N/A') }}"
+
+    - name: Display smoke test results
+      ansible.builtin.debug:
+        msg: |
+          ══════════════════════════════════════════════════════════════
+                          POST-DEPLOYMENT SMOKE TEST
+          ══════════════════════════════════════════════════════════════
+
+          Manager Service:     {{ smoke_results.manager_service }}
+          Filebeat Service:    {{ smoke_results.filebeat_service }}
+          Manager API:         {{ smoke_results.manager_api }}
+          Filebeat → Indexer:  {{ smoke_results.filebeat_output }}
+          Indexer Cluster:     {{ smoke_results.indexer_health }}
+          Alert Documents:     {{ smoke_results.alert_count }}
+
+          ══════════════════════════════════════════════════════════════
+
+    - name: Fail on critical smoke test failures
+      ansible.builtin.fail:
+        msg: |
+          CRITICAL: Smoke test detected failures that require attention.
+
+          {% if smoke_results.manager_service == 'FAIL' %}
+          - wazuh-manager service is not running
+          {% endif %}
+          {% if smoke_results.manager_api == 'FAIL' %}
+          - Manager API is not responding
+          {% endif %}
+          {% if smoke_results.indexer_health == 'RED' or smoke_results.indexer_health == 'UNREACHABLE' %}
+          - Indexer cluster is {{ smoke_results.indexer_health }}
+          {% endif %}
+
+          Fix these issues before proceeding. Bypass with: --skip-tags validation
+      when: >-
+        smoke_results.manager_service == 'FAIL'
+        or smoke_results.manager_api == 'FAIL'
+        or smoke_results.indexer_health in ['RED', 'UNREACHABLE']
 
 # ═══════════════════════════════════════════════════════════════
 # Post-deployment: Lock down the ansible deployment user

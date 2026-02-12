@@ -107,13 +107,23 @@
   become: true
   notify: restart filebeat
 
-# The filebeat-oss deb package only ships a SysV init script (/etc/init.d/filebeat),
-# not a native systemd unit. Without this, systemd generates a wrapper service that:
-# - Shows "active (exited)" instead of "active (running)" (no daemon supervision)
-# - Does NOT apply drop-in overrides from filebeat.service.d/ (e.g. GODEBUG fix)
-# - Cannot properly restart Filebeat on crash
-# A unit file at /etc/systemd/system/ takes precedence over the SysV wrapper.
-- name: Deploy native systemd unit file for Filebeat
+# Filebeat 7.10.2 has two Go runtime issues on modern Linux:
+#
+# 1. pthread_create crash (Go 1.14 + glibc 2.34+/Ubuntu 22.04+):
+#    "runtime/cgo: pthread_create failed: Operation not permitted"
+#    Fix: Run through filebeat-god wrapper instead of direct execution.
+#    filebeat-god is compiled without cgo and manages the child process.
+#
+# 2. Async preemption crash (Go 1.14 + kernel 6.x+):
+#    "runtime: unknown pc" / "reflect.Value.Set" panic during JSON loading.
+#    Fix: GODEBUG=asyncpreemptoff=1 disables signal-based preemption.
+#
+# The package ships a systemd unit (/usr/lib/systemd/system/filebeat.service)
+# that runs filebeat directly, triggering crash #1. We override it with a
+# custom unit that uses filebeat-god, matching the SysV init script behavior.
+# Restart=always with RestartSec=5 handles any intermittent crashes.
+
+- name: Deploy systemd unit for Filebeat (via filebeat-god wrapper)
   ansible.builtin.copy:
     content: |
       [Unit]
@@ -124,9 +134,13 @@
 
       [Service]
       Type=simple
-      ExecStart=/usr/share/filebeat/bin/filebeat --environment systemd -c /etc/filebeat/filebeat.yml --path.home /usr/share/filebeat --path.config /etc/filebeat --path.data /var/lib/filebeat --path.logs /var/log/filebeat
-      ExecReload=/bin/kill -HUP $MAINPID
+      Environment="GODEBUG=asyncpreemptoff=1"
+      Environment="BEAT_LOG_OPTS="
+      Environment="BEAT_CONFIG_OPTS=-c /etc/filebeat/filebeat.yml"
+      Environment="BEAT_PATH_OPTS=--path.home /usr/share/filebeat --path.config /etc/filebeat --path.data /var/lib/filebeat --path.logs /var/log/filebeat"
+      ExecStart=/usr/share/filebeat/bin/filebeat-god -f -r / -n -p /var/run/filebeat.pid -- /usr/share/filebeat/bin/filebeat $BEAT_LOG_OPTS $BEAT_CONFIG_OPTS $BEAT_PATH_OPTS
       Restart=always
+      RestartSec=5
 
       [Install]
       WantedBy=multi-user.target
@@ -136,43 +150,18 @@
     mode: '0644'
   become: true
 
+- name: Remove legacy systemd drop-in directory for Filebeat
+  ansible.builtin.file:
+    path: /etc/systemd/system/filebeat.service.d
+    state: absent
+  become: true
+
 - name: Enable Filebeat service
   ansible.builtin.systemd:
     name: filebeat
     enabled: true
     daemon_reload: true
   become: true
-
-- name: Create Filebeat systemd override directory
-  ansible.builtin.file:
-    path: /etc/systemd/system/filebeat.service.d
-    state: directory
-    owner: root
-    group: root
-    mode: '0755'
-  become: true
-
-# Filebeat 7.10.2 was compiled with Go ~1.15 which uses async preemption
-# via signals. On newer Linux kernels (6.x+), this causes a crash in the
-# Go runtime (runtime: unknown pc, reflect.Value.Set panic during JSON
-# template loading). Disabling async preemption fixes this.
-- name: Fix Filebeat Go runtime crash on newer kernels
-  ansible.builtin.copy:
-    content: |
-      [Service]
-      Environment="GODEBUG=asyncpreemptoff=1"
-    dest: /etc/systemd/system/filebeat.service.d/go-compat.conf
-    owner: root
-    group: root
-    mode: '0644'
-  become: true
-  register: filebeat_godebug
-
-- name: Reload systemd after override
-  ansible.builtin.systemd:
-    daemon_reload: true
-  become: true
-  when: filebeat_godebug.changed
 
 - name: Validate Filebeat configuration
   ansible.builtin.command: >-
@@ -185,6 +174,40 @@
   become: true
   register: filebeat_config_test
   changed_when: false
+
+- name: Pre-check indexer connectivity before starting Filebeat
+  block:
+    - name: Verify indexer is reachable from manager
+      ansible.builtin.uri:
+        url: "https://{{ wazuh_indexer_nodes[0].ip }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health"
+        method: GET
+        user: "{{ wazuh_indexer_admin_user }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+      register: indexer_precheck
+      retries: 3
+      delay: 10
+      until: indexer_precheck.status | default(0) == 200
+      become: true
+  rescue:
+    - name: Fail with indexer connectivity diagnosis
+      ansible.builtin.fail:
+        msg: |
+          ══════════════════════════════════════════════════════════════
+          CANNOT REACH INDEXER — Filebeat will not start successfully
+          ══════════════════════════════════════════════════════════════
+
+          Tried: https://{{ wazuh_indexer_nodes[0].ip }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health
+
+          Check:
+          1. Indexer service: systemctl status wazuh-indexer (on indexer node)
+          2. Network: curl -k https://{{ wazuh_indexer_nodes[0].ip }}:{{ wazuh_indexer_http_port | default(9200) }}/ (from this host)
+          3. Firewall: port {{ wazuh_indexer_http_port | default(9200) }} must be open between manager and indexer
+          4. Certificates: verify /etc/filebeat/certs/ files match the indexer CA
+
+          Filebeat will crash-loop if started without indexer connectivity.
+          ══════════════════════════════════════════════════════════════
 
 - name: Start Filebeat and verify
   block:
