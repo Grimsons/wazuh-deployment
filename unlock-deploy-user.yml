@@ -5,21 +5,27 @@
 # Usage:
 #   ansible-playbook unlock-deploy-user.yml
 #
-# The locked-down deployment user has restricted sudo that only allows
-# running the unlock script. This playbook uses that capability.
+# This playbook connects as the bootstrap user (the initial SSH user
+# specified during setup) which retains full sudo access even after
+# the deployment user is locked down. It then restores the deployment
+# user's sudo access by running the unlock script.
 
 - name: Unlock Wazuh Deployment User
   hosts: all
   gather_facts: false
-  # Note: become works here because the locked-down sudoers allows
-  # running the unlock script with NOPASSWD
   become: true
+  vars:
+    # Connect as the bootstrap user instead of the locked-down wazuh-deploy user.
+    # The bootstrap user (specified during setup.sh/setup-tui.sh) retains full
+    # sudo access and can run the unlock script on behalf of the deploy user.
+    ansible_user: "{{ wazuh_bootstrap_user | default('root') }}"
+    ansible_ssh_pass: "{{ vault_ansible_connection_password | default(wazuh_bootstrap_password) | default(omit) }}"
+    ansible_ssh_private_key_file: "{{ wazuh_bootstrap_ssh_key | default(omit) }}"
   tasks:
     - name: Check if user is locked down
       ansible.builtin.stat:
         path: /var/lib/wazuh-deploy/.locked
       register: lock_flag
-      become: false
 
     - name: Display current status
       ansible.builtin.debug:
@@ -36,7 +42,6 @@
       ansible.builtin.stat:
         path: /var/lib/wazuh-deploy/.locked
       register: lock_check
-      become: false
 
     - name: Confirm unlock status
       ansible.builtin.debug:
