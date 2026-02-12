@@ -4,7 +4,7 @@
 # Indexer credentials are sourced from Ansible Vault via group_vars
 
 - name: Check if Filebeat is already installed
-  ansible.builtin.command: dpkg -l filebeat
+  ansible.builtin.shell: dpkg -l filebeat 2>/dev/null | grep -q '^ii'
   register: filebeat_installed
   changed_when: false
   failed_when: false
@@ -175,7 +175,13 @@
   when: filebeat_godebug.changed
 
 - name: Validate Filebeat configuration
-  ansible.builtin.command: filebeat test config -c /etc/filebeat/filebeat.yml
+  ansible.builtin.command: >-
+    /usr/share/filebeat/bin/filebeat test config
+    -c /etc/filebeat/filebeat.yml
+    --path.home /usr/share/filebeat
+    --path.config /etc/filebeat
+    --path.data /var/lib/filebeat
+    --path.logs /var/log/filebeat
   become: true
   register: filebeat_config_test
   changed_when: false
@@ -212,7 +218,7 @@
       changed_when: false
 
     - name: Collect Filebeat version info
-      ansible.builtin.command: filebeat version
+      ansible.builtin.command: /usr/share/filebeat/bin/filebeat version
       become: true
       register: filebeat_version_info
       changed_when: false
@@ -232,14 +238,26 @@
       failed_when: false
 
     - name: Collect Filebeat config test output
-      ansible.builtin.command: filebeat test config -c /etc/filebeat/filebeat.yml
+      ansible.builtin.command: >-
+        /usr/share/filebeat/bin/filebeat test config
+        -c /etc/filebeat/filebeat.yml
+        --path.home /usr/share/filebeat
+        --path.config /etc/filebeat
+        --path.data /var/lib/filebeat
+        --path.logs /var/log/filebeat
       become: true
       register: filebeat_config_retest
       changed_when: false
       failed_when: false
 
     - name: Collect Filebeat test output
-      ansible.builtin.command: filebeat test output -c /etc/filebeat/filebeat.yml
+      ansible.builtin.command: >-
+        /usr/share/filebeat/bin/filebeat test output
+        -c /etc/filebeat/filebeat.yml
+        --path.home /usr/share/filebeat
+        --path.config /etc/filebeat
+        --path.data /var/lib/filebeat
+        --path.logs /var/log/filebeat
       become: true
       register: filebeat_output_test
       changed_when: false
