@@ -5,22 +5,22 @@
 # Usage:
 #   ansible-playbook unlock-deploy-user.yml
 #
-# This playbook connects as the bootstrap user (the initial SSH user
-# specified during setup) which retains full sudo access even after
-# the deployment user is locked down. It then restores the deployment
-# user's sudo access by running the unlock script.
+# Connects as the bootstrap user (stored in vault) which has full sudo
+# access on all hosts, even after the deployment user is locked down.
 
 - name: Unlock Wazuh Deployment User
   hosts: all
   gather_facts: false
   become: true
   vars:
-    # Connect as the bootstrap user instead of the locked-down wazuh-deploy user.
-    # The bootstrap user (specified during setup.sh/setup-tui.sh) retains full
-    # sudo access and can run the unlock script on behalf of the deploy user.
+    # Override connection to use the bootstrap user instead of the
+    # locked-down wazuh-deploy user (same pattern as site.yml bootstrap play)
     ansible_user: "{{ wazuh_bootstrap_user | default('root') }}"
     ansible_ssh_pass: "{{ vault_ansible_connection_password | default(wazuh_bootstrap_password) | default(omit) }}"
     ansible_ssh_private_key_file: "{{ wazuh_bootstrap_ssh_key | default(omit) }}"
+    # The bootstrap user may require a sudo password (unlike wazuh-deploy
+    # which has NOPASSWD). The become password is stored in the vault.
+    ansible_become_pass: "{{ vault_ansible_become_password | default(vault_ansible_connection_password) | default(omit) }}"
   tasks:
     - name: Check if user is locked down
       ansible.builtin.stat:
@@ -29,7 +29,7 @@
 
     - name: Display current status
       ansible.builtin.debug:
-        msg: "{{ 'User is LOCKED - unlocking...' if lock_flag.stat.exists else 'User is already UNLOCKED' }}"
+        msg: "{{ 'User is LOCKED on ' + inventory_hostname + ' - unlocking...' if lock_flag.stat.exists else 'User is already UNLOCKED on ' + inventory_hostname }}"
 
     - name: Run unlock script
       ansible.builtin.command:
