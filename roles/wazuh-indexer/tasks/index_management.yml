@@ -449,6 +449,7 @@
               properties:
                 name:
                   type: text
+                  fielddata: true
                   fields:
                     keyword:
                       type: keyword
@@ -457,6 +458,7 @@
               properties:
                 name:
                   type: text
+                  fielddata: true
                   fields:
                     keyword:
                       type: keyword
@@ -469,12 +471,14 @@
               properties:
                 groups:
                   type: text
+                  fielddata: true
                   fields:
                     keyword:
                       type: keyword
                       ignore_above: 256
                 description:
                   type: text
+                  fielddata: true
                   fields:
                     keyword:
                       type: keyword
@@ -511,6 +515,7 @@
               properties:
                 name:
                   type: text
+                  fielddata: true
                   fields:
                     keyword:
                       type: keyword
@@ -519,6 +524,7 @@
               properties:
                 name:
                   type: text
+                  fielddata: true
                   fields:
                     keyword:
                       type: keyword
@@ -531,12 +537,14 @@
               properties:
                 groups:
                   type: text
+                  fielddata: true
                   fields:
                     keyword:
                       type: keyword
                       ignore_above: 256
                 description:
                   type: text
+                  fielddata: true
                   fields:
                     keyword:
                       type: keyword
@@ -737,6 +745,56 @@
     status_code: [200]
   register: existing_indices
   when: wazuh_retention_enabled | default(true)
+  ignore_errors: true
+
+# ═══════════════════════════════════════════════════════════════
+# Update Mappings on Existing Indices
+# ═══════════════════════════════════════════════════════════════
+# Existing indices created before the rollover template won't have
+# the .keyword subfields needed for aggregations (e.g. manager.name).
+# This adds the keyword subfield mappings to all existing wazuh-alerts
+# and wazuh-archives indices so the dashboard can aggregate on them.
+# Enable fielddata on text fields that the Wazuh Dashboard aggregates on.
+# Existing indices may have different type mappings (e.g. agent.id as text),
+# so we only update fielddata on known text fields without changing types.
+- name: Enable fielddata for aggregation on existing alerts/archives indices
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/{{ item.index }}/_mapping"
+    method: PUT
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    body_format: json
+    body:
+      properties:
+        manager:
+          properties:
+            name:
+              type: text
+              fielddata: true
+        agent:
+          properties:
+            name:
+              type: text
+              fielddata: true
+        rule:
+          properties:
+            groups:
+              type: text
+              fielddata: true
+            description:
+              type: text
+              fielddata: true
+    status_code: [200]
+    headers:
+      Content-Type: "application/json"
+  loop: "{{ existing_indices.json | default([]) }}"
+  when:
+    - wazuh_rollover_enabled | default(true)
+    - existing_indices is defined
+    - existing_indices.json is defined
+    - item.index is match('wazuh-alerts-.*') or item.index is match('wazuh-archives-.*')
   ignore_errors: true
 
 - name: Attach ISM policy to existing alerts indices
