@@ -443,6 +443,42 @@
           number_of_replicas: "{{ wazuh_alerts_replica_shards | default(0) }}"
           index.refresh_interval: "5s"
           plugins.index_state_management.rollover_alias: "{{ wazuh_alerts_alias | default('wazuh-alerts') }}"
+        mappings:
+          properties:
+            manager:
+              properties:
+                name:
+                  type: text
+                  fields:
+                    keyword:
+                      type: keyword
+                      ignore_above: 256
+            agent:
+              properties:
+                name:
+                  type: text
+                  fields:
+                    keyword:
+                      type: keyword
+                      ignore_above: 256
+                id:
+                  type: keyword
+                ip:
+                  type: keyword
+            rule:
+              properties:
+                groups:
+                  type: text
+                  fields:
+                    keyword:
+                      type: keyword
+                      ignore_above: 256
+                description:
+                  type: text
+                  fields:
+                    keyword:
+                      type: keyword
+                      ignore_above: 256
       priority: 50
     status_code: [200]
     headers:
@@ -469,6 +505,42 @@
           number_of_replicas: "{{ wazuh_archives_replica_shards | default(0) }}"
           index.refresh_interval: "5s"
           plugins.index_state_management.rollover_alias: "{{ wazuh_archives_alias | default('wazuh-archives') }}"
+        mappings:
+          properties:
+            manager:
+              properties:
+                name:
+                  type: text
+                  fields:
+                    keyword:
+                      type: keyword
+                      ignore_above: 256
+            agent:
+              properties:
+                name:
+                  type: text
+                  fields:
+                    keyword:
+                      type: keyword
+                      ignore_above: 256
+                id:
+                  type: keyword
+                ip:
+                  type: keyword
+            rule:
+              properties:
+                groups:
+                  type: text
+                  fields:
+                    keyword:
+                      type: keyword
+                      ignore_above: 256
+                description:
+                  type: text
+                  fields:
+                    keyword:
+                      type: keyword
+                      ignore_above: 256
       priority: 50
     status_code: [200]
     headers:
@@ -812,5 +884,7 @@
       ├─ {{ wazuh_monitoring_alias | default('wazuh-monitoring') }}  → wazuh-monitoring-000001 (rolling)
       └─ {{ wazuh_statistics_alias | default('wazuh-statistics') }}  → wazuh-statistics-000001 (rolling)
 
-      Note: Field mappings are handled by Filebeat's official wazuh-template.json
+      Note: Core field mappings (manager.name, agent.name, rule.groups, etc.)
+            include .keyword subfields for aggregation support.
+            Additional mappings from Filebeat's wazuh-template.json are merged.
       ══════════════════════════════════════════════════════════════
