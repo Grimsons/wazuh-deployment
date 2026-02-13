@@ -76,7 +76,7 @@ ansible-galaxy collection install ansible.posix community.general
 |------|----------|-----------|---------|
 | 22   | TCP      | All       | SSH (Ansible) |
 | 443  | TCP      | Dashboard | HTTPS UI |
-| 1514 | TCP/UDP  | Manager   | Agent events |
+| 1514 | TCP      | Manager   | Agent events |
 | 1515 | TCP      | Manager   | Agent enrollment |
 | 1516 | TCP      | Manager   | Manager cluster |
 | 9200 | TCP      | Indexer   | REST API |
@@ -99,7 +99,7 @@ For detailed information on the compatibility of Wazuh components, please refer 
 
 Wazuh agents are compatible with a wide variety of operating systems. However, the installation and enrollment of agents using Ansible are only supported on Linux, Windows, and macOS operating systems.
 
-For more detailed information on Wazuh agents’ compatibility, please refer to the Wazuh documentation:
+For more detailed information on Wazuh agents' compatibility, please refer to the Wazuh documentation:
 
 - Compatibility Matrix: [Wazuh Compatibility Matrix](https://documentation.wazuh.com/current/user-manual/capabilities/system-inventory/compatibility-matrix.html)
 - Packages List: [Wazuh Packages List](https://documentation.wazuh.com/current/installation-guide/packages-list.html)

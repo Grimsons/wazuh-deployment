@@ -1,35 +1,27 @@
-# Introduction
+# Wazuh Deployment
 
-[![Slack](https://img.shields.io/badge/slack-join-blue.svg)](https://wazuh.com/community/join-us-on-slack/)
-[![Email](https://img.shields.io/badge/email-join-blue.svg)](https://groups.google.com/forum/#!forum/wazuh)
-[![Documentation](https://img.shields.io/badge/docs-view-green.svg)](https://documentation.wazuh.com)
-[![Documentation](https://img.shields.io/badge/web-view-green.svg)](https://wazuh.com)
+An Ansible-based deployment toolkit for the Wazuh SIEM/XDR platform. This project automates the installation, configuration, and ongoing management of Wazuh Indexer, Manager, Dashboard, and Agent components across single-node or distributed environments.
 
-# Wazuh Ansible Documentation
+Key features:
 
-Here is the technical documentation for deploying Wazuh using the Ansible method. The documentation is structured into the following key guides:
+- **Interactive setup** via CLI wizard or TUI (with [gum](https://github.com/charmbracelet/gum))
+- **Automated certificate generation** and credential management (Ansible Vault)
+- **Bootstrap workflow** that provisions a dedicated deployment user with SSH key auth
+- **Post-deployment lockdown** of the deployment user for security
+- **SOCFortress community detection rules** (1000+ rules with MITRE ATT&CK mapping)
+- **Operational playbooks** for backups, upgrades, health checks, certificate rotation, and more
+- **Makefile** shortcuts for all common operations
 
-- **Development Guide**: Step-by-step instructions to set up the development environment and deploy Wazuh effectively using Ansible.
-- **Reference Manual**: In-depth details on the Wazuh Ansible deployment process, including prerequisites, configuration options, compatibility guidelines, and usage instructions.
+## Documentation
 
-## Docs requirements
+This documentation is built with [mdBook](https://rust-lang.github.io/mdBook/). To build and serve locally:
 
-To work with this documentation, you need **mdBook** installed. For installation instructions, refer to the [mdBook documentation](https://rust-lang.github.io/mdBook/).
+```bash
+# Build (output in book/)
+./build.sh
 
-## Usage
+# Serve at http://127.0.0.1:3000
+./server.sh
+```
 
-- To build the documentation, run:
-
-  ```bash
-  ./build.sh
-  ```
-
-  The output will be generated in the `book` directory.
-
-- To serve the documentation locally for preview, run:
-
-  ```bash
-  ./server.sh
-  ```
-
-  The documentation will be available at [http://127.0.0.1:3000](http://127.0.0.1:3000).
+For deployment instructions, start with the [Deployment Guide](getting-started/deployment.md) or the [Cheatsheet](cheatsheet.md).

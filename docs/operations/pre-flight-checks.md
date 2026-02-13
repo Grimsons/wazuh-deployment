@@ -227,7 +227,7 @@ It's recommended to run pre-flight checks before:
 3. **Disaster recovery**
    ```bash
    ansible-playbook playbooks/pre-flight-checks.yml
-   ansible-playbook playbooks/restore.yml -e "backup_timestamp=20240115_020000"
+   ansible-playbook playbooks/restore.yml -e "restore_from=20260115_020000"
    ```
 
 ## Automated Validation

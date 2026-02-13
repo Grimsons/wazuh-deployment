@@ -20,9 +20,12 @@ After your main Wazuh deployment, enable monitoring:
 
 ```bash
 ansible-playbook site.yml --tags monitoring -e wazuh_monitoring_enabled=true
+
+# Or use the make shortcut:
+make monitoring
 ```
 
-Or enable permanently in `group_vars/all.yml`:
+Or enable permanently in `group_vars/all/main.yml`:
 
 ```yaml
 wazuh_monitoring_enabled: true
@@ -47,7 +50,7 @@ scrape_configs:
     # Optional: use basic auth if configured
     # basic_auth:
     #   username: admin
-    #   password: your-password
+    #   password: <your-password>
 
   # Manager metrics (one target per manager node)
   - job_name: 'wazuh-manager'
@@ -66,14 +69,14 @@ The dashboard is automatically provisioned to `/etc/grafana/provisioning/dashboa
 **Option 2: Manual import via UI**
 
 1. Copy `roles/wazuh-monitoring/files/grafana-wazuh-dashboard.json` to your machine
-2. In Grafana: **Dashboards → Import → Upload JSON file**
+2. In Grafana: **Dashboards -> Import -> Upload JSON file**
 3. Select your Prometheus datasource
 
 **Option 3: Import via API**
 
 ```bash
 curl -X POST \
-  -H "Authorization: Bearer YOUR_GRAFANA_API_KEY" \
+  -H "Authorization: Bearer <your-grafana-api-key>" \
   -H "Content-Type: application/json" \
   -d @roles/wazuh-monitoring/files/grafana-wazuh-dashboard.json \
   http://your-grafana:3000/api/dashboards/db
@@ -246,7 +249,7 @@ groups:
 
 ## Configuration Variables
 
-Set these in `group_vars/all.yml`:
+Set these in `group_vars/all/main.yml`:
 
 ```yaml
 # Enable/disable monitoring
@@ -312,14 +315,14 @@ journalctl -u wazuh-opensearch-exporter -f
 
 Verify OpenSearch is accessible:
 ```bash
-curl -k -u admin:password https://localhost:9200/_cluster/health
+curl -k -u admin:<your-password> https://localhost:9200/_cluster/health
 ```
 
 ### No metrics from manager
 
 Verify Wazuh API is accessible:
 ```bash
-curl -k -u wazuh-wui:password https://localhost:55000/security/user/authenticate
+curl -k -u wazuh-wui:<your-password> https://localhost:55000/security/user/authenticate
 ```
 
 ### Prometheus can't scrape
@@ -339,7 +342,7 @@ sudo ufw status | grep 9115
 
 1. Verify Prometheus datasource is configured in Grafana
 2. Check Prometheus targets: `http://prometheus:9090/targets`
-3. Verify metrics exist: `http://prometheus:9090/graph` → query `wazuh_agents_active`
+3. Verify metrics exist: `http://prometheus:9090/graph` -> query `wazuh_agents_active`
 
 ## Disabling Monitoring
 

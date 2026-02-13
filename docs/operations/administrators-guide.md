@@ -31,21 +31,24 @@ This guide provides best practices and operational procedures for managing your 
 
 ### During Setup
 
-- [ ] Run `./setup.sh` and complete the interactive wizard
+- [ ] Run `./setup.sh` (or `./setup-tui.sh` for the TUI version) and complete the interactive wizard
 - [ ] Note the admin credentials displayed at the end
 - [ ] Verify `.vault_password` file was created
 
 ### Bootstrap & Deployment
 
 ```bash
-# 1. Test connectivity to hosts (uses your personal credentials)
-ansible all -m ping -i inventory/bootstrap.yml --vault-password-file .vault_password
+# 1. First-time deployment (bootstrap + deploy in one step)
+ansible-playbook site.yml --tags bootstrap,all --ask-pass
 
-# 2. Bootstrap hosts (creates wazuh-deploy user with SSH key)
-ansible-playbook playbooks/bootstrap-hosts.yml -i inventory/bootstrap.yml --vault-password-file .vault_password
+# Or use the make shortcut:
+make deploy-bootstrap
 
-# 3. Deploy Wazuh (now uses SSH key authentication)
-ansible-playbook site.yml --vault-password-file .vault_password
+# 2. Subsequent deployments (uses SSH key auth from bootstrap)
+ansible-playbook site.yml
+
+# Or use the make shortcut:
+make deploy
 ```
 
 The bootstrap step creates the `wazuh-deploy` user on all hosts with:
@@ -59,7 +62,8 @@ After bootstrap, all operations use the main inventory (`hosts.yml`) with SSH ke
 - [ ] **CRITICAL**: Back up `.vault_password` to secure offline storage
 - [ ] Back up `group_vars/all/vault.yml` (encrypted credentials)
 - [ ] Test dashboard login at `https://<dashboard-ip>:443`
-- [ ] Verify all services running: `ansible-playbook playbooks/health-check.yml --vault-password-file .vault_password`
+- [ ] Verify all services running: `ansible-playbook playbooks/health-check.yml`
+- [ ] Quick status check: `./scripts/status.sh` (or `make status`)
 - [ ] Test credential retrieval: `./scripts/manage-vault.sh view`
 - [ ] Configure automated backups (see [Maintenance Schedule](#maintenance-schedule))
 
@@ -72,6 +76,9 @@ After bootstrap, all operations use the main inventory (`hosts.yml`) with SSH ke
 ```bash
 # View all credentials
 ./scripts/manage-vault.sh view
+
+# Or use the make shortcut:
+make vault-view
 
 # View specific credential
 ./scripts/manage-vault.sh view | grep indexer
@@ -87,8 +94,11 @@ Rotate all credentials periodically (recommended: every 90 days):
 # Generate new credentials and update vault
 ./scripts/manage-vault.sh rotate
 
+# Or use the make shortcut:
+make vault-rotate
+
 # Redeploy to apply new credentials
-ansible-playbook site.yml --vault-password-file .vault_password
+ansible-playbook site.yml
 ```
 
 ### Changing Vault Password
@@ -118,27 +128,32 @@ Change the vault encryption password periodically:
 Run daily health checks (or automate via cron):
 
 ```bash
-# Basic health check
-ansible-playbook playbooks/health-check.yml --vault-password-file .vault_password
+# Quick status check
+./scripts/status.sh
+make status
+
+# Full health check
+ansible-playbook playbooks/health-check.yml
+make health
 
 # Detailed check with agent status
-ansible-playbook playbooks/health-check.yml -e "check_agents=true" --vault-password-file .vault_password
+ansible-playbook playbooks/health-check.yml -e "check_agents=true"
 
 # Check with index statistics
-ansible-playbook playbooks/health-check.yml -e "check_indices=true" --vault-password-file .vault_password
+ansible-playbook playbooks/health-check.yml -e "check_indices=true"
 ```
 
 ### Service Management
 
 ```bash
 # Check service status on all hosts
-ansible all -m shell -a "systemctl status wazuh-* --no-pager" --become --vault-password-file .vault_password
+ansible all -m shell -a "systemctl status wazuh-* --no-pager" --become
 
 # Restart a specific service
-ansible wazuh_managers -m systemd -a "name=wazuh-manager state=restarted" --become --vault-password-file .vault_password
+ansible wazuh_managers -m systemd -a "name=wazuh-manager state=restarted" --become
 
 # View logs
-ansible wazuh_managers -m shell -a "tail -50 /var/ossec/logs/ossec.log" --become --vault-password-file .vault_password
+ansible wazuh_managers -m shell -a "tail -50 /var/ossec/logs/ossec.log" --become
 ```
 
 ### Agent Management
@@ -151,7 +166,7 @@ ssh <manager-ip> 'sudo /var/ossec/bin/agent_control -l'
 ssh <manager-ip> 'sudo /var/ossec/bin/agent_control -i <agent-id>'
 
 # Restart agent remotely
-ansible wazuh_agents -m systemd -a "name=wazuh-agent state=restarted" --become --vault-password-file .vault_password
+ansible wazuh_agents -m systemd -a "name=wazuh-agent state=restarted" --become
 ```
 
 ---
@@ -214,24 +229,24 @@ Default hardening settings (already configured):
 ### Automated Maintenance Setup
 
 ```bash
-# Set up automated backups and log cleanup
-ansible-playbook playbooks/setup-maintenance-cron.yml --vault-password-file .vault_password
+# Set up automated backups and log cleanup via cron
+ansible-playbook playbooks/setup-maintenance-cron.yml
 ```
+
+The scheduled backup script is `scripts/run-scheduled-backup.sh`, which is configured by the maintenance cron playbook.
 
 ### Recommended Schedule
 
-> **Note:** All `ansible-playbook` commands require `--vault-password-file .vault_password` to decrypt credentials.
-
 | Task | Frequency | Command |
 |------|-----------|---------|
-| Health check | Daily | `ansible-playbook playbooks/health-check.yml` |
-| Backup | Daily | `ansible-playbook playbooks/backup.yml` |
+| Health check | Daily | `make health` |
+| Backup | Daily | `make backup` |
 | Log cleanup | Weekly | `ansible-playbook playbooks/log-cleanup.yml` |
 | OS security updates | Weekly/Monthly | `ansible-playbook playbooks/system-update.yml -e security_only=true` |
-| Certificate check | Monthly | `ansible-playbook playbooks/certificate-management.yml --tags check-expiry` |
-| Credential rotation | Quarterly | `./scripts/manage-vault.sh rotate` |
+| Certificate check | Monthly | `make certs-check` |
+| Credential rotation | Quarterly | `make vault-rotate` |
 | Vault rekey | Bi-annually | `./scripts/manage-vault.sh rekey` |
-| Wazuh upgrade | As needed | `ansible-playbook playbooks/upgrade.yml` |
+| Wazuh upgrade | As needed | `make upgrade` |
 | Full OS update | Quarterly | `ansible-playbook playbooks/system-update.yml` |
 
 ### Log Retention
@@ -253,10 +268,11 @@ wazuh_retention_cold_after_days: 90   # Move to cold tier
 
 ```bash
 # Full backup
-ansible-playbook playbooks/backup.yml --vault-password-file .vault_password
+ansible-playbook playbooks/backup.yml
+make backup
 
 # Backup with index snapshots (larger, includes alert data)
-ansible-playbook playbooks/backup.yml -e "include_indices=true" --vault-password-file .vault_password
+ansible-playbook playbooks/backup.yml -e "include_indices=true"
 ```
 
 ### What Gets Backed Up
@@ -282,7 +298,10 @@ Backups are stored in `./backups/TIMESTAMP/`. Best practices:
 ls -la backups/
 
 # Restore from specific backup
-ansible-playbook playbooks/restore.yml -e "backup_timestamp=20260121_020000" --vault-password-file .vault_password
+ansible-playbook playbooks/restore.yml -e "restore_from=20260121_020000"
+
+# Or use the make shortcut:
+make restore BACKUP_ID=20260121_020000
 ```
 
 ### Disaster Recovery
@@ -293,7 +312,7 @@ For complete recovery on new infrastructure:
 2. Restore `.vault_password` from secure backup
 3. Restore `group_vars/all/vault.yml`
 4. Update `inventory/hosts.yml` with new host IPs
-5. Run: `ansible-playbook site.yml --vault-password-file .vault_password`
+5. Run: `ansible-playbook site.yml`
 6. Restore configuration backup if available
 
 ---
@@ -306,17 +325,17 @@ Set up automated alerting for failures:
 
 ```bash
 # With Slack alerts
-ansible-playbook playbooks/health-check-alerts.yml -e "alert_slack=true" --vault-password-file .vault_password
+ansible-playbook playbooks/health-check-alerts.yml -e "alert_slack=true"
 
 # With email alerts
-ansible-playbook playbooks/health-check-alerts.yml -e "alert_email=true" --vault-password-file .vault_password
+ansible-playbook playbooks/health-check-alerts.yml -e "alert_email=true"
 ```
 
 Configure alert destinations in `group_vars/all/main.yml`:
 
 ```yaml
 # Slack
-wazuh_health_slack_webhook: "https://hooks.slack.com/services/XXX"
+wazuh_health_slack_webhook: "https://hooks.slack.com/services/<your-webhook>"
 
 # Email
 wazuh_health_email_to: "admin@example.com"
@@ -337,7 +356,8 @@ wazuh_health_smtp_server: "smtp.example.com"
 
 ```bash
 # Check certificate expiration
-ansible-playbook playbooks/certificate-management.yml --tags check-expiry --vault-password-file .vault_password
+ansible-playbook playbooks/certificate-management.yml --tags check-expiry
+make certs-check
 ```
 
 ---
@@ -350,22 +370,22 @@ Apply operating system security patches and updates:
 
 ```bash
 # Check for available updates (no changes)
-ansible-playbook playbooks/system-update.yml --tags check --vault-password-file .vault_password
+ansible-playbook playbooks/system-update.yml --tags check
 
 # Apply security updates only (recommended for production)
-ansible-playbook playbooks/system-update.yml -e "security_only=true" --vault-password-file .vault_password
+ansible-playbook playbooks/system-update.yml -e "security_only=true"
 
 # Full system update (all packages)
-ansible-playbook playbooks/system-update.yml --vault-password-file .vault_password
+ansible-playbook playbooks/system-update.yml
 
 # Auto-reboot if kernel updates require it
-ansible-playbook playbooks/system-update.yml -e "auto_reboot=true" --vault-password-file .vault_password
+ansible-playbook playbooks/system-update.yml -e "auto_reboot=true"
 ```
 
 **Best Practices for OS Updates:**
 - Apply security updates weekly or monthly
 - Schedule full updates during maintenance windows
-- The playbook updates in safe order: Agents → Dashboard → Managers → Indexers
+- The playbook updates in safe order: Agents -> Dashboard -> Managers -> Indexers
 - Rolling updates ensure one node stays running during cluster updates
 - Backup is created automatically before updates
 
@@ -383,23 +403,25 @@ ansible-playbook playbooks/system-update.yml -e "auto_reboot=true" --vault-passw
 
 ```bash
 # Check current vs target versions (dry run)
-ansible-playbook playbooks/upgrade.yml --tags check --vault-password-file .vault_password
+ansible-playbook playbooks/upgrade.yml --tags check
+make upgrade-check
 
 # Perform upgrade
-ansible-playbook playbooks/upgrade.yml --vault-password-file .vault_password
+ansible-playbook playbooks/upgrade.yml
+make upgrade
 
 # Upgrade to specific version
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.15.0" --vault-password-file .vault_password
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0"
 ```
 
 ### Post-Upgrade Verification
 
 ```bash
 # Verify all services running
-ansible-playbook playbooks/health-check.yml --vault-password-file .vault_password
+ansible-playbook playbooks/health-check.yml
 
 # Check versions
-ansible all -m shell -a "wazuh-manager --version 2>/dev/null || wazuh-indexer --version 2>/dev/null || wazuh-agent --version 2>/dev/null" --become --vault-password-file .vault_password
+ansible all -m shell -a "wazuh-manager --version 2>/dev/null || wazuh-indexer --version 2>/dev/null || wazuh-agent --version 2>/dev/null" --become
 ```
 
 ### Rollback
@@ -408,7 +430,7 @@ If upgrade fails:
 
 ```bash
 # Restore from pre-upgrade backup
-ansible-playbook playbooks/restore.yml -e "backup_timestamp=pre-upgrade-TIMESTAMP" --vault-password-file .vault_password
+ansible-playbook playbooks/restore.yml -e "restore_from=pre-upgrade-TIMESTAMP"
 ```
 
 ---
@@ -430,12 +452,12 @@ ansible-playbook playbooks/restore.yml -e "backup_timestamp=pre-upgrade-TIMESTAM
 2. Add credentials to vault:
    ```bash
    ./scripts/manage-vault.sh edit
-   # Add vault_ssh_user_<ip> and vault_ssh_pass_<ip>
    ```
 
 3. Deploy:
    ```bash
-   ansible-playbook site.yml --tags indexer --vault-password-file .vault_password
+   ansible-playbook site.yml --tags indexer
+   make deploy-indexer
    ```
 
 ### Adding Manager Nodes (Cluster)
@@ -452,9 +474,9 @@ ansible-playbook playbooks/restore.yml -e "backup_timestamp=pre-upgrade-TIMESTAM
 ### Adding Agents
 
 ```bash
-# Add to inventory
-# Run agent deployment
-ansible-playbook site.yml --tags agent --vault-password-file .vault_password
+# Add to inventory, then run agent deployment
+ansible-playbook site.yml --tags agent
+make deploy-agent
 ```
 
 ---
@@ -469,7 +491,7 @@ ansible-playbook site.yml --tags agent --vault-password-file .vault_password
 | Agent not connecting | Check port 1514 connectivity, verify enrollment password |
 | Indexer cluster red | Check disk space, restart indexer service |
 | High memory usage | Adjust heap size in jvm.options |
-| Certificate errors | Regenerate certs: `./generate-certs.sh --force` |
+| Certificate errors | `make certs-rotate` to regenerate certificates |
 
 ### Log Locations
 
@@ -484,17 +506,20 @@ ansible-playbook site.yml --tags agent --vault-password-file .vault_password
 ### Diagnostic Commands
 
 ```bash
+# Quick status
+./scripts/status.sh
+
 # Full system diagnostics
-ansible-playbook playbooks/health-check.yml -e "check_agents=true check_indices=true" --vault-password-file .vault_password
+ansible-playbook playbooks/health-check.yml -e "check_agents=true check_indices=true"
 
 # Check cluster health
-curl -k -u admin:PASSWORD https://INDEXER:9200/_cluster/health?pretty
+curl -k -u admin:<your-password> https://<indexer-ip>:9200/_cluster/health?pretty
 
 # Check manager cluster
-ssh MANAGER 'sudo /var/ossec/bin/cluster_control -l'
+ssh <manager-ip> 'sudo /var/ossec/bin/cluster_control -l'
 
 # View recent alerts
-ssh MANAGER 'sudo tail -100 /var/ossec/logs/alerts/alerts.json | jq .'
+ssh <manager-ip> 'sudo tail -100 /var/ossec/logs/alerts/alerts.json | jq .'
 ```
 
 ### Getting Help
@@ -510,29 +535,29 @@ ssh MANAGER 'sudo tail -100 /var/ossec/logs/alerts/alerts.json | jq .'
 
 ```bash
 # View credentials
-./scripts/manage-vault.sh view
+./scripts/manage-vault.sh view          # or: make vault-view
+
+# Quick status
+./scripts/status.sh                     # or: make status
 
 # Health check
-ansible-playbook playbooks/health-check.yml --vault-password-file .vault_password
+ansible-playbook playbooks/health-check.yml  # or: make health
 
 # Backup
-ansible-playbook playbooks/backup.yml --vault-password-file .vault_password
+ansible-playbook playbooks/backup.yml   # or: make backup
 
 # Rotate credentials
-./scripts/manage-vault.sh rotate
+./scripts/manage-vault.sh rotate        # or: make vault-rotate
 
 # Check certificates
-ansible-playbook playbooks/certificate-management.yml --tags check-expiry --vault-password-file .vault_password
+make certs-check
 
 # OS security updates
-ansible-playbook playbooks/system-update.yml -e "security_only=true" --vault-password-file .vault_password
-
-# Check for OS updates (no changes)
-ansible-playbook playbooks/system-update.yml --tags check --vault-password-file .vault_password
+ansible-playbook playbooks/system-update.yml -e "security_only=true"
 
 # Wazuh upgrade (dry run)
-ansible-playbook playbooks/upgrade.yml --tags check --vault-password-file .vault_password
+make upgrade-check
 
 # Full deployment
-ansible-playbook site.yml --vault-password-file .vault_password
+ansible-playbook site.yml               # or: make deploy
 ```

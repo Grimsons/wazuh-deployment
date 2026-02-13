@@ -10,7 +10,6 @@ This document outlines the disaster recovery (DR) procedures for Wazuh deploymen
 4. [Recovery Procedures](#recovery-procedures)
 5. [DR Testing](#dr-testing)
 6. [Runbooks](#runbooks)
-7. [Contact Information](#contact-information)
 
 ---
 
@@ -57,9 +56,14 @@ This DR plan covers:
 ### Automated Backups
 
 ```bash
-# Schedule daily backup via cron
+# Set up automated backups and log cleanup via cron
+ansible-playbook playbooks/setup-maintenance-cron.yml
+
+# Or schedule manually
 0 2 * * * cd /path/to/wazuh-deployment && ansible-playbook playbooks/backup.yml
 ```
+
+The maintenance cron playbook configures `scripts/run-scheduled-backup.sh` to run on schedule.
 
 ### What Gets Backed Up
 
@@ -91,7 +95,7 @@ This DR plan covers:
 
 ```
 ./backups/
-├── 20240115_020000/           # Timestamp-based directories
+├── 20260115_020000/           # Timestamp-based directories
 │   ├── indexer/
 │   │   ├── opensearch.yml
 │   │   ├── opensearch-security/
@@ -105,7 +109,7 @@ This DR plan covers:
 │   │   ├── opensearch_dashboards.yml
 │   │   └── certs/
 │   └── vault.yml.backup
-├── 20240116_020000/
+├── 20260116_020000/
 └── checksums.sha256
 ```
 
@@ -127,16 +131,16 @@ This DR plan covers:
 
 ```bash
 # 1. Stop the failed indexer
-ssh indexer-1 "sudo systemctl stop wazuh-indexer"
+ssh <indexer-ip> "sudo systemctl stop wazuh-indexer"
 
 # 2. Restore configuration
 ansible-playbook playbooks/restore.yml \
-  -e "backup_timestamp=20240115_020000" \
+  -e "restore_from=20260115_020000" \
   -e "restore_indexer=true" \
   --limit indexer-1
 
 # 3. Start and verify
-ssh indexer-1 "sudo systemctl start wazuh-indexer"
+ssh <indexer-ip> "sudo systemctl start wazuh-indexer"
 ansible-playbook playbooks/health-check.yml --limit indexer-1
 ```
 
@@ -144,16 +148,16 @@ ansible-playbook playbooks/health-check.yml --limit indexer-1
 
 ```bash
 # 1. Stop the failed manager
-ssh manager-1 "sudo systemctl stop wazuh-manager"
+ssh <manager-ip> "sudo systemctl stop wazuh-manager"
 
 # 2. Restore configuration
 ansible-playbook playbooks/restore.yml \
-  -e "backup_timestamp=20240115_020000" \
+  -e "restore_from=20260115_020000" \
   -e "restore_manager=true" \
   --limit manager-1
 
 # 3. Start and verify
-ssh manager-1 "sudo systemctl start wazuh-manager"
+ssh <manager-ip> "sudo systemctl start wazuh-manager"
 ansible-playbook playbooks/health-check.yml --limit manager-1
 ```
 
@@ -161,7 +165,7 @@ ansible-playbook playbooks/health-check.yml --limit manager-1
 
 ```bash
 # 1. Validate backup integrity
-ansible-playbook playbooks/dr-validate.yml -e "backup_timestamp=20240115_020000"
+ansible-playbook playbooks/dr-validate.yml -e "backup_timestamp=20260115_020000"
 
 # 2. Run pre-flight checks on new infrastructure
 ansible-playbook playbooks/pre-flight-checks.yml
@@ -175,7 +179,7 @@ ansible all -m systemd -a "name=wazuh-manager state=stopped" --limit wazuh_manag
 ansible all -m systemd -a "name=wazuh-dashboard state=stopped" --limit wazuh_dashboards
 
 # 5. Restore from backup
-ansible-playbook playbooks/restore.yml -e "backup_timestamp=20240115_020000"
+ansible-playbook playbooks/restore.yml -e "restore_from=20260115_020000"
 
 # 6. Start services
 ansible all -m systemd -a "name=wazuh-indexer state=started" --limit wazuh_indexers
@@ -192,9 +196,9 @@ For recovering historical alert data (requires index snapshots):
 
 ```bash
 # 1. Register snapshot repository (if not exists)
-curl -X PUT "https://indexer:9200/_snapshot/backup_repo" \
+curl -X PUT "https://<indexer-ip>:9200/_snapshot/backup_repo" \
   -H "Content-Type: application/json" \
-  -u admin:password \
+  -u admin:<your-password> \
   -d '{
     "type": "fs",
     "settings": {
@@ -203,12 +207,12 @@ curl -X PUT "https://indexer:9200/_snapshot/backup_repo" \
   }'
 
 # 2. List available snapshots
-curl -X GET "https://indexer:9200/_snapshot/backup_repo/_all" -u admin:password
+curl -X GET "https://<indexer-ip>:9200/_snapshot/backup_repo/_all" -u admin:<your-password>
 
 # 3. Restore specific indices
-curl -X POST "https://indexer:9200/_snapshot/backup_repo/snapshot_20240115/_restore" \
+curl -X POST "https://<indexer-ip>:9200/_snapshot/backup_repo/snapshot_20260115/_restore" \
   -H "Content-Type: application/json" \
-  -u admin:password \
+  -u admin:<your-password> \
   -d '{
     "indices": "wazuh-alerts-*",
     "ignore_unavailable": true,
@@ -249,7 +253,7 @@ ansible-playbook playbooks/dr-validate.yml -e "dr_test_mode=true"
 
    ansible-playbook site.yml -i inventory/hosts-dr.yml
    ansible-playbook playbooks/restore.yml -i inventory/hosts-dr.yml \
-     -e "backup_timestamp=LATEST"
+     -e "restore_from=LATEST"
    ```
 
 3. **Validation**
@@ -276,12 +280,12 @@ ansible-playbook playbooks/dr-validate.yml -e "dr_test_mode=true"
 **Steps:**
 1. Check cluster status:
    ```bash
-   curl -X GET "https://indexer:9200/_cluster/health?pretty" -u admin:password
+   curl -X GET "https://<indexer-ip>:9200/_cluster/health?pretty" -u admin:<your-password>
    ```
 
 2. Identify unassigned shards:
    ```bash
-   curl -X GET "https://indexer:9200/_cat/shards?v&h=index,shard,prirep,state,unassigned.reason" -u admin:password
+   curl -X GET "https://<indexer-ip>:9200/_cat/shards?v&h=index,shard,prirep,state,unassigned.reason" -u admin:<your-password>
    ```
 
 3. If node failure, restore from backup:
@@ -291,7 +295,7 @@ ansible-playbook playbooks/dr-validate.yml -e "dr_test_mode=true"
 
 4. Force shard allocation (last resort):
    ```bash
-   curl -X POST "https://indexer:9200/_cluster/reroute?retry_failed=true" -u admin:password
+   curl -X POST "https://<indexer-ip>:9200/_cluster/reroute?retry_failed=true" -u admin:<your-password>
    ```
 
 ### Runbook 2: Manager Not Receiving Alerts
@@ -334,23 +338,14 @@ ansible-playbook playbooks/dr-validate.yml -e "dr_test_mode=true"
    openssl x509 -enddate -noout -in /etc/wazuh-indexer/certs/indexer.pem
    ```
 
-2. Generate new certificates:
+2. Rotate certificates using the certificate management playbook:
    ```bash
-   ./generate-certs.sh
+   ansible-playbook playbooks/certificate-management.yml --tags rotate
    ```
 
-3. Deploy new certificates:
+3. Verify services are running after rotation:
    ```bash
-   ansible-playbook playbooks/wazuh-indexer.yml --tags certificates
-   ansible-playbook playbooks/wazuh-manager.yml --tags certificates
-   ansible-playbook playbooks/wazuh-dashboard.yml --tags certificates
-   ```
-
-4. Restart services:
-   ```bash
-   ansible all -m systemd -a "name=wazuh-indexer state=restarted" --limit wazuh_indexers
-   ansible all -m systemd -a "name=wazuh-manager state=restarted" --limit wazuh_managers
-   ansible all -m systemd -a "name=wazuh-dashboard state=restarted" --limit wazuh_dashboards
+   ansible-playbook playbooks/health-check.yml
    ```
 
 ---
@@ -370,7 +365,7 @@ ansible-playbook playbooks/dr-validate.yml -e "dr_test_mode=true"
 
 - [ ] All services running: `ansible-playbook playbooks/health-check.yml`
 - [ ] Dashboard accessible and functional
-- [ ] API responding: `curl https://manager:55000/`
+- [ ] API responding: `curl https://<manager-ip>:55000/`
 - [ ] Agents reconnecting (may take several minutes)
 - [ ] New alerts being generated and stored
 - [ ] Custom rules and decoders loaded
@@ -380,58 +375,26 @@ ansible-playbook playbooks/dr-validate.yml -e "dr_test_mode=true"
 
 ---
 
-## Contact Information
-
-### Primary Contacts
-
-| Role | Name | Phone | Email |
-|------|------|-------|-------|
-| Security Lead | [Name] | [Phone] | [Email] |
-| Infrastructure | [Name] | [Phone] | [Email] |
-| On-Call | Rotation | [Phone] | [Email] |
-
-### Escalation Path
-
-1. **Level 1:** On-call engineer (15 min response)
-2. **Level 2:** Security team lead (30 min response)
-3. **Level 3:** Infrastructure manager (1 hour response)
-
-### External Support
-
-- **Wazuh Support:** https://wazuh.com/support/
-- **Community Slack:** https://wazuh.com/community/
-- **GitHub Issues:** https://github.com/wazuh/wazuh/issues
-
----
-
-## Revision History
-
-| Date | Version | Author | Changes |
-|------|---------|--------|---------|
-| YYYY-MM-DD | 1.0 | [Author] | Initial DR plan |
-
----
-
 ## Appendix A: Command Reference
 
 ```bash
 # Backup commands
-ansible-playbook playbooks/backup.yml                    # Full backup
-ansible-playbook playbooks/backup.yml -e "include_indices=true"  # Include index snapshot
+ansible-playbook playbooks/backup.yml                              # Full backup
+ansible-playbook playbooks/backup.yml -e "include_indices=true"    # Include index snapshot
 
 # Restore commands
-ansible-playbook playbooks/restore.yml -e "backup_timestamp=20240115_020000"
+ansible-playbook playbooks/restore.yml -e "restore_from=20260115_020000"
 ansible-playbook playbooks/restore.yml -e "restore_indexer=true"   # Indexer only
 ansible-playbook playbooks/restore.yml -e "restore_manager=true"   # Manager only
 
 # Validation commands
-ansible-playbook playbooks/dr-validate.yml               # Validate latest backup
+ansible-playbook playbooks/dr-validate.yml                         # Validate latest backup
 ansible-playbook playbooks/dr-validate.yml -e "dr_test_mode=true"  # Full test
-ansible-playbook playbooks/health-check.yml              # Check all services
-ansible-playbook playbooks/pre-flight-checks.yml         # Pre-deployment checks
+ansible-playbook playbooks/health-check.yml                        # Check all services
+ansible-playbook playbooks/pre-flight-checks.yml                   # Pre-deployment checks
 
 # Health check commands
-curl -X GET "https://indexer:9200/_cluster/health?pretty" -u admin:password
+curl -X GET "https://<indexer-ip>:9200/_cluster/health?pretty" -u admin:<your-password>
 /var/ossec/bin/wazuh-control status
 /var/ossec/bin/cluster_control -l   # For clustered managers
 ```

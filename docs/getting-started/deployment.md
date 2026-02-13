@@ -36,7 +36,7 @@ ansible-galaxy collection install community.general
 Choose your preferred setup method:
 
 ```bash
-# Option A: Beautiful TUI (recommended, requires gum)
+# Option A: TUI (recommended, requires gum)
 ./setup-tui.sh
 
 # Option B: Traditional CLI wizard
@@ -83,7 +83,7 @@ Both setup methods generate:
 - `group_vars/all/main.yml` - Configuration variables
 - `group_vars/all/vault.yml` - Encrypted credentials (Ansible Vault)
 - `.vault_password` - Vault encryption key (keep secure!)
-- `ansible.cfg` - Ansible settings
+- `ansible.cfg` - Ansible settings (includes vault_password_file path)
 - `keys/wazuh_ansible_key` - SSH keypair for deployment
 - `client-prep/` - Host preparation package
 - `wazuh-client-prep.sh` - Self-extracting installer
@@ -106,6 +106,8 @@ ansible-playbook site.yml --tags bootstrap,all
 
 The bootstrap play runs first, then continues with the full deployment using the newly created `wazuh-deploy` user.
 
+> **Note:** You do not need to pass `--vault-password-file` manually. The generated `ansible.cfg` already sets `vault_password_file = .vault_password`, so Ansible picks it up automatically.
+
 ### 3. Deploy (Subsequent Runs)
 
 After the initial bootstrap, subsequent deployments use `wazuh-deploy` automatically:
@@ -114,7 +116,7 @@ After the initial bootstrap, subsequent deployments use `wazuh-deploy` automatic
 ansible-playbook site.yml
 ```
 
-No bootstrap needed — just run the playbook.
+No bootstrap needed -- just run the playbook.
 
 ### Alternative: Manual Host Preparation
 
@@ -217,7 +219,7 @@ ansible-playbook site.yml
 
 ### Disabling Lockdown
 
-To disable automatic lockdown, set in `group_vars/all.yml`:
+To disable automatic lockdown, set in `group_vars/all/main.yml`:
 ```yaml
 wazuh_lockdown_deploy_user: false
 ```
@@ -231,21 +233,21 @@ all:
   children:
     wazuh_indexers:
       hosts:
-        192.168.1.10:
+        indexer-host:
           indexer_node_name: indexer-1
           indexer_cluster_initial_master: true
     wazuh_managers:
       hosts:
-        192.168.1.20:
+        manager-host:
           manager_node_name: manager-1
           manager_node_type: master
     wazuh_dashboards:
       hosts:
-        192.168.1.30:
+        dashboard-host:
     wazuh_agents:
       hosts:
-        192.168.1.100:
-        192.168.1.101:
+        agent-host-1:
+        agent-host-2:
 ```
 
 ### Key Variables (group_vars/all/main.yml)
@@ -294,11 +296,11 @@ For high availability, deploy multiple indexer nodes:
 ```yaml
 wazuh_indexer_nodes:
   - name: indexer-1
-    ip: 192.168.1.10
+    ip: "<indexer-1-ip>"
   - name: indexer-2
-    ip: 192.168.1.11
+    ip: "<indexer-2-ip>"
   - name: indexer-3
-    ip: 192.168.1.12
+    ip: "<indexer-3-ip>"
 ```
 
 ### Manager Cluster
@@ -308,13 +310,12 @@ For manager clustering, enable and configure:
 ```yaml
 wazuh_manager_cluster_enabled: true
 wazuh_manager_cluster_name: "wazuh-cluster"
-wazuh_manager_cluster_key: "your-32-character-cluster-key!!"
 
 wazuh_manager_nodes:
   - name: manager-1
-    ip: 192.168.1.20
+    ip: "<manager-1-ip>"
   - name: manager-2
-    ip: 192.168.1.21
+    ip: "<manager-2-ip>"
 ```
 
 ## Tags
@@ -410,7 +411,7 @@ If MITRE technique aggregations fail in the dashboard:
 
 ## Security Considerations
 
-1. Back up `.vault_password` securely - required to decrypt credentials
+1. Back up `.vault_password` securely -- required to decrypt credentials
 2. Use external CA certificates for production environments
 3. Restrict network access to management ports
 4. Enable firewall rules (`wazuh_configure_firewall: true`)

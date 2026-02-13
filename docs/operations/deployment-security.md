@@ -114,8 +114,11 @@ When locked, the deployment user can only:
 # From control node - unlock all hosts
 ansible-playbook unlock-deploy-user.yml
 
+# Or use the make shortcut:
+make unlock
+
 # Manual unlock on single host
-ssh wazuh-deploy@HOST 'sudo /usr/local/bin/wazuh-unlock-deploy'
+ssh wazuh-deploy@<host-ip> 'sudo /usr/local/bin/wazuh-unlock-deploy'
 ```
 
 ### Disabling Lockdown
@@ -123,7 +126,7 @@ ssh wazuh-deploy@HOST 'sudo /usr/local/bin/wazuh-unlock-deploy'
 To disable automatic lockdown:
 
 ```yaml
-# In group_vars/all.yml
+# In group_vars/all/main.yml
 wazuh_lockdown_deploy_user: false
 ```
 
@@ -326,7 +329,7 @@ All rules are deployed to the Manager at `/var/ossec/etc/rules/` and `/var/ossec
 - [ ] Secure control node with encryption and access controls
 - [ ] Back up `.vault_password` file securely (offline storage recommended)
 - [ ] Generate certificates (done automatically by setup.sh)
-- [ ] Review `group_vars/all.yml` security settings
+- [ ] Review `group_vars/all/main.yml` security settings
 - [ ] Plan network segmentation
 
 ### Post-Deployment
@@ -344,7 +347,7 @@ All rules are deployed to the Manager at `/var/ossec/etc/rules/` and `/var/ossec
 - [ ] Monitor health check results
 - [ ] Review security alerts daily
 - [ ] Rotate credentials periodically (`./scripts/manage-vault.sh rotate`)
-- [ ] Monitor certificate expiration (`ansible-playbook playbooks/certificate-management.yml --tags check-expiry`)
+- [ ] Monitor certificate expiration (`make certs-check`)
 - [ ] Keep Wazuh version updated
 - [ ] Review and update firewall rules
 - [ ] Test disaster recovery procedures
