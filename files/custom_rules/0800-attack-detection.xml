@@ -13,7 +13,7 @@
        ═══════════════════════════════════════════════════════════════ -->
   <rule id="800100" level="14">
     <if_sid>530,531</if_sid>
-    <regex>bash -i >& /dev/tcp|bash -i >& /dev/udp|nc -e /bin|ncat -e /bin|python.*socket.*connect|perl.*socket.*INET|ruby.*TCPSocket|php.*fsockopen.*exec</regex>
+    <regex>bash -i >&amp; /dev/tcp|bash -i >&amp; /dev/udp|nc -e /bin|ncat -e /bin|python.*socket.*connect|perl.*socket.*INET|ruby.*TCPSocket|php.*fsockopen.*exec</regex>
     <description>Possible reverse shell detected: suspicious network-capable command execution</description>
     <mitre>
       <id>T1059</id>
@@ -24,7 +24,7 @@
 
   <rule id="800101" level="14">
     <if_sid>530,531</if_sid>
-    <regex>mkfifo.*nc |mknod.*nc |/dev/tcp/|socat.*EXEC:|exec \d+<>/dev/tcp/</regex>
+    <regex>mkfifo.*nc |mknod.*nc |/dev/tcp/|socat.*EXEC:|exec \d+&lt;&gt;/dev/tcp/</regex>
     <description>Possible reverse shell detected: named pipe or /dev/tcp redirection</description>
     <mitre>
       <id>T1059</id>

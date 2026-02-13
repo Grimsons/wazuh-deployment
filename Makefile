@@ -7,7 +7,7 @@
 .PHONY: help setup setup-tui deploy deploy-bootstrap deploy-indexer deploy-manager \
         deploy-dashboard deploy-agent health backup restore upgrade check status \
         unlock vault-view vault-edit vault-rotate certs-check certs-rotate clean \
-        monitoring test lint
+        monitoring test lint deploy-rules threat-intel
 
 # Default target
 .DEFAULT_GOAL := help
@@ -33,7 +33,7 @@ help: ## Show this help message
 	@grep -E '^deploy[^:]*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  $(CYAN)%-20s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(GREEN)Operations:$(RESET)"
-	@grep -E '^(health|status|backup|restore|upgrade|unlock|monitoring):.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  $(CYAN)%-20s$(RESET) %s\n", $$1, $$2}'
+	@grep -E '^(health|status|backup|restore|upgrade|unlock|monitoring|deploy-rules|threat-intel):.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  $(CYAN)%-20s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(GREEN)Security:$(RESET)"
 	@grep -E '^(vault-|certs-)[^:]*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  $(CYAN)%-20s$(RESET) %s\n", $$1, $$2}'
@@ -157,6 +157,16 @@ unlock: ## Unlock deployment user for new deployment
 monitoring: ## Enable Prometheus monitoring exporters
 	@echo "$(CYAN)Deploying Prometheus exporters...$(RESET)"
 	ansible-playbook site.yml --tags monitoring -e wazuh_monitoring_enabled=true
+
+deploy-rules: ## Deploy only custom rules, decoders, and CDB lists
+	@echo "$(CYAN)Deploying custom rules and decoders...$(RESET)"
+	ansible-playbook site.yml --tags manager -e wazuh_custom_content_enabled=true
+
+threat-intel: ## Update threat intelligence feeds (IPs, domains, hashes)
+	@echo "$(CYAN)Updating threat intelligence feeds...$(RESET)"
+	@./scripts/update-threat-intel.sh
+	@echo ""
+	@echo "$(GREEN)Feeds updated.$(RESET) Deploy with: make deploy-rules"
 
 #═══════════════════════════════════════════════════════════════════════════════
 # Security

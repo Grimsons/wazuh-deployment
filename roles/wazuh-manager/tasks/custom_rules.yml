@@ -110,11 +110,14 @@
   vars:
     ansible_become: false
 
-- name: Find CDB list files
+- name: Find CDB list files (recursive)
   ansible.builtin.find:
     paths: "{{ playbook_dir }}/files/cdb_lists"
     patterns: "*"
     file_type: file
+    recurse: true
+    excludes:
+      - ".gitkeep"
   delegate_to: localhost
   become: false
   register: cdb_list_files
@@ -122,14 +125,32 @@
   vars:
     ansible_become: false
 
+- name: Ensure CDB list subdirectories exist
+  ansible.builtin.file:
+    path: "/var/ossec/etc/lists/{{ item.path | relpath(playbook_dir + '/files/cdb_lists') | dirname }}"
+    state: directory
+    owner: wazuh
+    group: wazuh
+    mode: '0750'
+  loop: "{{ cdb_list_files.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path | relpath(playbook_dir + '/files/cdb_lists') | dirname }}"
+  become: true
+  when:
+    - cdb_lists_dir.stat.exists
+    - cdb_list_files.files | length > 0
+    - (item.path | relpath(playbook_dir + '/files/cdb_lists') | dirname) != '.'
+
 - name: Deploy CDB lists
   ansible.builtin.copy:
     src: "{{ item.path }}"
-    dest: "/var/ossec/etc/lists/{{ item.path | basename }}"
+    dest: "/var/ossec/etc/lists/{{ item.path | relpath(playbook_dir + '/files/cdb_lists') }}"
     owner: wazuh
     group: wazuh
     mode: '0640'
   loop: "{{ cdb_list_files.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path | relpath(playbook_dir + '/files/cdb_lists') }}"
   become: true
   notify: restart wazuh-manager
   when:

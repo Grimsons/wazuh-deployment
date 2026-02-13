@@ -1,0 +1,156 @@
+<!--
+  Cisco DNA Center / Catalyst Center Detection Rules
+  Rule ID range: 800300-800349
+
+  Prerequisites:
+    - Cisco DNA Center configured to send syslog event notifications to Wazuh manager
+    - wazuh_syslog_listeners configured in group_vars/all/main.yml with DNA Center IP
+    - cisco-dnac-decoder.xml deployed to /var/ossec/etc/decoders/
+
+  Syslog setup on DNA Center:
+    System > Settings > External Services > Destinations > Syslog
+    Then subscribe events via Platform > Developer Toolkit > Event Notifications
+-->
+<group name="cisco_dnac,network,">
+
+  <!-- Grouping rule: any Cisco DNA Center event -->
+  <rule id="800300" level="3">
+    <decoded_as>cisco-dnac</decoded_as>
+    <description>Cisco DNA Center: $(dnac.category) - $(dnac.event_id)</description>
+    <group>cisco_dnac,</group>
+  </rule>
+
+  <!-- Alternative decoder grouping -->
+  <rule id="800314" level="3">
+    <decoded_as>cisco-dnac-alt</decoded_as>
+    <description>Cisco DNA Center: $(dnac.category) - $(dnac.event_id)</description>
+    <group>cisco_dnac,</group>
+  </rule>
+
+  <!-- Device unreachable -->
+  <rule id="800301" level="10">
+    <if_sid>800300,800314</if_sid>
+    <field name="dnac.event_id">NETWORK-\S+-\d+-\d+</field>
+    <regex>unreachable|down|not responding</regex>
+    <description>Cisco DNA Center: Network device unreachable - $(dnac.device_ip)</description>
+    <mitre>
+      <id>T1499</id>
+    </mitre>
+    <group>cisco_dnac,network_down,</group>
+  </rule>
+
+  <!-- Device reachable again (resolved) -->
+  <rule id="800302" level="3">
+    <if_sid>800300,800314</if_sid>
+    <field name="dnac.status">resolved</field>
+    <description>Cisco DNA Center: Event resolved - $(dnac.event_id)</description>
+    <group>cisco_dnac,resolved,</group>
+  </rule>
+
+  <!-- Authentication failure -->
+  <rule id="800303" level="10">
+    <if_sid>800300,800314</if_sid>
+    <regex>authentication fail|login fail|unauthorized|invalid credential</regex>
+    <description>Cisco DNA Center: Authentication failure detected</description>
+    <mitre>
+      <id>T1078</id>
+    </mitre>
+    <group>cisco_dnac,authentication_failed,</group>
+  </rule>
+
+  <!-- Configuration change -->
+  <rule id="800304" level="8">
+    <if_sid>800300,800314</if_sid>
+    <regex>configuration change|config deploy|template push|provision</regex>
+    <description>Cisco DNA Center: Configuration change - $(dnac.description)</description>
+    <mitre>
+      <id>T1565</id>
+    </mitre>
+    <group>cisco_dnac,config_change,</group>
+  </rule>
+
+  <!-- User/role change -->
+  <rule id="800305" level="10">
+    <if_sid>800300,800314</if_sid>
+    <regex>user creat|user delet|user modif|role change|role assign|permission</regex>
+    <description>Cisco DNA Center: User or role change - $(dnac.description)</description>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+    <group>cisco_dnac,account_change,</group>
+  </rule>
+
+  <!-- Security advisory match -->
+  <rule id="800306" level="12">
+    <if_sid>800300,800314</if_sid>
+    <field name="dnac.event_id">SECURITY-\S+</field>
+    <description>Cisco DNA Center: Security advisory - $(dnac.description)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>cisco_dnac,vulnerability,</group>
+  </rule>
+
+  <!-- Rogue device detected -->
+  <rule id="800307" level="12">
+    <if_sid>800300,800314</if_sid>
+    <regex>rogue|unauthorized device|unknown device</regex>
+    <description>Cisco DNA Center: Rogue/unauthorized device detected</description>
+    <mitre>
+      <id>T1200</id>
+    </mitre>
+    <group>cisco_dnac,rogue_device,</group>
+  </rule>
+
+  <!-- Certificate issue -->
+  <rule id="800308" level="10">
+    <if_sid>800300,800314</if_sid>
+    <regex>certificate expir|certificate error|PKI|ssl error|tls error</regex>
+    <description>Cisco DNA Center: Certificate issue - $(dnac.description)</description>
+    <group>cisco_dnac,certificate,</group>
+  </rule>
+
+  <!-- Fabric topology change -->
+  <rule id="800309" level="8">
+    <if_sid>800300,800314</if_sid>
+    <regex>fabric|topology change|SDA|segment</regex>
+    <description>Cisco DNA Center: Fabric topology change - $(dnac.description)</description>
+    <mitre>
+      <id>T1565</id>
+    </mitre>
+    <group>cisco_dnac,topology_change,</group>
+  </rule>
+
+  <!-- Client health critical -->
+  <rule id="800310" level="8">
+    <if_sid>800300,800314</if_sid>
+    <regex>client health|onboarding fail|DHCP fail|DNS fail</regex>
+    <description>Cisco DNA Center: Client health issue - $(dnac.description)</description>
+    <group>cisco_dnac,client_health,</group>
+  </rule>
+
+  <!-- Severity 1 catch-all (highest priority) -->
+  <rule id="800311" level="12">
+    <if_sid>800300,800314</if_sid>
+    <field name="dnac.severity">1</field>
+    <description>Cisco DNA Center: Severity 1 alert - $(dnac.event_id) - $(dnac.description)</description>
+    <group>cisco_dnac,severity_1,</group>
+  </rule>
+
+  <!-- Severity 2 catch-all -->
+  <rule id="800312" level="10">
+    <if_sid>800300,800314</if_sid>
+    <field name="dnac.severity">2</field>
+    <description>Cisco DNA Center: Severity 2 alert - $(dnac.event_id) - $(dnac.description)</description>
+    <group>cisco_dnac,severity_2,</group>
+  </rule>
+
+  <!-- Severity 3 catch-all -->
+  <rule id="800313" level="6">
+    <if_sid>800300,800314</if_sid>
+    <field name="dnac.severity">3</field>
+    <description>Cisco DNA Center: Severity 3 alert - $(dnac.event_id)</description>
+    <group>cisco_dnac,severity_3,</group>
+  </rule>
+
+</group>

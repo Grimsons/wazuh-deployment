@@ -124,6 +124,52 @@ wazuh_log_collection_enabled: true
 wazuh_active_response_enabled: true
 wazuh_active_response_ca_verification: true
 
+# Active response triggers (empty = detection only, no automatic blocking)
+# Example:
+# wazuh_active_responses:
+#   - command: firewall-drop
+#     rules_id: "5763"         # SSH brute force
+#     timeout: 1800
+#   - command: firewall-drop
+#     rules_group: "web_attack"
+#     timeout: 600
+#   - command: firewall-drop
+#     level: 12                # All high-severity alerts
+#     location: all
+#     timeout: 3600
+wazuh_active_responses: []
+
+# Remote syslog listeners (for network devices: Cisco DNA Center, firewalls, etc.)
+# Example:
+# wazuh_syslog_listeners:
+#   - port: 514
+#     protocol: udp
+#     allowed_ips: "10.0.0.0/8"
+#   - port: 1514
+#     protocol: tcp
+#     allowed_ips: "192.168.1.0/24"
+wazuh_syslog_listeners: []
+
+# CDB lists loaded in the ruleset (paths relative to /var/ossec/)
+wazuh_cdb_lists:
+  - "etc/lists/audit-keys"
+  - "etc/lists/amazon/aws-eventnames"
+  - "etc/lists/security-eventchannel"
+  - "etc/lists/malicious-ioc/malware-hashes"
+  - "etc/lists/malicious-ioc/malicious-ip"
+  - "etc/lists/malicious-ioc/malicious-domains"
+
+# Custom content deployment (rules, decoders, CDB lists from files/)
+wazuh_custom_content_enabled: true
+
+# Alerting profile: none | basic | full
+# none:  no email or integration alerts (default - detection only)
+# basic: email alerts for level 12+ (requires wazuh_email_notification_enabled + wazuh_email_* vars)
+# full:  email for level 10+, Slack for level 10+ (also requires wazuh_slack_hook_url)
+wazuh_alerting_profile: "none"
+# Slack webhook URL - used by 'full' alerting profile and explicit Slack integration
+# wazuh_slack_hook_url: "https://hooks.slack.com/services/xxx/yyy/zzz"
+
 # Security Configuration Assessment (SCA)
 wazuh_sca_enabled: true
 wazuh_sca_interval: "12h"

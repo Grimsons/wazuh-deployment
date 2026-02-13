@@ -1,0 +1,46 @@
+<!--
+  Cisco DNA Center / Catalyst Center Decoder
+  Decodes syslog event notifications from Cisco DNA Center
+
+  Expected syslog format (native event notification):
+  [2020-05-21 18:38:02] [Cisco DNA Center] 1 ALERT active [NETWORK-NON-FABRIC_WIRED-1-250] 127.0.0.1 This network device is unreachable
+
+  Fields extracted:
+    dnac.timestamp  - Event timestamp from DNA Center
+    dnac.severity   - Severity number (1=critical, 5=informational)
+    dnac.category   - Event category (ALERT, ERROR, WARN, INFO, TASK_PROGRESS)
+    dnac.status     - Event status (active, resolved, unknown)
+    dnac.event_id   - Event class identifier (e.g. NETWORK-NON-FABRIC_WIRED-1-250)
+    dnac.device_ip  - IP address of the affected device
+    dnac.description - Human-readable event description
+-->
+
+<!-- Parent decoder: match Cisco DNA Center in syslog -->
+<decoder name="cisco-dnac">
+  <prematch>Cisco DNA Center</prematch>
+</decoder>
+
+<!-- Child: extract all fields from the structured message -->
+<decoder name="cisco-dnac">
+  <parent>cisco-dnac</parent>
+  <regex type="pcre2">\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] \[Cisco DNA Center\] (\d+) (\S+) (\S+) \[([^\]]+)\] (\d+\.\d+\.\d+\.\d+) (.+)</regex>
+  <order>dnac.timestamp,dnac.severity,dnac.category,dnac.status,dnac.event_id,dnac.device_ip,dnac.description</order>
+</decoder>
+
+<!-- Fallback child: match without device IP (some events don't include one) -->
+<decoder name="cisco-dnac">
+  <parent>cisco-dnac</parent>
+  <regex type="pcre2">\[Cisco DNA Center\] (\d+) (\S+) (\S+) \[([^\]]+)\] (.+)</regex>
+  <order>dnac.severity,dnac.category,dnac.status,dnac.event_id,dnac.description</order>
+</decoder>
+
+<!-- Alternative format: Cisco_DNA_Center (underscore variant from some firmware versions) -->
+<decoder name="cisco-dnac-alt">
+  <prematch>Cisco_DNA_Center</prematch>
+</decoder>
+
+<decoder name="cisco-dnac-alt">
+  <parent>cisco-dnac-alt</parent>
+  <regex type="pcre2">Cisco_DNA_Center (\d+) (\S+) (\S+) \[([^\]]+)\] (\d+\.\d+\.\d+\.\d+) (.+)</regex>
+  <order>dnac.severity,dnac.category,dnac.status,dnac.event_id,dnac.device_ip,dnac.description</order>
+</decoder>

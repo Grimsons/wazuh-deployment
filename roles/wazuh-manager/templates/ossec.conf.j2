@@ -40,7 +40,11 @@
 
   <alerts>
     <log_alert_level>{{ wazuh_log_alert_level | default(3) }}</log_alert_level>
+{% if wazuh_alerting_profile | default('none') == 'full' %}
+    <email_alert_level>{{ wazuh_email_alert_level | default(10) }}</email_alert_level>
+{% else %}
     <email_alert_level>{{ wazuh_email_alert_level | default(12) }}</email_alert_level>
+{% endif %}
   </alerts>
 
   <!-- Internal logging format: plain, json, or plain,json -->
@@ -237,77 +241,29 @@
     <timeout_allowed>yes</timeout_allowed>
   </command>
 
-  <!-- ═══════════════════════════════════════════════════════════════
-       Active Response Rules
-       These rules are COMMENTED OUT by default. To enable, uncomment
-       the desired <active-response> blocks below.
-
-       IMPORTANT: Test in a staging environment before enabling in production.
-       Active responses can block legitimate traffic if rules are too aggressive.
-       ═══════════════════════════════════════════════════════════════ -->
-
-  <!-- SSH Brute Force Protection (Rule 5763 = multiple auth failures)
-       Action: Block attacking IP via firewall for 30 minutes
+  <!-- Active Response Triggers -->
+  <!-- Configure via wazuh_active_responses list in group_vars/all/main.yml -->
+  <!-- Example: [{command: "firewall-drop", rules_id: "5763", timeout: 1800}] -->
+{% if wazuh_active_responses is defined and wazuh_active_responses | length > 0 %}
+{% for ar in wazuh_active_responses %}
   <active-response>
-    <command>firewall-drop</command>
-    <location>local</location>
-    <rules_id>5763</rules_id>
-    <timeout>1800</timeout>
+    <command>{{ ar.command }}</command>
+    <location>{{ ar.location | default('local') }}</location>
+{% if ar.rules_id is defined %}
+    <rules_id>{{ ar.rules_id }}</rules_id>
+{% endif %}
+{% if ar.rules_group is defined %}
+    <rules_group>{{ ar.rules_group }}</rules_group>
+{% endif %}
+{% if ar.level is defined %}
+    <level>{{ ar.level }}</level>
+{% endif %}
+    <timeout>{{ ar.timeout | default(1800) }}</timeout>
   </active-response>
-  -->
-
-  <!-- Repeated SSH Auth Failures - Disable Account (Rule 5720 = multiple failures same user)
-       Action: Disable the targeted user account for 1 hour
-  <active-response>
-    <command>disable-account</command>
-    <location>local</location>
-    <rules_id>5720</rules_id>
-    <timeout>3600</timeout>
-  </active-response>
-  -->
-
-  <!-- Web Application Attack Protection (Rule group web_attack)
-       Action: Block attacking IP via firewall for 10 minutes
-  <active-response>
-    <command>firewall-drop</command>
-    <location>local</location>
-    <rules_group>web_attack</rules_group>
-    <timeout>600</timeout>
-  </active-response>
-  -->
-
-  <!-- SQL Injection Attempt (Rule group sql_injection)
-       Action: Block via host-deny for 1 hour
-  <active-response>
-    <command>host-deny</command>
-    <location>local</location>
-    <rules_group>sql_injection</rules_group>
-    <timeout>3600</timeout>
-  </active-response>
-  -->
-
-  <!-- Network Scan Detection (Rule 581 = port scan)
-       Action: Null-route scanning IP for 30 minutes
-  <active-response>
-    <command>route-null</command>
-    <location>local</location>
-    <rules_id>581</rules_id>
-    <timeout>1800</timeout>
-  </active-response>
-  -->
-
-  <!-- High-Severity Alert Auto-Response (level >= 12)
-       Action: Block IP via firewall for 1 hour
-  <active-response>
-    <command>firewall-drop</command>
-    <location>all</location>
-    <level>12</level>
-    <timeout>3600</timeout>
-  </active-response>
-  -->
+{% endfor %}
+{% endif %}
 {% endif %}
 
-  <!-- Remote Syslog -->
   <!-- Remote agent connections -->
   <remote>
     <connection>secure</connection>
@@ -319,6 +275,21 @@
     <!-- How long to wait before closing idle agent sessions (frees resources) -->
     <rids_closing_time>{{ wazuh_remote_rids_closing_time | default('5m') }}</rids_closing_time>
   </remote>
+
+  <!-- Remote syslog listeners (for network devices: Cisco DNA Center, firewalls, etc.) -->
+{% if wazuh_syslog_listeners is defined and wazuh_syslog_listeners | length > 0 %}
+{% for listener in wazuh_syslog_listeners %}
+  <remote>
+    <connection>syslog</connection>
+    <port>{{ listener.port | default(514) }}</port>
+    <protocol>{{ listener.protocol | default('udp') }}</protocol>
+    <allowed-ips>{{ listener.allowed_ips }}</allowed-ips>
+{% if listener.local_ip is defined %}
+    <local_ip>{{ listener.local_ip }}</local_ip>
+{% endif %}
+  </remote>
+{% endfor %}
+{% endif %}
 
   <!-- Authentication - Agent Enrollment Security -->
   <!-- Note: When use_password is enabled, authd reads from /var/ossec/etc/authd.pass automatically -->
@@ -343,12 +314,9 @@
     <decoder_dir>ruleset/decoders</decoder_dir>
     <rule_dir>ruleset/rules</rule_dir>
     <rule_exclude>0215-policy_rules.xml</rule_exclude>
-    <list>etc/lists/audit-keys</list>
-    <list>etc/lists/amazon/aws-eventnames</list>
-    <list>etc/lists/security-eventchannel</list>
-    <list>etc/lists/malicious-ioc/malware-hashes</list>
-    <list>etc/lists/malicious-ioc/malicious-ip</list>
-    <list>etc/lists/malicious-ioc/malicious-domains</list>
+{% for list_path in wazuh_cdb_lists | default(['etc/lists/audit-keys', 'etc/lists/amazon/aws-eventnames', 'etc/lists/security-eventchannel', 'etc/lists/malicious-ioc/malware-hashes', 'etc/lists/malicious-ioc/malicious-ip', 'etc/lists/malicious-ioc/malicious-domains']) %}
+    <list>{{ list_path }}</list>
+{% endfor %}
 
     <!-- User-defined ruleset -->
     <decoder_dir>etc/decoders</decoder_dir>
@@ -615,7 +583,7 @@
 {% endif %}
 
 {% if wazuh_integrations is defined and wazuh_integrations | length > 0 %}
-  <!-- Integrations -->
+  <!-- Integrations (explicit) -->
 {% for integration in wazuh_integrations %}
   <integration>
     <name>{{ integration.name }}</name>
@@ -642,6 +610,25 @@
 {% endif %}
   </integration>
 {% endfor %}
+{% elif wazuh_alerting_profile | default('none') != 'none' %}
+  <!-- Integrations (from alerting profile: {{ wazuh_alerting_profile }}) -->
+{% if wazuh_alerting_profile == 'full' and wazuh_slack_hook_url is defined %}
+  <integration>
+    <name>slack</name>
+    <hook_url>{{ wazuh_slack_hook_url }}</hook_url>
+    <level>10</level>
+    <alert_format>json</alert_format>
+  </integration>
+{% endif %}
+{% endif %}
+
+  <!-- Alerting profile: {{ wazuh_alerting_profile | default('none') }} -->
+{% if wazuh_alerting_profile | default('none') == 'basic' and not wazuh_email_notification_enabled %}
+  <!-- Profile 'basic': email alerts for level 12+ -->
+  <!-- To activate, set wazuh_email_notification_enabled: true and configure wazuh_email_* vars -->
+{% elif wazuh_alerting_profile | default('none') == 'full' and not wazuh_email_notification_enabled %}
+  <!-- Profile 'full': email for level 10+, Slack for level 10+ -->
+  <!-- To activate, set wazuh_email_notification_enabled: true and wazuh_slack_hook_url -->
 {% endif %}
 
 {% if wazuh_docker_listener_enabled | default(false) %}

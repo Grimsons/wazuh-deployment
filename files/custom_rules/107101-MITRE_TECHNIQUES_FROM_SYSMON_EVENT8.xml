@@ -1,0 +1,75 @@
+<group name="windows,sysmon,">
+<!-- Sysmon - Event 8: CreateRemoteThread - Process Injection Detection -->
+<!-- if_sid 61610 = Wazuh built-in Sysmon Event 8 rule -->
+<rule id="107101" level="3">
+<if_sid>61610</if_sid>
+<field name="win.eventdata.RuleName">^technique_id=T1055,technique_name=Process Injection$</field>
+<description>Sysmon - Event 8: CreateRemoteThread by $(win.eventdata.sourceimage)</description>
+<mitre>
+<id>T1055</id>
+</mitre>
+<options>no_full_log</options>
+<group>sysmon_event_8,</group>
+</rule>
+<rule id="107102" level="3">
+<if_sid>61610</if_sid>
+<field name="win.eventdata.RuleName">^technique_id=T1055.001,technique_name=Dynamic-link Library Injection$</field>
+<description>Sysmon - Event 8: CreateRemoteThread DLL Injection by $(win.eventdata.sourceimage)</description>
+<mitre>
+<id>T1055.001</id>
+</mitre>
+<options>no_full_log</options>
+<group>sysmon_event_8,</group>
+</rule>
+<rule id="107103" level="3">
+<if_sid>61610</if_sid>
+<field name="win.eventdata.RuleName">^technique_id=T1055.002,technique_name=Portable Executable Injection$</field>
+<description>Sysmon - Event 8: CreateRemoteThread PE Injection by $(win.eventdata.sourceimage)</description>
+<mitre>
+<id>T1055.002</id>
+</mitre>
+<options>no_full_log</options>
+<group>sysmon_event_8,</group>
+</rule>
+<rule id="107104" level="3">
+<if_sid>61610</if_sid>
+<field name="win.eventdata.RuleName">^technique_id=T1055.003,technique_name=Thread Execution Hijacking$</field>
+<description>Sysmon - Event 8: CreateRemoteThread Thread Hijacking by $(win.eventdata.sourceimage)</description>
+<mitre>
+<id>T1055.003</id>
+</mitre>
+<options>no_full_log</options>
+<group>sysmon_event_8,</group>
+</rule>
+<rule id="107105" level="3">
+<if_sid>61610</if_sid>
+<field name="win.eventdata.RuleName">^technique_id=T1055.004,technique_name=Asynchronous Procedure Call$</field>
+<description>Sysmon - Event 8: CreateRemoteThread APC Injection by $(win.eventdata.sourceimage)</description>
+<mitre>
+<id>T1055.004</id>
+</mitre>
+<options>no_full_log</options>
+<group>sysmon_event_8,</group>
+</rule>
+<rule id="107106" level="3">
+<if_sid>61610</if_sid>
+<field name="win.eventdata.RuleName">^technique_id=T1055.012,technique_name=Process Hollowing$</field>
+<description>Sysmon - Event 8: CreateRemoteThread Process Hollowing by $(win.eventdata.sourceimage)</description>
+<mitre>
+<id>T1055.012</id>
+</mitre>
+<options>no_full_log</options>
+<group>sysmon_event_8,</group>
+</rule>
+<!-- Catch-all for Event 8 with any technique_id annotation -->
+<rule id="107107" level="3">
+<if_sid>61610</if_sid>
+<field name="win.eventdata.RuleName">^technique_id=</field>
+<description>Sysmon - Event 8: CreateRemoteThread by $(win.eventdata.sourceimage)</description>
+<mitre>
+<id>T1055</id>
+</mitre>
+<options>no_full_log</options>
+<group>sysmon_event_8,</group>
+</rule>
+</group>
