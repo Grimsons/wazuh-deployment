@@ -18,33 +18,36 @@
 - name: Unlock Wazuh Deployment User
   hosts: all:!local
   gather_facts: false
-  # The locked-down sudoers grants NOPASSWD for the unlock script
-  become: true
+  # When locked down, the user can only sudo the unlock script - not python3.
+  # So we must use 'raw' module instead of Ansible modules like stat/command.
+  # Disable become since ansible.cfg enables it globally - we call sudo
+  # explicitly in raw commands where the restricted sudoers allows it.
+  vars:
+    ansible_become: false
   tasks:
     - name: Check if user is locked down
-      ansible.builtin.stat:
-        path: /var/lib/wazuh-deploy/.locked
+      ansible.builtin.raw: test -f /var/lib/wazuh-deploy/.locked && echo "LOCKED" || echo "UNLOCKED"
       register: lock_flag
+      changed_when: false
 
     - name: Display current status
       ansible.builtin.debug:
-        msg: "{{ 'User is LOCKED on ' + inventory_hostname + ' - unlocking...' if lock_flag.stat.exists else 'User is already UNLOCKED on ' + inventory_hostname }}"
+        msg: "{{ 'User is LOCKED on ' + inventory_hostname + ' - unlocking...' if 'LOCKED' in lock_flag.stdout else 'User is already UNLOCKED on ' + inventory_hostname }}"
 
     - name: Run unlock script
-      ansible.builtin.command:
-        cmd: /usr/local/bin/wazuh-unlock-deploy
+      ansible.builtin.raw: sudo /usr/local/bin/wazuh-unlock-deploy
       register: unlock_result
       changed_when: unlock_result.rc == 0
-      when: lock_flag.stat.exists
+      when: "'LOCKED' in lock_flag.stdout"
 
     - name: Verify unlock was successful
-      ansible.builtin.stat:
-        path: /var/lib/wazuh-deploy/.locked
+      ansible.builtin.raw: test -f /var/lib/wazuh-deploy/.locked && echo "LOCKED" || echo "UNLOCKED"
       register: lock_check
+      changed_when: false
 
     - name: Confirm unlock status
       ansible.builtin.debug:
-        msg: "{{ 'SUCCESS: User unlocked on ' + inventory_hostname if not lock_check.stat.exists else 'WARNING: User may still be locked on ' + inventory_hostname }}"
+        msg: "{{ 'SUCCESS: User unlocked on ' + inventory_hostname if 'UNLOCKED' in lock_check.stdout else 'WARNING: User may still be locked on ' + inventory_hostname }}"
 
 - name: Unlock Summary
   hosts: localhost
