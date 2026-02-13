@@ -1,0 +1,367 @@
+#!/usr/bin/env python3
+"""
+Wazuh Manager Prometheus Exporter
+Exports Wazuh Manager metrics via the Wazuh API.
+
+Metrics exposed:
+- Agent statistics (total, active, disconnected, pending, never_connected)
+- Alerts by severity level
+- Manager cluster status
+- Events per second
+- Vulnerability stats (if enabled)
+"""
+
+import json
+import os
+import signal
+import sys
+import time
+import requests
+from requests.packages.urllib3.exceptions import InsecureRequestWarning
+from prometheus_client import start_http_server, Gauge, Counter, Info
+
+# Only suppress SSL warnings if verification is disabled
+_ca_cert = os.environ.get("WAZUH_API_CA_CERT", "{{ wazuh_manager_certs_path | default('/etc/wazuh-manager/certs') }}/root-ca.pem")
+VERIFY_SSL = _ca_cert if os.path.isfile(_ca_cert) else False
+if VERIFY_SSL is False:
+    requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+
+# ═══════════════════════════════════════════════════════════════
+# Configuration
+# ═══════════════════════════════════════════════════════════════
+WAZUH_API_HOST = "{{ wazuh_api_protocol | default('https') }}://{{ wazuh_api_host | default('localhost') }}:{{ wazuh_manager_api_port | default(55000) }}"
+WAZUH_API_USER = os.environ.get("WAZUH_API_USER", "{{ wazuh_api_user | default('wazuh') }}")
+WAZUH_API_PASS = os.environ.get("WAZUH_API_PASS", "")
+
+METRICS_PORT = {{ wazuh_manager_exporter_port | default(9115) }}
+SCRAPE_INTERVAL = {{ wazuh_manager_exporter_scrape_interval | default(30) }}
+
+# ═══════════════════════════════════════════════════════════════
+# Prometheus Metrics Definition
+# ═══════════════════════════════════════════════════════════════
+
+# Agent Metrics
+agents_total = Gauge('wazuh_agents_total',
+    'Total number of registered agents')
+agents_active = Gauge('wazuh_agents_active',
+    'Number of active agents')
+agents_disconnected = Gauge('wazuh_agents_disconnected',
+    'Number of disconnected agents')
+agents_pending = Gauge('wazuh_agents_pending',
+    'Number of pending agents')
+agents_never_connected = Gauge('wazuh_agents_never_connected',
+    'Number of agents that never connected')
+
+agents_by_os = Gauge('wazuh_agents_by_os',
+    'Number of agents by operating system', ['os'])
+agents_by_version = Gauge('wazuh_agents_by_version',
+    'Number of agents by Wazuh version', ['version'])
+agents_by_status = Gauge('wazuh_agents_by_status',
+    'Number of agents by status', ['status'])
+
+# Alert Metrics
+alerts_total = Gauge('wazuh_alerts_total',
+    'Total alerts in last interval')
+alerts_by_level = Gauge('wazuh_alerts_by_level',
+    'Alerts by severity level', ['level'])
+alerts_by_rule_group = Gauge('wazuh_alerts_by_rule_group',
+    'Alerts by rule group (top 10)', ['group'])
+alerts_critical = Gauge('wazuh_alerts_critical',
+    'Critical alerts (level 12+)')
+alerts_high = Gauge('wazuh_alerts_high',
+    'High severity alerts (level 10-11)')
+alerts_medium = Gauge('wazuh_alerts_medium',
+    'Medium severity alerts (level 7-9)')
+alerts_low = Gauge('wazuh_alerts_low',
+    'Low severity alerts (level 0-6)')
+
+# Manager Metrics
+manager_status = Gauge('wazuh_manager_status',
+    'Manager status (1=running, 0=stopped)')
+manager_cluster_enabled = Gauge('wazuh_manager_cluster_enabled',
+    'Whether cluster mode is enabled')
+manager_cluster_nodes = Gauge('wazuh_manager_cluster_nodes',
+    'Number of nodes in the cluster')
+manager_is_master = Gauge('wazuh_manager_is_master',
+    'Whether this node is the cluster master')
+
+# Events Metrics
+events_per_second = Gauge('wazuh_events_per_second',
+    'Events processed per second')
+events_total = Counter('wazuh_events_total',
+    'Total events processed')
+events_dropped = Gauge('wazuh_events_dropped',
+    'Events dropped')
+events_queue_size = Gauge('wazuh_events_queue_size',
+    'Current event queue size')
+
+# Vulnerability Metrics (if enabled)
+vulnerabilities_total = Gauge('wazuh_vulnerabilities_total',
+    'Total vulnerabilities detected')
+vulnerabilities_by_severity = Gauge('wazuh_vulnerabilities_by_severity',
+    'Vulnerabilities by severity', ['severity'])
+vulnerabilities_by_agent = Gauge('wazuh_vulnerabilities_by_agent',
+    'Top agents by vulnerability count', ['agent_id', 'agent_name'])
+
+# Exporter Health
+exporter_scrape_success = Gauge('wazuh_manager_exporter_scrape_success',
+    'Whether the last scrape was successful')
+exporter_scrape_duration_seconds = Gauge('wazuh_manager_exporter_scrape_duration_seconds',
+    'Duration of the last scrape in seconds')
+exporter_api_calls_total = Counter('wazuh_manager_exporter_api_calls_total',
+    'Total API calls made', ['endpoint', 'status'])
+
+# ═══════════════════════════════════════════════════════════════
+# API Client
+# ═══════════════════════════════════════════════════════════════
+
+class WazuhAPI:
+    def __init__(self, host, user, password):
+        self.host = host
+        self.user = user
+        self.password = password
+        self.token = None
+        self.token_expires = 0
+
+    def authenticate(self):
+        """Get JWT token from Wazuh API"""
+        try:
+            response = requests.post(
+                f"{self.host}/security/user/authenticate",
+                auth=(self.user, self.password),
+                verify=VERIFY_SSL,
+                timeout=10
+            )
+            if response.status_code == 200:
+                data = response.json()
+                self.token = data.get("data", {}).get("token")
+                # Token expires in 15 minutes, refresh at 10
+                self.token_expires = time.time() + 600
+                return True
+            else:
+                print(f"Authentication failed: {response.status_code}")
+                return False
+        except Exception as e:
+            print(f"Authentication error: {e}")
+            return False
+
+    def get_token(self):
+        """Get valid token, refreshing if needed"""
+        if not self.token or time.time() > self.token_expires:
+            self.authenticate()
+        return self.token
+
+    def get(self, endpoint, params=None):
+        """Make authenticated GET request"""
+        token = self.get_token()
+        if not token:
+            exporter_api_calls_total.labels(endpoint=endpoint, status="auth_failed").inc()
+            return None
+
+        try:
+            response = requests.get(
+                f"{self.host}{endpoint}",
+                headers={"Authorization": f"Bearer {token}"},
+                params=params,
+                verify=VERIFY_SSL,
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                exporter_api_calls_total.labels(endpoint=endpoint, status="success").inc()
+                return response.json().get("data", {})
+            else:
+                exporter_api_calls_total.labels(endpoint=endpoint, status=f"error_{response.status_code}").inc()
+                print(f"API error for {endpoint}: {response.status_code}")
+                return None
+        except Exception as e:
+            exporter_api_calls_total.labels(endpoint=endpoint, status="exception").inc()
+            print(f"API exception for {endpoint}: {e}")
+            return None
+
+# ═══════════════════════════════════════════════════════════════
+# Metric Collection Functions
+# ═══════════════════════════════════════════════════════════════
+
+api = WazuhAPI(WAZUH_API_HOST, WAZUH_API_USER, WAZUH_API_PASS)
+
+def collect_agent_metrics():
+    """Collect agent statistics"""
+    # Summary stats
+    summary = api.get("/agents/summary/status")
+    if summary:
+        connection = summary.get("connection", {})
+        agents_total.set(connection.get("total", 0))
+        agents_active.set(connection.get("active", 0))
+        agents_disconnected.set(connection.get("disconnected", 0))
+        agents_pending.set(connection.get("pending", 0))
+        agents_never_connected.set(connection.get("never_connected", 0))
+
+        # By status
+        for status, count in connection.items():
+            if status != "total":
+                agents_by_status.labels(status=status).set(count)
+
+    # OS summary
+    os_summary = api.get("/agents/summary/os")
+    if os_summary:
+        for os_info in os_summary.get("affected_items", []):
+            os_name = os_info.get("os", {}).get("platform", "unknown")
+            count = os_info.get("count", 0)
+            agents_by_os.labels(os=os_name).set(count)
+
+    return summary is not None
+
+def collect_alert_metrics():
+    """Collect alert statistics"""
+    # Get alerts from last scrape interval
+    alerts = api.get("/alerts", params={"limit": 1000, "offset": 0})
+    if not alerts:
+        return False
+
+    total = alerts.get("total_affected_items", 0)
+    alerts_total.set(total)
+
+    # Count by level
+    level_counts = {i: 0 for i in range(16)}
+    group_counts = {}
+
+    for alert in alerts.get("affected_items", []):
+        level = alert.get("rule", {}).get("level", 0)
+        if 0 <= level <= 15:
+            level_counts[level] += 1
+
+        groups = alert.get("rule", {}).get("groups", [])
+        for group in groups[:3]:  # First 3 groups only
+            group_counts[group] = group_counts.get(group, 0) + 1
+
+    # Set level metrics
+    for level, count in level_counts.items():
+        alerts_by_level.labels(level=str(level)).set(count)
+
+    # Severity buckets
+    alerts_critical.set(sum(level_counts.get(i, 0) for i in range(12, 16)))
+    alerts_high.set(sum(level_counts.get(i, 0) for i in range(10, 12)))
+    alerts_medium.set(sum(level_counts.get(i, 0) for i in range(7, 10)))
+    alerts_low.set(sum(level_counts.get(i, 0) for i in range(0, 7)))
+
+    # Top 10 groups
+    top_groups = sorted(group_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+    for group, count in top_groups:
+        alerts_by_rule_group.labels(group=group).set(count)
+
+    return True
+
+def collect_manager_metrics():
+    """Collect manager and cluster statistics"""
+    # Manager status
+    status = api.get("/manager/status")
+    if status:
+        daemons = status.get("affected_items", [{}])[0]
+        # Wazuh API returns {"daemon_name": "running|stopped", ...} - values are strings
+        all_running = all(v == "running" for v in daemons.values() if isinstance(v, str))
+        manager_status.set(1 if all_running else 0)
+
+    # Cluster info
+    enabled = False
+    cluster = api.get("/cluster/status")
+    if cluster:
+        enabled = cluster.get("enabled") == "yes"
+        manager_cluster_enabled.set(1 if enabled else 0)
+
+    if cluster and enabled:
+        nodes = api.get("/cluster/nodes")
+        if nodes:
+            node_count = nodes.get("total_affected_items", 1)
+            manager_cluster_nodes.set(node_count)
+
+        local = api.get("/cluster/local/info")
+        if local:
+            info = local.get("affected_items", [{}])[0]
+            is_master = info.get("type") == "master"
+            manager_is_master.set(1 if is_master else 0)
+
+    # Stats
+    stats = api.get("/manager/stats")
+    if stats:
+        items = stats.get("affected_items", [])
+        if items:
+            hourly = items[0].get("hourly", {})
+            if hourly:
+                # Use only the most recent hour's value for a more accurate EPS
+                latest_hour = max(hourly.keys()) if hourly else None
+                if latest_hour is not None:
+                    events = hourly[latest_hour]
+                    events_per_second.set(events / 3600 if events else 0)
+
+    return status is not None
+
+def collect_vulnerability_metrics():
+    """Collect vulnerability statistics (if enabled)"""
+    summary = api.get("/vulnerability")
+    if not summary:
+        return True  # Not an error if not enabled
+
+    total = summary.get("total_affected_items", 0)
+    vulnerabilities_total.set(total)
+
+    # This endpoint might not exist in all versions
+    return True
+
+def collect_all_metrics():
+    """Collect all metrics"""
+    start_time = time.time()
+    success = True
+
+    try:
+        if not collect_agent_metrics():
+            success = False
+        if not collect_manager_metrics():
+            success = False
+        # Alerts can be slow, make it optional in high-volume environments
+        collect_alert_metrics()
+        collect_vulnerability_metrics()
+    except Exception as e:
+        print(f"Error collecting metrics: {e}")
+        success = False
+
+    duration = time.time() - start_time
+    exporter_scrape_success.set(1 if success else 0)
+    exporter_scrape_duration_seconds.set(duration)
+
+    return success
+
+# ═══════════════════════════════════════════════════════════════
+# Main Loop
+# ═══════════════════════════════════════════════════════════════
+
+def handle_signal(signum, frame):
+    """Handle shutdown signals gracefully"""
+    print(f"Received signal {signum}, shutting down...")
+    sys.exit(0)
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
+
+    bind_addr = os.environ.get("METRICS_BIND_ADDR", "{{ wazuh_exporter_bind_addr | default('127.0.0.1') }}")
+    print(f"Starting Wazuh Manager Exporter on {bind_addr}:{METRICS_PORT}")
+    print(f"Connecting to Wazuh API at {WAZUH_API_HOST}")
+
+    # Start Prometheus HTTP server
+    start_http_server(METRICS_PORT, addr=bind_addr)
+    print(f"Prometheus metrics available at http://{bind_addr}:{METRICS_PORT}/metrics")
+
+    # Initial authentication
+    if api.authenticate():
+        print("Successfully authenticated with Wazuh API")
+    else:
+        print("Warning: Initial authentication failed, will retry")
+
+    # Initial collection
+    collect_all_metrics()
+
+    # Main loop
+    while True:
+        time.sleep(SCRAPE_INTERVAL)
+        collect_all_metrics()

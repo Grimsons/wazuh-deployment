@@ -3,14 +3,47 @@
 # Wazuh Ansible Deployment - Interactive Setup Script
 # This script configures Ansible variables for Wazuh deployment
 #
+# Usage:
+#   ./setup.sh                    # Interactive mode (default: production profile)
+#   ./setup.sh --profile minimal  # Quick single-node setup
+#   ./setup.sh --profile production # Multi-node with prompts for IPs
+#   ./setup.sh --profile custom   # Full interactive configuration
+#   ./setup.sh --edit             # Edit existing configuration
+#   ./setup.sh --help             # Show help
+#
 # Security features:
 # - No use of eval for variable assignment
 # - Input validation for all user inputs
 # - Secure password generation
-# - Credentials stored in separate protected files
+# - Credentials stored in Ansible Vault
 # - Cleanup on exit
 
 set -euo pipefail
+
+# Script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ═══════════════════════════════════════════════════════════════
+# Source modular libraries
+# ═══════════════════════════════════════════════════════════════
+if [[ -f "$SCRIPT_DIR/lib/colors.sh" ]]; then
+    source "$SCRIPT_DIR/lib/colors.sh"
+    source "$SCRIPT_DIR/lib/validation.sh"
+    source "$SCRIPT_DIR/lib/prompts.sh"
+    source "$SCRIPT_DIR/lib/generators.sh"
+    source "$SCRIPT_DIR/lib/profiles.sh"
+    source "$SCRIPT_DIR/lib/client-prep.sh"
+    MODULAR_MODE=true
+else
+    MODULAR_MODE=false
+    # Fallback: Define colors inline if libraries not found
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    CYAN='\033[0;36m'
+    NC='\033[0m'
+fi
 
 # Cleanup trap for security
 cleanup() {
@@ -23,16 +56,99 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+# ═══════════════════════════════════════════════════════════════
+# CLI Argument Parsing
+# ═══════════════════════════════════════════════════════════════
+SELECTED_PROFILE=""
+EDIT_MODE=false
+SHOW_HELP=false
+QUIET_MODE=false
 
-# Script directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+show_usage() {
+    cat << EOF
+${CYAN}Wazuh Ansible Deployment - Setup Script${NC}
+
+${YELLOW}Usage:${NC}
+  $0 [OPTIONS]
+
+${YELLOW}Options:${NC}
+  -p, --profile PROFILE   Use deployment profile (minimal|production|custom)
+  -e, --edit              Edit existing configuration
+  -q, --quiet             Reduce output verbosity
+  -h, --help              Show this help message
+
+${YELLOW}Profiles:${NC}
+  ${GREEN}minimal${NC}      Single-node setup for testing/development
+               All components on localhost, basic features enabled
+
+  ${GREEN}production${NC}   Multi-node HA setup (default)
+               Prompts for node IPs, all security features enabled
+               Generates SSH keys and client preparation package
+
+  ${GREEN}custom${NC}       Full interactive configuration
+               Configure every option manually
+
+${YELLOW}Examples:${NC}
+  $0                           # Interactive with production defaults
+  $0 --profile minimal         # Quick single-node setup
+  $0 --profile custom          # Full interactive mode
+  $0 --edit                    # Modify existing configuration
+
+${YELLOW}Quick Start:${NC}
+  1. Run: $0 --profile minimal  (for testing)
+     or:  $0                    (for production)
+
+  2. Follow the prompts to configure your deployment
+
+  3. Run: ansible-playbook site.yml --vault-password-file .vault_password
+
+EOF
+}
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -p|--profile)
+            if [[ -n "${2:-}" ]]; then
+                SELECTED_PROFILE="$2"
+                shift 2
+            else
+                echo -e "${RED}Error: --profile requires an argument${NC}"
+                exit 1
+            fi
+            ;;
+        -e|--edit)
+            EDIT_MODE=true
+            shift
+            ;;
+        -q|--quiet)
+            QUIET_MODE=true
+            shift
+            ;;
+        -h|--help)
+            show_usage
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}Unknown option: $1${NC}"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
+# Validate profile if specified
+if [[ -n "$SELECTED_PROFILE" ]]; then
+    case "$SELECTED_PROFILE" in
+        minimal|production|custom)
+            ;;
+        *)
+            echo -e "${RED}Error: Invalid profile '$SELECTED_PROFILE'${NC}"
+            echo "Valid profiles: minimal, production, custom"
+            exit 1
+            ;;
+    esac
+fi
 
 # Default values
 DEFAULT_WAZUH_VERSION="4.14.1"
@@ -42,7 +158,18 @@ DEFAULT_DASHBOARD_PORT="443"
 DEFAULT_MANAGER_API_PORT="55000"
 DEFAULT_AGENT_PORT="1514"
 
-# Function to print colored output
+# ═══════════════════════════════════════════════════════════════
+# Fallback functions (if libraries not loaded)
+# ═══════════════════════════════════════════════════════════════
+if [[ "$MODULAR_MODE" == "false" ]]; then
+    print_header() {
+        echo -e "\n${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+        echo -e "${CYAN}  $1${NC}"
+        echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}\n"
+    }
+fi
+
+# Function to print colored output (keep for compatibility)
 print_header() {
     echo -e "\n${BLUE}═══════════════════════════════════════════════════════════════${NC}"
     echo -e "${CYAN}  $1${NC}"
@@ -218,7 +345,10 @@ generate_password() {
     local upper=$(head -c 100 /dev/urandom | LC_ALL=C tr -dc 'A-Z' | head -c 1)
     local lower=$(head -c 100 /dev/urandom | LC_ALL=C tr -dc 'a-z' | head -c 1)
     local number=$(head -c 100 /dev/urandom | LC_ALL=C tr -dc '0-9' | head -c 1)
-    local symbol="${symbols:$((RANDOM % ${#symbols})):1}"
+    # Use /dev/urandom for cryptographically secure symbol selection
+    local symbol_idx
+    symbol_idx=$(head -c 4 /dev/urandom | od -An -tu4 | tr -d ' ')
+    local symbol="${symbols:$((symbol_idx % ${#symbols})):1}"
 
     # Fallback if any character generation failed
     [ -z "$upper" ] && upper="A"
@@ -243,13 +373,83 @@ main() {
     echo
 
     # ═══════════════════════════════════════════════════════════════
+    # PROFILE SELECTION
+    # ═══════════════════════════════════════════════════════════════
+    if [[ -z "$SELECTED_PROFILE" ]]; then
+        # No profile specified via CLI, prompt user
+        if [[ "$MODULAR_MODE" == "true" ]]; then
+            select_profile "SELECTED_PROFILE"
+        else
+            # Fallback: simple selection without library
+            echo -e "${CYAN}Select Deployment Profile:${NC}"
+            echo -e "  ${YELLOW}1)${NC} minimal     - Single-node for testing"
+            echo -e "  ${YELLOW}2)${NC} production  - Multi-node HA setup ${GREEN}[default]${NC}"
+            echo -e "  ${YELLOW}3)${NC} custom      - Full interactive"
+            echo
+            read -erp "$(echo -e "${CYAN}Select profile ${NC}[${YELLOW}2${NC}]: ")" profile_choice
+            case "${profile_choice:-2}" in
+                1) SELECTED_PROFILE="minimal" ;;
+                3) SELECTED_PROFILE="custom" ;;
+                *) SELECTED_PROFILE="production" ;;
+            esac
+        fi
+    fi
+
+    # Apply profile defaults
+    echo
+    case "$SELECTED_PROFILE" in
+        minimal)
+            print_info "Using MINIMAL profile - single-node setup for testing"
+            if [[ "$MODULAR_MODE" == "true" ]]; then
+                apply_profile_minimal
+            else
+                # Inline minimal defaults
+                INDEXER_NODES="localhost"
+                MANAGER_NODES="localhost"
+                DASHBOARD_NODES="localhost"
+                DEPLOY_AGENTS="false"
+                ENVIRONMENT="development"
+                CUSTOM_PASSWORDS="false"
+                USE_SELF_SIGNED_CERTS="true"
+                GENERATE_SSH_KEY="false"
+                CREATE_PREP_PACKAGE="false"
+            fi
+            ;;
+        production)
+            print_info "Using PRODUCTION profile - multi-node HA setup"
+            if [[ "$MODULAR_MODE" == "true" ]]; then
+                apply_profile_production
+            fi
+            ;;
+        custom)
+            print_info "Using CUSTOM profile - all options will be prompted"
+            ;;
+    esac
+    echo
+
+    # ═══════════════════════════════════════════════════════════════
     # GENERAL SETTINGS
     # ═══════════════════════════════════════════════════════════════
     print_section "General Settings"
 
-    prompt_with_default "Wazuh version to install" "$DEFAULT_WAZUH_VERSION" "WAZUH_VERSION"
-    prompt_with_default "Environment name (e.g., production, staging)" "production" "ENVIRONMENT"
-    prompt_with_default "Organization name" "MyOrg" "ORG_NAME"
+    # Skip prompts if already set by profile
+    if [[ -z "${WAZUH_VERSION:-}" ]]; then
+        prompt_with_default "Wazuh version to install" "$DEFAULT_WAZUH_VERSION" "WAZUH_VERSION"
+    else
+        print_info "Wazuh version: $WAZUH_VERSION"
+    fi
+
+    if [[ -z "${ENVIRONMENT:-}" ]]; then
+        prompt_with_default "Environment name (e.g., production, staging)" "production" "ENVIRONMENT"
+    else
+        print_info "Environment: $ENVIRONMENT"
+    fi
+
+    if [[ -z "${ORG_NAME:-}" ]]; then
+        prompt_with_default "Organization name" "MyOrg" "ORG_NAME"
+    else
+        print_info "Organization: $ORG_NAME"
+    fi
 
     # ═══════════════════════════════════════════════════════════════
     # WAZUH INDEXER CONFIGURATION
@@ -259,21 +459,39 @@ main() {
     print_info "The Wazuh Indexer stores and indexes alerts and events."
     echo
 
-    prompt_hosts "Enter Wazuh Indexer node(s)" "INDEXER_NODES"
+    # Skip if already set by profile
+    if [[ -z "${INDEXER_NODES:-}" ]]; then
+        prompt_hosts "Enter Wazuh Indexer node(s)" "INDEXER_NODES"
+    else
+        print_info "Indexer nodes: $INDEXER_NODES"
+    fi
 
     if [ -z "$INDEXER_NODES" ]; then
         print_error "At least one Indexer node is required!"
         exit 1
     fi
 
-    INDEXER_NODES_ARRAY=($INDEXER_NODES)
+    IFS=' ' read -r -a INDEXER_NODES_ARRAY <<< "$INDEXER_NODES"
     INDEXER_COUNT=${#INDEXER_NODES_ARRAY[@]}
 
-    prompt_with_default "Indexer HTTP port" "$DEFAULT_INDEXER_HTTP_PORT" "INDEXER_HTTP_PORT"
-    prompt_with_default "Indexer cluster name" "wazuh-cluster" "INDEXER_CLUSTER_NAME"
+    if [[ -z "${INDEXER_HTTP_PORT:-}" ]]; then
+        prompt_with_default "Indexer HTTP port" "$DEFAULT_INDEXER_HTTP_PORT" "INDEXER_HTTP_PORT"
+    fi
+
+    if [[ -z "${INDEXER_CLUSTER_NAME:-}" ]]; then
+        prompt_with_default "Indexer cluster name" "wazuh-cluster" "INDEXER_CLUSTER_NAME"
+    fi
 
     # Indexer memory settings
-    prompt_with_default "Indexer JVM heap size (e.g., 1g, 2g, 4g)" "1g" "INDEXER_HEAP_SIZE"
+    if [[ -z "${INDEXER_HEAP_SIZE:-}" ]]; then
+        print_info "JVM heap size determines indexer performance and memory usage."
+        echo -e "${CYAN}Options:${NC}"
+        echo -e "  ${YELLOW}auto${NC} - Automatically calculate 50% of RAM (min 1g, max 32g) [RECOMMENDED]"
+        echo -e "  ${YELLOW}Manual${NC} - Specify value: 1g, 2g, 4g, 8g, 16g, 32g (max 32g for compressed OOPs)"
+        prompt_with_default "Indexer JVM heap size" "auto" "INDEXER_HEAP_SIZE"
+    else
+        print_info "JVM heap size: $INDEXER_HEAP_SIZE"
+    fi
 
     # ═══════════════════════════════════════════════════════════════
     # WAZUH MANAGER CONFIGURATION
@@ -290,7 +508,7 @@ main() {
         exit 1
     fi
 
-    MANAGER_NODES_ARRAY=($MANAGER_NODES)
+    IFS=' ' read -r -a MANAGER_NODES_ARRAY <<< "$MANAGER_NODES"
     MANAGER_COUNT=${#MANAGER_NODES_ARRAY[@]}
 
     prompt_with_default "Manager API port" "$DEFAULT_MANAGER_API_PORT" "MANAGER_API_PORT"
@@ -332,7 +550,7 @@ main() {
         exit 1
     fi
 
-    DASHBOARD_NODES_ARRAY=($DASHBOARD_NODES)
+    IFS=' ' read -r -a DASHBOARD_NODES_ARRAY <<< "$DASHBOARD_NODES"
 
     prompt_with_default "Dashboard HTTPS port" "$DEFAULT_DASHBOARD_PORT" "DASHBOARD_PORT"
 
@@ -346,9 +564,11 @@ main() {
 
     prompt_yes_no "Do you want to deploy agents now?" "yes" "DEPLOY_AGENTS"
 
+    AGENT_NODES_ARRAY=()
     if [ "$DEPLOY_AGENTS" = "true" ]; then
         prompt_hosts "Enter Agent host(s)" "AGENT_NODES"
-        AGENT_NODES_ARRAY=($AGENT_NODES)
+        # Use read -a to safely split into array without glob expansion
+        IFS=' ' read -r -a AGENT_NODES_ARRAY <<< "$AGENT_NODES"
     fi
 
     # ═══════════════════════════════════════════════════════════════
@@ -723,12 +943,10 @@ EOF
         node_name="manager-$((i+1))"
         echo "        ${node}:" >> "$SCRIPT_DIR/inventory/hosts.yml"
         echo "          manager_node_name: ${node_name}" >> "$SCRIPT_DIR/inventory/hosts.yml"
-        if [ $MANAGER_COUNT -gt 1 ]; then
-            if [ $i -eq 0 ]; then
-                echo "          manager_node_type: master" >> "$SCRIPT_DIR/inventory/hosts.yml"
-            else
-                echo "          manager_node_type: worker" >> "$SCRIPT_DIR/inventory/hosts.yml"
-            fi
+        if [ $i -eq 0 ]; then
+            echo "          manager_node_type: master" >> "$SCRIPT_DIR/inventory/hosts.yml"
+        else
+            echo "          manager_node_type: worker" >> "$SCRIPT_DIR/inventory/hosts.yml"
         fi
     done
 
@@ -830,12 +1048,10 @@ EOF
         if [ -n "${HOST_SSH_PASS[$node]:-}" ]; then
             echo "          ansible_ssh_pass: \"{{ vault_ssh_pass_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
         fi
-        if [ $MANAGER_COUNT -gt 1 ]; then
-            if [ $i -eq 0 ]; then
-                echo "          manager_node_type: master" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
-            else
-                echo "          manager_node_type: worker" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
-            fi
+        if [ $i -eq 0 ]; then
+            echo "          manager_node_type: master" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+        else
+            echo "          manager_node_type: worker" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
         fi
     done
 
@@ -902,6 +1118,7 @@ EOF
 wazuh_version: "${WAZUH_VERSION}"
 environment_name: "${ENVIRONMENT}"
 organization_name: "${ORG_NAME}"
+wazuh_ansible_user: "${ANSIBLE_USER:-wazuh-deploy}"
 
 # ═══════════════════════════════════════════════════════════════
 # Wazuh Indexer Settings
@@ -967,6 +1184,9 @@ EOF
 # API password loaded from Ansible Vault
 # SECURITY: Password encrypted in group_vars/all/vault.yml
 wazuh_api_password: "{{ vault_wazuh_api_password }}"
+
+# Agent enrollment password loaded from Ansible Vault
+wazuh_agent_enrollment_password: "{{ vault_wazuh_agent_enrollment_password }}"
 EOF
 
     # Build per-host SSH credentials string for vault (format: host1:user1:pass1,host2:user2:pass2)
@@ -1185,12 +1405,76 @@ wazuh_log_retention_days: ${LOG_RETENTION_DAYS:-30}
 wazuh_log_cleanup_schedule: "${LOG_CLEANUP_SCHEDULE:-daily}"
 
 # ═══════════════════════════════════════════════════════════════
+# Bootstrap Settings (used by --tags bootstrap)
+# ═══════════════════════════════════════════════════════════════
+wazuh_bootstrap_user: "${INITIAL_SSH_USER:-root}"
+
+# ═══════════════════════════════════════════════════════════════
 # Post-Deployment Security
 # ═══════════════════════════════════════════════════════════════
 # Lock down the ansible deployment user after deployment completes
 # When locked, the user can only run the unlock script and check Wazuh status
 # Set to false to keep full sudo access after deployment
 wazuh_lockdown_deploy_user: true
+
+# ═══════════════════════════════════════════════════════════════
+# Automatic Index Management (Prevents 1000 Index Limit)
+# ═══════════════════════════════════════════════════════════════
+# ISM (Index State Management) with automatic rollover prevents
+# reaching OpenSearch's 1000 open index limit.
+
+# Enable automatic index rollover (STRONGLY recommended)
+wazuh_rollover_enabled: true
+
+# Rollover triggers (any condition triggers new index creation)
+wazuh_rollover_max_size: "30gb"            # Rollover when index reaches 30GB
+wazuh_rollover_max_age: "1d"               # Rollover daily for predictable naming
+wazuh_rollover_max_docs: 50000000          # Rollover at 50 million documents
+
+# Index lifecycle stages
+wazuh_retention_enabled: true
+wazuh_retention_days: 365                  # Delete after 1 year
+wazuh_retention_warm_after_days: 7         # Move to warm tier after 7 days
+wazuh_retention_cold_after_days: 30        # Move to cold tier after 30 days
+
+# Close cold indices (CRITICAL: Closed indices don't count toward 1000 limit)
+wazuh_close_cold_indices: true
+
+# Monitoring/Statistics retention (shorter - less critical data)
+wazuh_monitoring_retention_days: 7
+wazuh_statistics_retention_days: 7
+
+# Shard configuration
+wazuh_alerts_primary_shards: 1
+wazuh_alerts_replica_shards: 0
+
+# ═══════════════════════════════════════════════════════════════
+# Health Check & Timeout Settings
+# ═══════════════════════════════════════════════════════════════
+# Configurable timeouts for slow systems or high-latency environments
+
+# Indexer settings
+wazuh_indexer_startup_timeout: 300
+wazuh_indexer_health_check_retries: 30
+wazuh_indexer_health_check_delay: 10
+
+# Manager settings
+wazuh_service_start_timeout: 300
+wazuh_api_check_retries: 30
+wazuh_api_check_delay: 10
+
+# Dashboard settings
+wazuh_dashboard_startup_timeout: 300
+wazuh_dashboard_health_check_retries: 30
+wazuh_dashboard_health_check_delay: 10
+
+# ═══════════════════════════════════════════════════════════════
+# Log Rotation
+# ═══════════════════════════════════════════════════════════════
+wazuh_log_rotation_enabled: true
+wazuh_log_rotation_keep_days: 30
+wazuh_log_rotation_max_size: "100M"
+wazuh_log_rotation_compress: true
 EOF
 
     print_success "Group variables created: group_vars/all/main.yml"
@@ -1254,135 +1538,12 @@ EOF
     if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
         print_section "Creating Client Preparation Package"
 
-        local prep_dir="${SCRIPT_DIR}/client-prep"
-        local tarball="${SCRIPT_DIR}/wazuh-client-prep.tar.gz"
+        # Wire up log callbacks for the shared library
+        _prep_info()    { print_info "$@"; }
+        _prep_success() { print_success "$@"; }
+        _prep_warn()    { print_warning "$@"; }
 
-        mkdir -p "$prep_dir"
-
-        # Copy preparation script
-        if [ -f "${SCRIPT_DIR}/scripts/prepare-client.sh" ]; then
-            cp "${SCRIPT_DIR}/scripts/prepare-client.sh" "$prep_dir/"
-        else
-            print_warning "Preparation script not found, skipping..."
-        fi
-
-        # Copy SSH public key
-        if [ -f "${ANSIBLE_SSH_KEY}.pub" ]; then
-            cp "${ANSIBLE_SSH_KEY}.pub" "$prep_dir/ansible_key.pub"
-        elif [ -f "${SCRIPT_DIR}/keys/wazuh_ansible_key.pub" ]; then
-            cp "${SCRIPT_DIR}/keys/wazuh_ansible_key.pub" "$prep_dir/ansible_key.pub"
-        fi
-
-        # Create install script for easy deployment
-        cat > "$prep_dir/install.sh" << 'INSTALL_EOF'
-#!/bin/bash
-# Quick install script - run this on target machines
-set -e
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-chmod +x "${SCRIPT_DIR}/prepare-client.sh"
-sudo "${SCRIPT_DIR}/prepare-client.sh" -k "${SCRIPT_DIR}/ansible_key.pub" "$@"
-INSTALL_EOF
-        chmod +x "$prep_dir/install.sh"
-
-        # Create README
-        cat > "$prep_dir/README.txt" << README_EOF
-Wazuh Client Preparation Package
-=================================
-
-This package prepares target machines for Wazuh deployment via Ansible.
-
-Quick Start:
-1. Copy this entire folder to the target machine
-2. Run: sudo ./install.sh
-
-Or run with options:
-  sudo ./prepare-client.sh -k ansible_key.pub --minimal
-
-Supported Operating Systems:
-- Ubuntu 20.04+, Debian 10+
-- RHEL/CentOS 8+, Rocky Linux 8+, Fedora
-- SUSE Linux Enterprise, openSUSE
-- Arch Linux
-
-Options:
-  -u, --user NAME     Ansible user to create (default: wazuh-deploy)
-  -p, --port PORT     SSH port (default: 22)
-  -k, --key FILE      Path to SSH public key file
-  -m, --minimal       Skip package removal (faster)
-  -d, --dry-run       Show what would happen
-  -h, --help          Show help
-
-What this script does:
-- Detects your OS automatically
-- Removes unnecessary packages (desktop, games, office suites, etc.)
-- Installs required packages (Python, SSH, sudo, etc.)
-- Creates an Ansible deployment user with sudo access
-- Deploys the SSH public key for passwordless access
-- Configures firewall for Wazuh ports (UFW, firewalld, iptables, or nftables)
-- Optimizes system settings
-- Installs unlock script for post-deployment reactivation
-
-Firewall Ports Configured:
-- 1514/tcp  - Agent communication
-- 1515/tcp  - Agent enrollment
-- 1516/tcp  - Manager cluster
-- 9200/tcp  - Indexer API
-- 9300/tcp  - Indexer cluster
-- 443/tcp   - Dashboard HTTPS
-- 55000/tcp - Manager API
-
-Post-Deployment:
-After Wazuh deployment, the ansible user is automatically locked down
-for security. To run future deployments:
-
-  # From your Ansible control node:
-  ansible-playbook unlock-deploy-user.yml
-
-  # Or manually on each host:
-  sudo /usr/local/bin/wazuh-unlock-deploy
-
-SSH User: ${ANSIBLE_USER}
-README_EOF
-
-        # Create tarball
-        tar -czf "$tarball" -C "${SCRIPT_DIR}" "client-prep"
-
-        # Also create a self-extracting script
-        cat > "${SCRIPT_DIR}/wazuh-client-prep.sh" << 'SELFEXTRACT_EOF'
-#!/bin/bash
-# Wazuh Client Preparation - Self-extracting installer
-# Usage: curl -sSL http://your-server/wazuh-client-prep.sh | sudo bash
-
-set -e
-
-TEMP_DIR=$(mktemp -d)
-ARCHIVE_START=$(awk '/^__ARCHIVE_START__$/{print NR + 1; exit 0; }' "$0")
-
-echo "Extracting Wazuh client preparation package..."
-tail -n+$ARCHIVE_START "$0" | tar -xz -C "$TEMP_DIR"
-
-cd "$TEMP_DIR/client-prep"
-chmod +x prepare-client.sh install.sh
-
-echo "Running preparation script..."
-sudo ./prepare-client.sh -k ansible_key.pub "$@"
-
-# Cleanup
-rm -rf "$TEMP_DIR"
-
-exit 0
-
-__ARCHIVE_START__
-SELFEXTRACT_EOF
-
-        # Append tarball to self-extracting script
-        cat "$tarball" >> "${SCRIPT_DIR}/wazuh-client-prep.sh"
-        chmod +x "${SCRIPT_DIR}/wazuh-client-prep.sh"
-
-        print_success "Client preparation package created:"
-        print_info "  Folder: ${prep_dir}/"
-        print_info "  Tarball: ${tarball}"
-        print_info "  Self-extracting: ${SCRIPT_DIR}/wazuh-client-prep.sh"
+        create_client_prep_package "$SCRIPT_DIR" "$ANSIBLE_SSH_KEY" "$ANSIBLE_USER"
     fi
 
     # ═══════════════════════════════════════════════════════════════
@@ -1614,21 +1775,17 @@ SELFEXTRACT_EOF
     echo
 
     if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
-        echo -e "4. Bootstrap hosts (create ansible user with SSH key):"
+        echo -e "4. Bootstrap + deploy (one command):"
     else
-        echo -e "3. Bootstrap hosts (create ansible user with SSH key):"
+        echo -e "3. Bootstrap + deploy (one command):"
     fi
-    echo -e "   ${YELLOW}ansible-playbook playbooks/bootstrap-hosts.yml -i inventory/bootstrap.yml --vault-password-file .vault_password${NC}"
+    echo -e "   ${YELLOW}ansible-playbook site.yml --tags bootstrap,all${NC}"
     echo
-    echo -e "   This creates the '${CYAN}wazuh-deploy${NC}' user with SSH key auth and passwordless sudo."
+    echo -e "   This first connects as '${CYAN}${INITIAL_SSH_USER:-root}${NC}' to create the '${CYAN}wazuh-deploy${NC}' user"
+    echo -e "   with SSH key auth and passwordless sudo, then runs the full deployment."
     echo
-
-    if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
-        echo -e "5. Run the deployment:"
-    else
-        echo -e "4. Run the deployment:"
-    fi
-    echo -e "   ${YELLOW}ansible-playbook site.yml --vault-password-file .vault_password${NC}"
+    echo -e "   Subsequent deployments (no bootstrap needed):"
+    echo -e "   ${YELLOW}ansible-playbook site.yml${NC}"
     echo
     echo -e "   Or deploy components individually:"
     echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-indexer.yml --vault-password-file .vault_password${NC}"

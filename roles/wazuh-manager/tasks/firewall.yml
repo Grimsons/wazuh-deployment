@@ -51,6 +51,11 @@
     effective_agent_networks: "{{ wazuh_allowed_agent_networks | default([auto_detected_subnet]) }}"
     effective_cluster_networks: "{{ wazuh_allowed_cluster_networks | default([auto_detected_subnet]) }}"
 
+# Option to allow agents from any network (recommended for flexibility)
+- name: Set allow agents from any network flag
+  ansible.builtin.set_fact:
+    allow_agents_from_any: "{{ wazuh_allow_agents_from_any | default(true) }}"
+
 # Install UFW on Debian/Ubuntu if not present and no firewalld
 - name: Install UFW (Debian/Ubuntu)
   ansible.builtin.apt:
@@ -142,6 +147,7 @@
         from_ip: "{{ item }}"
       become: true
       loop: "{{ effective_agent_networks }}"
+      when: not allow_agents_from_any
 
     # Agent communication - allow from auto-detected/configured agent subnets (UDP)
     - name: Allow Wazuh agent communication (1514/udp) from agent networks
@@ -152,6 +158,7 @@
         from_ip: "{{ item }}"
       become: true
       loop: "{{ effective_agent_networks }}"
+      when: not allow_agents_from_any
 
     # Agent registration - allow from agent subnets
     - name: Allow Wazuh agent registration (1515/tcp) from agent networks
@@ -162,6 +169,27 @@
         from_ip: "{{ item }}"
       become: true
       loop: "{{ effective_agent_networks }}"
+      when: not allow_agents_from_any
+
+    # Agent communication - allow from anywhere (when enabled)
+    - name: Allow Wazuh agent communication (1514/tcp) from anywhere
+      community.general.ufw:
+        rule: allow
+        port: "{{ wazuh_manager_agent_port | default(1514) }}"
+        proto: tcp
+        comment: "Wazuh agent communication"
+      become: true
+      when: allow_agents_from_any
+
+    # Agent registration - allow from anywhere (when enabled)
+    - name: Allow Wazuh agent registration (1515/tcp) from anywhere
+      community.general.ufw:
+        rule: allow
+        port: "1515"
+        proto: tcp
+        comment: "Wazuh agent enrollment"
+      become: true
+      when: allow_agents_from_any
 
     # API - allow from cluster networks (dashboard, other managers)
     - name: Allow Wazuh API port from cluster networks

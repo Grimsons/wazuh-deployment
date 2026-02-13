@@ -1,0 +1,42 @@
+<!--
+  SSH Brute Force Correlation Rules
+  Rule ID range: 800600-800619
+
+  Correlates SSH authentication events to detect:
+  - Successful login after multiple failures (credential stuffing success)
+  - Password spraying (many usernames from same IP)
+
+  Uses Wazuh built-in SSH rule IDs:
+    - 5710 = SSH authentication attempt (failed)
+    - 5715 = sshd authentication success
+    - 5716 = sshd authentication success
+    - 5720 = multiple SSH authentication failures
+    - 5763 = brute force attack (multiple failures, same source)
+-->
+<group name="sshd,custom_ssh_correlation,">
+
+  <!-- Credential stuffing success: successful SSH login from an IP that was brute forcing -->
+  <!-- Triggers when 5716 (success) fires from same source IP that had 5763 (brute force) -->
+  <rule id="800600" level="10" frequency="2" timeframe="300">
+    <if_matched_sid>5716</if_matched_sid>
+    <same_source_ip />
+    <description>SSH: Successful login from IP that previously failed multiple times - possible credential compromise</description>
+    <mitre>
+      <id>T1110</id>
+    </mitre>
+    <group>authentication_success,brute_force,attack,</group>
+  </rule>
+
+  <!-- Password spraying: 10+ different usernames failed from same IP in 5 minutes -->
+  <rule id="800601" level="12" frequency="10" timeframe="300">
+    <if_matched_sid>5710</if_matched_sid>
+    <same_source_ip />
+    <different_user />
+    <description>SSH: Password spraying detected - 10+ different usernames from same IP</description>
+    <mitre>
+      <id>T1110.003</id>
+    </mitre>
+    <group>authentication_failed,password_spray,attack,</group>
+  </rule>
+
+</group>

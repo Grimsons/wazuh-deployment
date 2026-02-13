@@ -1,0 +1,61 @@
+---
+# Bootstrap Inventory - For initial setup ONLY
+# Uses SSH password auth to connect before SSH keys are deployed
+#
+# This inventory is used ONLY with:
+#   ansible-playbook playbooks/bootstrap-hosts.yml -i inventory/bootstrap.yml --vault-password-file .vault_password
+#
+# After bootstrap, use hosts.yml for ALL operations (including unlock-deploy-user.yml)
+#
+# The variable vault_bootstrap_ssh_pass must be defined in your vault:
+#   group_vars/all/vault.yml  (auto-loaded by Ansible)
+#   OR group_vars/vault.yml   (auto-loaded by Ansible)
+#
+# To set it up:
+#   1. Run: ./scripts/manage-vault.sh init
+#   2. Run: ./scripts/manage-vault.sh create
+#   3. Edit vault to add vault_bootstrap_ssh_pass:
+#      ./scripts/manage-vault.sh edit
+
+all:
+  vars:
+    ansible_port: 22
+    ansible_become: true
+    ansible_ssh_pass: "{{ vault_bootstrap_ssh_pass }}"
+
+  children:
+    wazuh_indexers:
+      hosts:
+        192.168.1.10:
+          indexer_node_name: indexer-1
+          indexer_cluster_initial_master: true
+        # 192.168.1.11:
+        #   indexer_node_name: indexer-2
+        # 192.168.1.12:
+        #   indexer_node_name: indexer-3
+
+    wazuh_managers:
+      hosts:
+        192.168.1.20:
+          manager_node_name: manager-1
+          manager_node_type: master
+        # 192.168.1.21:
+        #   manager_node_name: manager-2
+        #   manager_node_type: worker
+
+    wazuh_dashboards:
+      hosts:
+        192.168.1.30:
+
+    # wazuh_agents:
+    #   hosts:
+    #     192.168.1.100:
+    #     192.168.1.101:
+
+    # Local deployment host (no SSH needed)
+    local:
+      hosts:
+        localhost:
+          ansible_connection: local
+          ansible_user: "{{ lookup('env', 'USER') }}"
+          ansible_become: false

@@ -7,14 +7,19 @@ This guide covers common issues encountered during Wazuh deployment and operatio
 ### Health Check Commands
 
 ```bash
+# Quick status check
+./scripts/status.sh
+make status
+
 # Run automated health check
 ansible-playbook playbooks/health-check.yml
+make health
 
 # Check all services status
 ansible all -m shell -a "systemctl status wazuh-* --no-pager" --become
 
 # Quick cluster health
-curl -k -u admin:PASSWORD https://INDEXER_IP:9200/_cluster/health?pretty
+curl -k -u admin:<your-password> https://<indexer-ip>:9200/_cluster/health?pretty
 ```
 
 ### Log Locations
@@ -41,7 +46,7 @@ curl -k -u admin:PASSWORD https://INDEXER_IP:9200/_cluster/health?pretty
 
 1. **Verify SSH connectivity:**
    ```bash
-   ssh -i keys/wazuh_ansible_key wazuh-deploy@TARGET_IP
+   ssh -i keys/wazuh_ansible_key wazuh-deploy@<target-ip>
    ```
 
 2. **Check SSH key permissions:**
@@ -53,8 +58,8 @@ curl -k -u admin:PASSWORD https://INDEXER_IP:9200/_cluster/health?pretty
 3. **Verify target host preparation:**
    ```bash
    # Re-run client preparation
-   scp -r client-prep/ root@TARGET:/tmp/
-   ssh root@TARGET 'bash /tmp/client-prep/install.sh'
+   scp -r client-prep/ root@<target-ip>:/tmp/
+   ssh root@<target-ip> 'bash /tmp/client-prep/install.sh'
    ```
 
 4. **Check firewall rules:**
@@ -134,8 +139,9 @@ curl -k -u admin:PASSWORD https://INDEXER_IP:9200/_cluster/health?pretty
 1. **Check Java heap size:**
    ```bash
    # Edit /etc/wazuh-indexer/jvm.options
-   # Ensure heap size is appropriate for available RAM
-   # Recommended: 50% of RAM, max 32GB
+   # Recommended: 50% of RAM, min 1GB, max 32GB
+   # Default "auto" calculates this at deployment
+   # Example for 8GB RAM system:
    -Xms4g
    -Xmx4g
    ```
@@ -168,21 +174,21 @@ curl -k -u admin:PASSWORD https://INDEXER_IP:9200/_cluster/health?pretty
 
 1. **Check cluster status:**
    ```bash
-   curl -k -u admin:PASSWORD https://localhost:9200/_cluster/health?pretty
-   curl -k -u admin:PASSWORD https://localhost:9200/_cat/shards?v | grep -i unassigned
+   curl -k -u admin:<your-password> https://localhost:9200/_cluster/health?pretty
+   curl -k -u admin:<your-password> https://localhost:9200/_cat/shards?v | grep -i unassigned
    ```
 
 2. **For single-node clusters (yellow is normal):**
    ```bash
    # Set replicas to 0 for single-node
-   curl -k -u admin:PASSWORD -X PUT "https://localhost:9200/_settings" \
+   curl -k -u admin:<your-password> -X PUT "https://localhost:9200/_settings" \
      -H 'Content-Type: application/json' \
      -d '{"index": {"number_of_replicas": 0}}'
    ```
 
 3. **Force shard allocation:**
    ```bash
-   curl -k -u admin:PASSWORD -X POST "https://localhost:9200/_cluster/reroute?retry_failed=true"
+   curl -k -u admin:<your-password> -X POST "https://localhost:9200/_cluster/reroute?retry_failed=true"
    ```
 
 ### Authentication Failed (401 Errors)
@@ -207,7 +213,7 @@ curl -k -u admin:PASSWORD https://INDEXER_IP:9200/_cluster/health?pretty
 3. **If password was changed, update internal_users.yml:**
    ```bash
    # Hash new password
-   sudo /usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p "NEW_PASSWORD"
+   sudo /usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p "<new-password>"
 
    # Update /etc/wazuh-indexer/opensearch-security/internal_users.yml with hash
 
@@ -284,7 +290,7 @@ curl -k -u admin:PASSWORD https://INDEXER_IP:9200/_cluster/health?pretty
 4. **Test enrollment manually:**
    ```bash
    # On agent
-   sudo /var/ossec/bin/agent-auth -m MANAGER_IP -P "ENROLLMENT_PASSWORD"
+   sudo /var/ossec/bin/agent-auth -m <manager-ip> -P "<enrollment-password>"
    ```
 
 ### Cluster Synchronization Issues
@@ -308,7 +314,7 @@ curl -k -u admin:PASSWORD https://INDEXER_IP:9200/_cluster/health?pretty
 
 3. **Check network connectivity between nodes:**
    ```bash
-   nc -zv OTHER_MANAGER_IP 1516
+   nc -zv <other-manager-ip> 1516
    ```
 
 4. **Restart cluster:**
@@ -342,7 +348,7 @@ curl -k -u admin:PASSWORD https://INDEXER_IP:9200/_cluster/health?pretty
 
 3. **Check Indexer connectivity from Dashboard:**
    ```bash
-   curl -k -u admin:PASSWORD https://INDEXER_IP:9200/
+   curl -k -u admin:<your-password> https://<indexer-ip>:9200/
    ```
 
 4. **Check dashboard config:**
@@ -360,7 +366,7 @@ curl -k -u admin:PASSWORD https://INDEXER_IP:9200/_cluster/health?pretty
 
 1. **Check index mappings:**
    ```bash
-   curl -k -u admin:PASSWORD "https://localhost:9200/wazuh-alerts-*/_mapping" | jq '.[] | .mappings.properties.rule.properties.mitre'
+   curl -k -u admin:<your-password> "https://localhost:9200/wazuh-alerts-*/_mapping" | jq '.[] | .mappings.properties.rule.properties.mitre'
    ```
 
 2. **For existing indices with wrong mappings, reindex:**
@@ -370,7 +376,7 @@ curl -k -u admin:PASSWORD https://INDEXER_IP:9200/_cluster/health?pretty
 
 3. **Verify Filebeat template is applied:**
    ```bash
-   curl -k -u admin:PASSWORD "https://localhost:9200/_template/wazuh"
+   curl -k -u admin:<your-password> "https://localhost:9200/_template/wazuh"
    ```
 
 ### Wazuh App Shows "API is not reachable"
@@ -388,7 +394,7 @@ curl -k -u admin:PASSWORD https://INDEXER_IP:9200/_cluster/health?pretty
 
 2. **Verify API is running:**
    ```bash
-   curl -k -u wazuh:API_PASSWORD https://MANAGER_IP:55000/
+   curl -k -u wazuh:<your-api-password> https://<manager-ip>:55000/
    ```
 
 3. **Check API credentials from vault:**
@@ -420,7 +426,7 @@ curl -k -u admin:PASSWORD https://INDEXER_IP:9200/_cluster/health?pretty
 
 3. **Test connectivity to manager:**
    ```bash
-   nc -zv MANAGER_IP 1514
+   nc -zv <manager-ip> 1514
    ```
 
 4. **Check agent key:**
@@ -431,7 +437,7 @@ curl -k -u admin:PASSWORD https://INDEXER_IP:9200/_cluster/health?pretty
 
 5. **Re-register agent:**
    ```bash
-   sudo /var/ossec/bin/agent-auth -m MANAGER_IP -P "ENROLLMENT_PASSWORD"
+   sudo /var/ossec/bin/agent-auth -m <manager-ip> -P "<enrollment-password>"
    sudo systemctl restart wazuh-agent
    ```
 
@@ -479,7 +485,7 @@ curl -k -u admin:PASSWORD https://INDEXER_IP:9200/_cluster/health?pretty
 
 2. **Verify Filebeat can reach Indexer:**
    ```bash
-   curl -k -u admin:PASSWORD https://INDEXER_IP:9200/
+   curl -k -u admin:<your-password> https://<indexer-ip>:9200/
    ```
 
 3. **Check Filebeat configuration:**
@@ -543,7 +549,7 @@ curl -k -u admin:PASSWORD https://INDEXER_IP:9200/_cluster/health?pretty
 
 2. **Check Indexer performance:**
    ```bash
-   curl -k -u admin:PASSWORD "https://localhost:9200/_nodes/stats/jvm?pretty"
+   curl -k -u admin:<your-password> "https://localhost:9200/_nodes/stats/jvm?pretty"
    ```
 
 ---
@@ -558,6 +564,9 @@ ls -la backups/
 
 # Restore specific backup
 ansible-playbook playbooks/restore.yml -e "restore_from=BACKUP_TIMESTAMP"
+
+# Or use the make shortcut:
+make restore BACKUP_ID=BACKUP_TIMESTAMP
 ```
 
 ### Reset Admin Password
@@ -569,7 +578,7 @@ ansible-playbook site.yml  # Redeploy with new credentials
 
 # Option 2: Manual reset
 # Generate new password hash
-sudo /usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p "NEW_PASSWORD"
+sudo /usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p "<new-password>"
 
 # Update internal_users.yml with new hash
 sudo vi /etc/wazuh-indexer/opensearch-security/internal_users.yml

@@ -17,6 +17,9 @@ The backup system provides:
 ```bash
 # Create a full backup of all components
 ansible-playbook playbooks/backup.yml
+
+# Or use the make shortcut:
+make backup
 ```
 
 ### Component-Specific Backups
@@ -68,18 +71,18 @@ Backups are stored in timestamped directories:
 
 ```
 ./backups/
-├── 20240115_020000/
+├── 20260115_020000/
 │   ├── indexer/
 │   ├── manager/
 │   ├── dashboard/
 │   └── vault/
-├── 20240116_020000/
+├── 20260116_020000/
 └── checksums.sha256
 ```
 
 ## Backup Retention
 
-Configure retention in `group_vars/all.yml`:
+Configure retention in `group_vars/all/main.yml`:
 
 ```yaml
 backup_retention_days: 30
@@ -90,29 +93,16 @@ backup_remote_location: "s3://bucket/wazuh-backups"
 
 ## Scheduled Backups
 
-Use the provided script to set up automated backups with retention management:
+### Using the Maintenance Cron Playbook
+
+The recommended way to set up automated backups is through the maintenance cron playbook, which configures the scheduled backup script:
 
 ```bash
-# Daily backup at 2 AM, keep 7 days of backups (default)
-./scripts/setup-backup-cron.sh --daily
-
-# Daily backup at 3 AM, keep 14 days
-./scripts/setup-backup-cron.sh --daily --hour 3 --keep 14
-
-# Weekly backup on Sunday, keep 4 weeks
-./scripts/setup-backup-cron.sh --weekly --keep 4
-
-# Every 6 hours, keep 28 backups (7 days)
-./scripts/setup-backup-cron.sh --hourly 6 --keep 28
-
-# Skip specific components
-./scripts/setup-backup-cron.sh --daily --no-indexer
-
-# Remove the cron job
-./scripts/setup-backup-cron.sh --remove
+# Set up automated backups and log cleanup
+ansible-playbook playbooks/setup-maintenance-cron.yml
 ```
 
-The backup script automatically:
+This configures `scripts/run-scheduled-backup.sh` as a cron job that automatically:
 - Creates timestamped backups in `./backups/`
 - Removes backups older than the retention limit
 - Logs to `./logs/backup-cron.log`
@@ -132,7 +122,10 @@ If you prefer manual cron setup:
 
 ```bash
 # Restore from specific backup
-ansible-playbook playbooks/restore.yml -e "backup_timestamp=20240115_020000"
+ansible-playbook playbooks/restore.yml -e "restore_from=20260115_020000"
+
+# Or use the make shortcut:
+make restore BACKUP_ID=20260115_020000
 ```
 
 ### Component-Specific Restore
@@ -140,13 +133,13 @@ ansible-playbook playbooks/restore.yml -e "backup_timestamp=20240115_020000"
 ```bash
 # Restore only indexer
 ansible-playbook playbooks/restore.yml \
-  -e "backup_timestamp=20240115_020000" \
+  -e "restore_from=20260115_020000" \
   -e "restore_indexer=true" \
   --limit wazuh_indexers
 
 # Restore only manager
 ansible-playbook playbooks/restore.yml \
-  -e "backup_timestamp=20240115_020000" \
+  -e "restore_from=20260115_020000" \
   -e "restore_manager=true" \
   --limit wazuh_managers
 ```
@@ -156,7 +149,7 @@ ansible-playbook playbooks/restore.yml \
 ```bash
 # Restore to new infrastructure
 ansible-playbook playbooks/restore.yml \
-  -e "backup_timestamp=20240115_020000" \
+  -e "restore_from=20260115_020000" \
   -i inventory/new-hosts.yml
 ```
 
@@ -173,7 +166,7 @@ ansible all -m systemd -a "name=wazuh-dashboard state=stopped" --limit wazuh_das
 ### 2. Execute Restore
 
 ```bash
-ansible-playbook playbooks/restore.yml -e "backup_timestamp=20240115_020000"
+ansible-playbook playbooks/restore.yml -e "restore_from=20260115_020000"
 ```
 
 ### 3. Start Services
@@ -197,9 +190,9 @@ For recovering historical alert data, use OpenSearch snapshots:
 ### Configure Snapshot Repository
 
 ```bash
-curl -X PUT "https://indexer:9200/_snapshot/backup_repo" \
+curl -X PUT "https://<indexer-ip>:9200/_snapshot/backup_repo" \
   -H "Content-Type: application/json" \
-  -u admin:password \
+  -u admin:<your-password> \
   -d '{
     "type": "fs",
     "settings": {
@@ -211,9 +204,9 @@ curl -X PUT "https://indexer:9200/_snapshot/backup_repo" \
 ### Create Snapshot
 
 ```bash
-curl -X PUT "https://indexer:9200/_snapshot/backup_repo/snapshot_$(date +%Y%m%d)" \
+curl -X PUT "https://<indexer-ip>:9200/_snapshot/backup_repo/snapshot_$(date +%Y%m%d)" \
   -H "Content-Type: application/json" \
-  -u admin:password \
+  -u admin:<your-password> \
   -d '{
     "indices": "wazuh-alerts-*",
     "ignore_unavailable": true,
@@ -224,15 +217,15 @@ curl -X PUT "https://indexer:9200/_snapshot/backup_repo/snapshot_$(date +%Y%m%d)
 ### List Snapshots
 
 ```bash
-curl -X GET "https://indexer:9200/_snapshot/backup_repo/_all" -u admin:password
+curl -X GET "https://<indexer-ip>:9200/_snapshot/backup_repo/_all" -u admin:<your-password>
 ```
 
 ### Restore Snapshot
 
 ```bash
-curl -X POST "https://indexer:9200/_snapshot/backup_repo/snapshot_20240115/_restore" \
+curl -X POST "https://<indexer-ip>:9200/_snapshot/backup_repo/snapshot_20260115/_restore" \
   -H "Content-Type: application/json" \
-  -u admin:password \
+  -u admin:<your-password> \
   -d '{
     "indices": "wazuh-alerts-*",
     "ignore_unavailable": true,
@@ -245,7 +238,7 @@ curl -X POST "https://indexer:9200/_snapshot/backup_repo/snapshot_20240115/_rest
 ### Validate Backup Integrity
 
 ```bash
-ansible-playbook playbooks/dr-validate.yml -e "backup_timestamp=20240115_020000"
+ansible-playbook playbooks/dr-validate.yml -e "backup_timestamp=20260115_020000"
 ```
 
 ### Test Restore (Non-Destructive)
@@ -305,25 +298,16 @@ ansible-playbook playbooks/log-cleanup.yml -e cleanup_archives=false
 
 ### Automated Log Cleanup
 
-Use the provided script to schedule automatic cleanup:
+Use the maintenance cron playbook to schedule automatic cleanup alongside backups:
 
 ```bash
-# Daily cleanup at 3:30 AM, keep 30 days (default)
-./scripts/setup-log-cleanup-cron.sh
-
-# Keep only 14 days of logs
-./scripts/setup-log-cleanup-cron.sh --days 14
-
-# Weekly cleanup on Sunday
-./scripts/setup-log-cleanup-cron.sh --weekly --days 7
-
-# Remove the cron job
-./scripts/setup-log-cleanup-cron.sh --remove
+# Set up automated backups and log cleanup
+ansible-playbook playbooks/setup-maintenance-cron.yml
 ```
 
 ### Log Retention Configuration
 
-Set the default retention in `group_vars/all.yml`:
+Set the default retention in `group_vars/all/main.yml`:
 
 ```yaml
 wazuh_log_retention_days: 30

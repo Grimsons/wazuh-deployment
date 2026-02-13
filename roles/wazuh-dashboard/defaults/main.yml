@@ -7,6 +7,11 @@
 wazuh_dashboard_package_name: "wazuh-dashboard"
 wazuh_dashboard_service_name: "wazuh-dashboard"
 
+# Repository settings
+wazuh_repo_gpg_key: "https://packages.wazuh.com/key/GPG-KEY-WAZUH"
+wazuh_repo_url_apt: "https://packages.wazuh.com/4.x/apt/"
+wazuh_repo_url_yum: "https://packages.wazuh.com/4.x/yum/"
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Path Settings
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -20,6 +25,13 @@ wazuh_dashboard_certs_path: /etc/wazuh-dashboard/certs
 # ═══════════════════════════════════════════════════════════════════════════════
 wazuh_dashboard_port: 443
 wazuh_dashboard_host: "0.0.0.0"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Startup Settings (configurable for slow systems)
+# ═══════════════════════════════════════════════════════════════════════════════
+wazuh_dashboard_startup_timeout: 300
+wazuh_dashboard_health_check_retries: 30
+wazuh_dashboard_health_check_delay: 10
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SSL/TLS Settings
@@ -45,7 +57,7 @@ wazuh_dashboard_cookie_same_site: "Strict"
 # ═══════════════════════════════════════════════════════════════════════════════
 # Dashboard uses indexer admin credentials - auto-generated if not set
 wazuh_dashboard_admin_user: "admin"
-# wazuh_dashboard_admin_password: auto-read from credentials/indexer_admin_password.txt
+# wazuh_dashboard_admin_password: sourced from Ansible Vault via wazuh_indexer_admin_password
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HTTP Security Headers

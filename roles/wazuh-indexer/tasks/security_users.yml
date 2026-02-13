@@ -1,6 +1,7 @@
 ---
 # Wazuh Indexer - Security Users Configuration
 # This configures the admin user with a secure random password
+# All passwords are managed through Ansible Vault
 
 - name: Generate random admin password
   ansible.builtin.set_fact:
@@ -12,48 +13,6 @@
   ansible.builtin.set_fact:
     wazuh_admin_password: "{{ wazuh_indexer_admin_password if (wazuh_indexer_admin_password is defined and wazuh_indexer_admin_password != 'admin') else wazuh_indexer_admin_password_generated }}"
   run_once: true
-
-- name: Display generated password location notice
-  ansible.builtin.debug:
-    msg: |
-      ═══════════════════════════════════════════════════════════════
-      IMPORTANT: Admin password has been generated/configured.
-      The password will be saved to: {{ playbook_dir }}/credentials/indexer_admin_password.txt
-      ═══════════════════════════════════════════════════════════════
-  run_once: true
-
-- name: Create credentials directory on controller
-  ansible.builtin.file:
-    path: "{{ playbook_dir }}/credentials"
-    state: directory
-    mode: '0700'
-  delegate_to: localhost
-  become: false
-  run_once: true
-  vars:
-    ansible_become: false
-
-- name: Save admin password to file on controller
-  ansible.builtin.copy:
-    content: |
-      # Wazuh Indexer Admin Credentials
-      # Generated: {{ ansible_date_time.iso8601 }}
-      # Host: {{ inventory_hostname }}
-
-      Username: admin
-      Password: {{ wazuh_admin_password }}
-
-      URL: https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}
-
-      # IMPORTANT: Keep this file secure and delete after noting the password!
-    dest: "{{ playbook_dir }}/credentials/indexer_admin_password.txt"
-    mode: '0600'
-  delegate_to: localhost
-  become: false
-  run_once: true
-  no_log: true
-  vars:
-    ansible_become: false
 
 - name: Hash the admin password using OpenSearch security tools
   ansible.builtin.shell: |

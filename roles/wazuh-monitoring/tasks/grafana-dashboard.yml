@@ -1,0 +1,113 @@
+---
+# Grafana Dashboard Provisioning
+# ═══════════════════════════════════════════════════════════════
+#
+# Deploys the Wazuh monitoring dashboard to Grafana
+# Supports both file provisioning and API import methods
+
+- name: Check if Grafana is installed
+  ansible.builtin.stat:
+    path: /etc/grafana/grafana.ini
+  register: grafana_installed
+
+- name: Create Grafana provisioning directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+    owner: grafana
+    group: grafana
+  loop:
+    - "{{ wazuh_grafana_provisioning_dir }}"
+    - "/etc/grafana/provisioning/datasources"
+  when: grafana_installed.stat.exists
+
+# ─────────────────────────────────────────────────────────────────
+# Dashboard Provisioning via Files (preferred)
+# ─────────────────────────────────────────────────────────────────
+- name: Deploy Wazuh dashboard JSON
+  ansible.builtin.copy:
+    src: grafana-wazuh-dashboard.json
+    dest: "{{ wazuh_grafana_provisioning_dir }}/wazuh-dashboard.json"
+    mode: "0644"
+    owner: grafana
+    group: grafana
+  when: grafana_installed.stat.exists
+  notify: Restart grafana
+
+- name: Create dashboard provisioning config
+  ansible.builtin.copy:
+    content: |
+      apiVersion: 1
+      providers:
+        - name: 'Wazuh'
+          orgId: 1
+          folder: 'Wazuh'
+          folderUid: 'wazuh'
+          type: file
+          disableDeletion: false
+          updateIntervalSeconds: 30
+          allowUiUpdates: true
+          options:
+            path: {{ wazuh_grafana_provisioning_dir }}
+    dest: /etc/grafana/provisioning/dashboards/wazuh.yml
+    mode: "0644"
+    owner: grafana
+    group: grafana
+  when: grafana_installed.stat.exists
+  notify: Restart grafana
+
+# ─────────────────────────────────────────────────────────────────
+# Prometheus Datasource (if not already configured)
+# ─────────────────────────────────────────────────────────────────
+- name: Check for existing Prometheus datasource
+  ansible.builtin.stat:
+    path: /etc/grafana/provisioning/datasources/prometheus.yml
+  register: prometheus_ds
+
+- name: Create Prometheus datasource config (example)
+  ansible.builtin.copy:
+    content: |
+      # Prometheus datasource configuration for Wazuh metrics
+      # Adjust the URL to match your Prometheus server
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          access: proxy
+          url: http://localhost:9090
+          isDefault: true
+          editable: true
+    dest: /etc/grafana/provisioning/datasources/prometheus-wazuh.yml.example
+    mode: "0644"
+    owner: grafana
+    group: grafana
+  when:
+    - grafana_installed.stat.exists
+    - not prometheus_ds.stat.exists
+
+- name: Display dashboard import instructions
+  ansible.builtin.debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════════
+      Wazuh Grafana Dashboard Deployed
+      ═══════════════════════════════════════════════════════════════
+
+      Dashboard location: {{ wazuh_grafana_provisioning_dir }}/wazuh-dashboard.json
+
+      Add these Prometheus scrape targets to your prometheus.yml:
+
+        scrape_configs:
+          - job_name: 'wazuh-indexer'
+            static_configs:
+              - targets: ['{{ groups['wazuh_indexers'] | default(['localhost']) | join(':' ~ wazuh_indexer_metrics_port ~ "', '") }}:{{ wazuh_indexer_metrics_port }}']
+            scheme: https
+            tls_config:
+              insecure_skip_verify: true
+
+          - job_name: 'wazuh-manager'
+            static_configs:
+              - targets: ['{{ groups['wazuh_managers'] | default(['localhost']) | join(':' ~ wazuh_manager_exporter_port ~ "', '") }}:{{ wazuh_manager_exporter_port }}']
+
+      Then restart Grafana to load the dashboard.
+      ═══════════════════════════════════════════════════════════════

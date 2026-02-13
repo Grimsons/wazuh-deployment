@@ -1,0 +1,14 @@
+kernel_module:Kernel module loading
+susp_activity:Suspicious activity
+power_abuse:Privilege abuse
+session:Session events
+logins:Login events
+perm_mod:Permission modification
+access:File access
+delete:File deletion
+network_connect:Network connections
+time_change:Time changes
+identity:Identity/user changes
+system_locale:System locale changes
+MAC_policy:MAC policy changes
+priv_esc:Privilege escalation

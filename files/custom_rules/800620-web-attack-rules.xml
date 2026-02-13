@@ -1,0 +1,93 @@
+<!--
+  Web Attack Detection Rules
+  Rule ID range: 800620-800649
+
+  Detects common web application attacks from HTTP access logs.
+  Uses Wazuh built-in web rules as parents:
+    - 31100 = web access event (generic)
+    - 31101 = web access from known scanner
+    - 31108-31110 = HTTP error codes (400, 403, 404)
+
+  Note: These rules enhance Wazuh's built-in web_rules. The built-in rules
+  already cover basic patterns; these add deeper detection for specific
+  attack types and correlation for volume-based attacks.
+-->
+<group name="web,custom_web_attacks,">
+
+  <!-- ═══════════ SQL Injection ═══════════ -->
+
+  <!-- SQL injection patterns in URL/query string -->
+  <rule id="800620" level="10">
+    <if_sid>31100</if_sid>
+    <url>SELECT\s|UNION\s+SELECT|INSERT\s+INTO|DROP\s+TABLE|UPDATE\s+\S+\s+SET|DELETE\s+FROM|1=1|1'='1|' OR '|" OR "|SLEEP\(|BENCHMARK\(|WAITFOR\s+DELAY|;--|\bOR\b\s+\d+=\d+|CONCAT\(|GROUP_CONCAT\(|LOAD_FILE\(|INTO\s+OUTFILE|INTO\s+DUMPFILE</url>
+    <description>Web: SQL injection attempt from $(srcip) - $(url)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>web_attack,sql_injection,attack,</group>
+  </rule>
+
+  <!-- ═══════════ Path Traversal ═══════════ -->
+
+  <!-- Directory traversal attempt -->
+  <rule id="800621" level="10">
+    <if_sid>31100</if_sid>
+    <url>\.\./|\.\.\\|%2e%2e%2f|%2e%2e/|\.%2e/|%2e\.\.|/etc/passwd|/etc/shadow|/proc/self|/windows/system32|boot\.ini|win\.ini</url>
+    <description>Web: Path traversal attempt from $(srcip) - $(url)</description>
+    <mitre>
+      <id>T1083</id>
+    </mitre>
+    <group>web_attack,path_traversal,attack,</group>
+  </rule>
+
+  <!-- ═══════════ Cross-Site Scripting ═══════════ -->
+
+  <!-- XSS attempt -->
+  <rule id="800622" level="8">
+    <if_sid>31100</if_sid>
+    <url>&lt;script|%3cscript|javascript:|onerror=|onload=|onfocus=|onmouseover=|&lt;img\s|&lt;svg\s|&lt;iframe|%3ciframe|document\.cookie|alert\(|String\.fromCharCode</url>
+    <description>Web: XSS attempt from $(srcip) - $(url)</description>
+    <mitre>
+      <id>T1189</id>
+    </mitre>
+    <group>web_attack,xss,attack,</group>
+  </rule>
+
+  <!-- ═══════════ Command Injection ═══════════ -->
+
+  <!-- OS command injection patterns -->
+  <rule id="800623" level="12">
+    <if_sid>31100</if_sid>
+    <url>;\s*cat\s|;\s*ls\s|;\s*id\s|;\s*whoami|;\s*wget\s|;\s*curl\s|\|\s*cat\s|\|\s*id\s|`.*`|%60.*%60|\$\(.*\)|;\s*nc\s|;\s*ncat\s|;\s*bash\s|;\s*sh\s|;\s*python|;\s*perl|;\s*ruby</url>
+    <description>Web: Command injection attempt from $(srcip) - $(url)</description>
+    <mitre>
+      <id>T1059</id>
+      <id>T1190</id>
+    </mitre>
+    <group>web_attack,command_injection,attack,</group>
+  </rule>
+
+  <!-- ═══════════ Web Scanner Detection ═══════════ -->
+
+  <!-- Known web scanner user-agents -->
+  <rule id="800624" level="8">
+    <if_sid>31100</if_sid>
+    <regex>nikto|sqlmap|dirbuster|gobuster|wfuzz|ffuf|nessus|nuclei|acunetix|burpsuite|w3af|zaproxy|arachni|skipfish|vega|openvas</regex>
+    <description>Web: Scanner detected from $(srcip) - known attack tool user-agent</description>
+    <mitre>
+      <id>T1595</id>
+    </mitre>
+    <group>web_attack,scanner,recon,</group>
+  </rule>
+
+  <!-- ═══════════ Volume-Based Correlation ═══════════ -->
+
+  <!-- Sustained web attack: 10+ attack events from same IP in 2 minutes -->
+  <rule id="800625" level="14" frequency="10" timeframe="120">
+    <if_matched_group>web_attack</if_matched_group>
+    <same_source_ip />
+    <description>Web: Sustained attack - 10+ web attack events from $(srcip) in 2 minutes</description>
+    <group>web_attack,sustained_attack,attack,</group>
+  </rule>
+
+</group>

@@ -153,7 +153,9 @@ EOF
 # Generate Dashboard certificate
 generate_dashboard_cert() {
     print_info "Generating Dashboard certificate..."
-    generate_node_cert "dashboard" "0.0.0.0" ""
+    # Use localhost as default SAN - override with actual dashboard IP from inventory
+    local dashboard_ip="${DASHBOARD_IP:-127.0.0.1}"
+    generate_node_cert "dashboard" "$dashboard_ip" ""
 }
 
 # Main function
@@ -188,7 +190,7 @@ main() {
                 generate_node_cert "indexer-${i}" "$ip" ""
                 ((i++))
             fi
-        done < <(sed -n '/wazuh_indexer_nodes:/,/^[a-z]/p' "$CONFIG_FILE" | head -n -1)
+        done < <(sed -n '/wazuh_indexer_nodes:/,/^[a-z]/p' "$CONFIG_FILE" | sed '$d')
     fi
 
     # Read manager nodes from config and generate certs
@@ -202,7 +204,7 @@ main() {
                 generate_node_cert "manager-${i}" "$ip" ""
                 ((i++))
             fi
-        done < <(sed -n '/wazuh_manager_nodes:/,/^[a-z]/p' "$CONFIG_FILE" | head -n -1)
+        done < <(sed -n '/wazuh_manager_nodes:/,/^[a-z]/p' "$CONFIG_FILE" | sed '$d')
     fi
 
     print_header "Certificate Generation Complete"
