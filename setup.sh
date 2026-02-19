@@ -829,6 +829,19 @@ main() {
         done
     fi
 
+    prompt_yes_no "Enable MS Teams notifications?" "no" "ENABLE_TEAMS"
+
+    if [ "$ENABLE_TEAMS" = "true" ]; then
+        print_info "Create an Incoming Webhook in Teams: Channel → Connectors → Incoming Webhook"
+        print_info "Or use a Power Automate flow URL for the newer Teams experience."
+        prompt_with_default "Teams webhook URL" "" "TEAMS_WEBHOOK_URL"
+        while [ -z "$TEAMS_WEBHOOK_URL" ]; do
+            print_error "Teams webhook URL is required when MS Teams is enabled."
+            prompt_with_default "Teams webhook URL" "" "TEAMS_WEBHOOK_URL"
+        done
+        prompt_with_default "Minimum alert level for Teams (1-15)" "10" "TEAMS_ALERT_LEVEL"
+    fi
+
     # ═══════════════════════════════════════════════════════════════
     # LOAD BALANCER CONFIGURATION
     # ═══════════════════════════════════════════════════════════════
@@ -1408,7 +1421,7 @@ EOF
 
     # Add integrations configuration
     local has_integrations=false
-    if [ "$ENABLE_SLACK" = "true" ] || [ "$ENABLE_VIRUSTOTAL" = "true" ]; then
+    if [ "$ENABLE_SLACK" = "true" ] || [ "$ENABLE_VIRUSTOTAL" = "true" ] || [ "${ENABLE_TEAMS:-false}" = "true" ]; then
         has_integrations=true
         cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << EOF
 
@@ -1427,6 +1440,18 @@ EOF
 EOF
         cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << EOF
     level: ${SLACK_ALERT_LEVEL:-10}
+    alert_format: json
+EOF
+    fi
+
+    if [ "${ENABLE_TEAMS:-false}" = "true" ]; then
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << 'EOF'
+  - name: ms-teams
+    # SECURITY: webhook URL encrypted in group_vars/all/vault.yml
+    hook_url: "{{ vault_teams_webhook_url }}"
+EOF
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << EOF
+    level: ${TEAMS_ALERT_LEVEL:-10}
     alert_format: json
 EOF
     fi
@@ -1692,6 +1717,7 @@ EOF
         VAULT_CLUSTER_KEY="${MANAGER_CLUSTER_KEY:-}" \
         VAULT_SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-}" \
         VAULT_VIRUSTOTAL_API_KEY="${VIRUSTOTAL_API_KEY:-}" \
+        VAULT_TEAMS_WEBHOOK_URL="${TEAMS_WEBHOOK_URL:-}" \
         bash "${SCRIPT_DIR}/scripts/manage-vault.sh" create
         print_success "Encrypted credentials stored in: group_vars/all/vault.yml"
 
@@ -1844,11 +1870,15 @@ EOF
     if [ "$ENABLE_SLACK" = "true" ]; then
         echo "  - Slack Notifications (level >= ${SLACK_ALERT_LEVEL})"
     fi
+    if [ "${ENABLE_TEAMS:-false}" = "true" ]; then
+        echo "  - MS Teams Notifications (level >= ${TEAMS_ALERT_LEVEL:-10})"
+    fi
     if [ "$ENABLE_VIRUSTOTAL" = "true" ]; then
         echo "  - VirusTotal Integration"
     fi
     if [ "$ENABLE_EMAIL_ALERTS" != "true" ] && [ "$ENABLE_SYSLOG_OUTPUT" != "true" ] && \
-       [ "$ENABLE_SLACK" != "true" ] && [ "$ENABLE_VIRUSTOTAL" != "true" ]; then
+       [ "$ENABLE_SLACK" != "true" ] && [ "${ENABLE_TEAMS:-false}" != "true" ] && \
+       [ "$ENABLE_VIRUSTOTAL" != "true" ]; then
         echo "  - None configured (alerts will only appear in Wazuh Dashboard)"
     fi
 

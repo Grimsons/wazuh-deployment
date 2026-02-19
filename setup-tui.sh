@@ -548,6 +548,16 @@ configure_integrations() {
     if gum confirm "Enable Slack notifications?"; then
         ENABLE_SLACK="true"
         SLACK_WEBHOOK_URL=$(gum input --prompt "Slack Webhook URL: ")
+        SLACK_ALERT_LEVEL=$(gum input --prompt "Minimum alert level (1-15): " --value "10")
+    fi
+
+    # MS Teams
+    ENABLE_TEAMS="false"
+    if gum confirm "Enable MS Teams notifications?"; then
+        ENABLE_TEAMS="true"
+        info "Create an Incoming Webhook in Teams: Channel → Connectors → Incoming Webhook"
+        TEAMS_WEBHOOK_URL=$(gum input --prompt "Teams Webhook URL: ")
+        TEAMS_ALERT_LEVEL=$(gum input --prompt "Minimum alert level (1-15): " --value "10")
     fi
 
     # VirusTotal
@@ -1101,7 +1111,8 @@ EOF
 
     # Add integrations configuration
     local has_integrations=false
-    if [[ "${ENABLE_SLACK:-false}" == "true" ]] || [[ "${ENABLE_VIRUSTOTAL:-false}" == "true" ]]; then
+    if [[ "${ENABLE_SLACK:-false}" == "true" ]] || [[ "${ENABLE_TEAMS:-false}" == "true" ]] || \
+       [[ "${ENABLE_VIRUSTOTAL:-false}" == "true" ]]; then
         has_integrations=true
         cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << 'EOF'
 
@@ -1120,6 +1131,18 @@ EOF
 EOF
         cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << EOF
     level: ${SLACK_ALERT_LEVEL:-10}
+    alert_format: json
+EOF
+    fi
+
+    if [[ "${ENABLE_TEAMS:-false}" == "true" ]]; then
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << 'EOF'
+  - name: ms-teams
+    # SECURITY: webhook URL encrypted in group_vars/all/vault.yml
+    hook_url: "{{ vault_teams_webhook_url }}"
+EOF
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << EOF
+    level: ${TEAMS_ALERT_LEVEL:-10}
     alert_format: json
 EOF
     fi
@@ -1225,6 +1248,7 @@ EOF
         VAULT_ANSIBLE_USER="${ANSIBLE_USER:-wazuh-deploy}" \
         VAULT_SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-}" \
         VAULT_VIRUSTOTAL_API_KEY="${VIRUSTOTAL_API_KEY:-}" \
+        VAULT_TEAMS_WEBHOOK_URL="${TEAMS_WEBHOOK_URL:-}" \
         bash "$SCRIPT_DIR/scripts/manage-vault.sh" create 2>/dev/null || true
 
         success "Vault initialized with encrypted credentials"
@@ -1376,11 +1400,15 @@ show_summary() {
     if [[ "${ENABLE_SLACK:-false}" == "true" ]]; then
         echo "  - Slack Notifications (level >= ${SLACK_ALERT_LEVEL:-10})"
     fi
+    if [[ "${ENABLE_TEAMS:-false}" == "true" ]]; then
+        echo "  - MS Teams Notifications (level >= ${TEAMS_ALERT_LEVEL:-10})"
+    fi
     if [[ "${ENABLE_VIRUSTOTAL:-false}" == "true" ]]; then
         echo "  - VirusTotal Integration"
     fi
     if [[ "${ENABLE_EMAIL_ALERTS:-false}" != "true" ]] && [[ "${ENABLE_SYSLOG_OUTPUT:-false}" != "true" ]] && \
-       [[ "${ENABLE_SLACK:-false}" != "true" ]] && [[ "${ENABLE_VIRUSTOTAL:-false}" != "true" ]]; then
+       [[ "${ENABLE_SLACK:-false}" != "true" ]] && [[ "${ENABLE_TEAMS:-false}" != "true" ]] && \
+       [[ "${ENABLE_VIRUSTOTAL:-false}" != "true" ]]; then
         echo "  - None configured (alerts will only appear in Wazuh Dashboard)"
     fi
 
@@ -1647,6 +1675,9 @@ main() {
         ENABLE_EMAIL_ALERTS="false"
         ENABLE_SYSLOG_OUTPUT="false"
         ENABLE_SLACK="false"
+        ENABLE_TEAMS="false"
+        TEAMS_WEBHOOK_URL=""
+        TEAMS_ALERT_LEVEL="10"
         ENABLE_VIRUSTOTAL="false"
         ENABLE_LB="false"
         LB_NODE=""

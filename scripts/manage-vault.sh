@@ -99,6 +99,7 @@ init_vault() {
 #   VAULT_CLUSTER_KEY
 #   VAULT_SLACK_WEBHOOK_URL   (optional - Slack integration)
 #   VAULT_VIRUSTOTAL_API_KEY  (optional - VirusTotal integration)
+#   VAULT_TEAMS_WEBHOOK_URL   (optional - MS Teams integration)
 create_vault() {
     print_header "Creating Encrypted Vault"
 
@@ -119,6 +120,7 @@ create_vault() {
     local cluster_key="${VAULT_CLUSTER_KEY:-}"
     local slack_webhook="${VAULT_SLACK_WEBHOOK_URL:-}"
     local virustotal_api_key="${VAULT_VIRUSTOTAL_API_KEY:-}"
+    local teams_webhook="${VAULT_TEAMS_WEBHOOK_URL:-}"
 
     # Generate passwords if not provided
     if [ -z "$indexer_password" ]; then
@@ -206,6 +208,13 @@ vault_slack_webhook_url: \"${slack_webhook}\"
         vault_content+="
 # VirusTotal integration API key
 vault_virustotal_api_key: \"${virustotal_api_key}\"
+"
+    fi
+
+    if [ -n "$teams_webhook" ]; then
+        vault_content+="
+# MS Teams integration webhook URL
+vault_teams_webhook_url: \"${teams_webhook}\"
 "
     fi
 
