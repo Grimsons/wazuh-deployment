@@ -92,8 +92,14 @@ wazuh_dashboard_nodes:
 # Angie is an nginx-compatible load balancer: https://en.angie.software/angie/
 #
 # When enabled, all Wazuh traffic is routed through a dedicated LB host
-# defined in the [wazuh_lb] inventory group. The LB uses TCP passthrough
-# (no TLS termination) — certificates live only on the Wazuh nodes.
+# defined in the [wazuh_lb] inventory group.
+#
+# Default mode: TCP passthrough — all TLS lives on the Wazuh nodes, no
+# certificates needed on the LB itself.
+#
+# Optional dashboard SSL termination: the LB presents the company cert to
+# browsers and re-encrypts to the dashboard backend with HTTPS (accepting
+# its self-signed cert). Set wazuh_lb_ssl_termination_enabled: true.
 #
 # KEY BENEFIT — Agent stability:
 #   Agents are configured to connect to wazuh_lb_address instead of manager IPs.
@@ -136,6 +142,46 @@ wazuh_lb_enabled: false
 # Options: least_conn (default), round_robin (omit), hash, random
 # least_conn works best for persistent agent connections.
 # wazuh_lb_algorithm: "least_conn"
+
+# ── Dashboard SSL termination (company cert on the LB) ───────────────────
+# When false (default):  dashboard is TCP passthrough — browsers see the
+#                        dashboard's own self-signed cert.
+# When true:             The LB terminates TLS from the browser using your
+#                        company/CA-signed cert, then re-encrypts to the
+#                        dashboard backend accepting its self-signed cert.
+#                        All agent and API traffic stays as TCP passthrough.
+#
+# wazuh_lb_ssl_termination_enabled: true
+#
+# ── Certificate source — choose ONE method ────────────────────────────────
+#
+# Method A — Copy from Ansible controller (recommended for new setups):
+#   Place the full-chain cert and private key in files/certs/lb/ :
+#     files/certs/lb/lb-fullchain.pem   ← cert + any intermediates
+#     files/certs/lb/lb-key.pem         ← private key (add to vault!)
+# wazuh_lb_ssl_cert_src: "files/certs/lb/lb-fullchain.pem"
+# wazuh_lb_ssl_key_src:  "files/certs/lb/lb-key.pem"
+#
+# Method B — Cert already on the LB host (Let's Encrypt, internal PKI):
+#   Leave the _src vars empty; point to the on-host paths instead:
+# wazuh_lb_ssl_cert_path: "/etc/letsencrypt/live/wazuh.example.com/fullchain.pem"
+# wazuh_lb_ssl_key_path:  "/etc/letsencrypt/live/wazuh.example.com/privkey.pem"
+#
+# ── Optional extras ───────────────────────────────────────────────────────
+# HTTP → HTTPS redirect on :80 (recommended):
+# wazuh_lb_ssl_redirect_http: true
+#
+# HSTS (set after verifying everything works correctly):
+# wazuh_lb_ssl_hsts_enabled: true
+# wazuh_lb_ssl_hsts_max_age: 31536000     # 1 year
+#
+# TLS settings (defaults are PCI-DSS / HIPAA compliant):
+# wazuh_lb_ssl_protocols: "TLSv1.2 TLSv1.3"
+# wazuh_lb_ssl_prefer_server_ciphers: true
+#
+# OCSP stapling (for publicly-trusted certs only):
+# wazuh_lb_ssl_ocsp_stapling: false
+# wazuh_lb_ssl_trusted_cert_path: "/etc/angie/certs/ca-chain.pem"
 
 # ═══════════════════════════════════════════════════════════════
 # SSL/TLS Configuration

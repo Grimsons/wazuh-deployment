@@ -1,16 +1,28 @@
 ---
-# Configure Angie as a TCP/SSL-passthrough load balancer for all Wazuh components.
+# Configure Angie as a load balancer for all Wazuh components.
 #
 # Architecture overview:
+#
+#   wazuh_lb_ssl_termination_enabled: false  (default — full TCP passthrough)
+#   ─────────────────────────────────────────────────────────────────────────
 #   Agents / Browsers
 #        │
-#        ▼
-#   Angie LB  (this host)
+#        ▼  (stream block — raw TCP)
+#   Angie LB
 #   ├── :443  ─────────────▶  wazuh_dashboards  :443   (HTTPS passthrough)
-#   ├── :1514 ─────────────▶  wazuh_managers    :1514  (agent events, TCP)
-#   ├── :1515 ─────────────▶  wazuh_managers    :1515  (agent enrollment, TCP)
+#   ├── :1514 ─────────────▶  wazuh_managers    :1514  (agent events)
+#   ├── :1515 ─────────────▶  wazuh_managers    :1515  (agent enrollment)
 #   ├── :55000 ────────────▶  wazuh_managers    :55000 (API, HTTPS passthrough)
-#   └── :9200  ────────────▶  wazuh_indexers    :9200  (optional, HTTPS passthrough)
+#   └── :9200  ────────────▶  wazuh_indexers    :9200  (optional)
+#
+#   wazuh_lb_ssl_termination_enabled: true   (dashboard SSL bridging)
+#   ─────────────────────────────────────────────────────────────────────────
+#   Browser ──[company cert TLS]──▶ LB :443  (http block, Layer 7)
+#                                    └──[HTTPS, accept self-signed]──▶ Dashboard :443
+#   Agents  ──[TCP passthrough]────▶ LB :1514/1515  (stream block)
+#   API     ──[TCP passthrough]────▶ LB :55000       (stream block)
+
+# ── Directories ───────────────────────────────────────────────────────────────
 
 - name: Ensure log directory exists
   ansible.builtin.file:
@@ -20,12 +32,91 @@
     group: adm
     mode: "0750"
 
+- name: Ensure stream.d directory exists
+  ansible.builtin.file:
+    path: /etc/angie/stream.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure http.d directory exists
+  ansible.builtin.file:
+    path: /etc/angie/http.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# ── Company certificate for SSL termination (dashboard only) ──────────────────
+
+- name: Ensure LB cert directory exists
+  ansible.builtin.file:
+    path: "{{ wazuh_lb_ssl_certs_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: wazuh_lb_ssl_termination_enabled | default(false)
+
+- name: Copy company certificate to LB host (from Ansible controller)
+  ansible.builtin.copy:
+    src: "{{ wazuh_lb_ssl_cert_src }}"
+    dest: "{{ wazuh_lb_ssl_cert_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - wazuh_lb_ssl_termination_enabled | default(false)
+    - wazuh_lb_ssl_cert_src | default('') | length > 0
+  notify: Reload angie
+
+- name: Copy company private key to LB host (from Ansible controller)
+  ansible.builtin.copy:
+    src: "{{ wazuh_lb_ssl_key_src }}"
+    dest: "{{ wazuh_lb_ssl_key_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when:
+    - wazuh_lb_ssl_termination_enabled | default(false)
+    - wazuh_lb_ssl_key_src | default('') | length > 0
+  notify: Reload angie
+
+- name: Assert company cert is present on LB host
+  ansible.builtin.stat:
+    path: "{{ wazuh_lb_ssl_cert_path }}"
+  register: lb_cert_stat
+  when: wazuh_lb_ssl_termination_enabled | default(false)
+
+- name: Fail if company cert is missing from LB host
+  ansible.builtin.fail:
+    msg: |
+      ══════════════════════════════════════════════════════════════
+      wazuh_lb_ssl_termination_enabled is true but the certificate
+      is not found at {{ wazuh_lb_ssl_cert_path }} on {{ inventory_hostname }}.
+
+      Provide the certificate via ONE of:
+
+      A) Copy from Ansible controller — set in group_vars/all.yml:
+           wazuh_lb_ssl_cert_src: "files/certs/lb/lb-fullchain.pem"
+           wazuh_lb_ssl_key_src:  "files/certs/lb/lb-key.pem"
+
+      B) Place cert on the LB host manually first, then set:
+           wazuh_lb_ssl_cert_path: "/path/to/fullchain.pem"
+           wazuh_lb_ssl_key_path:  "/path/to/privkey.pem"
+           (e.g. /etc/letsencrypt/live/<domain>/fullchain.pem)
+      ══════════════════════════════════════════════════════════════
+  when:
+    - wazuh_lb_ssl_termination_enabled | default(false)
+    - not (lb_cert_stat.stat.exists | default(false))
+
+# ── Main configuration ────────────────────────────────────────────────────────
+
 - name: Remove default Angie HTTP site (avoids port conflicts)
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: /etc/angie/http.d/default.conf
     state: absent
-  loop:
-    - /etc/angie/http.d/default.conf
   notify: Reload angie
 
 - name: Deploy main angie.conf
@@ -38,25 +129,35 @@
     validate: "angie -t -c %s"
   notify: Reload angie
 
-- name: Ensure stream.d directory exists
-  ansible.builtin.file:
-    path: /etc/angie/stream.d
-    state: directory
-    owner: root
-    group: root
-    mode: "0755"
-
-- name: Deploy Wazuh stream load-balancer config
+- name: Deploy Wazuh stream (TCP) load-balancer config
   ansible.builtin.template:
     src: stream-wazuh.conf.j2
     dest: /etc/angie/stream.d/wazuh.conf
     owner: root
     group: root
     mode: "0644"
-    validate: "angie -t -c /etc/angie/angie.conf"
   notify: Reload angie
 
-- name: Validate final Angie configuration
+- name: Deploy dashboard HTTPS config with SSL termination
+  ansible.builtin.template:
+    src: http-dashboard.conf.j2
+    dest: /etc/angie/http.d/wazuh-dashboard.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: wazuh_lb_ssl_termination_enabled | default(false)
+  notify: Reload angie
+
+- name: Remove dashboard HTTPS config when SSL termination is disabled
+  ansible.builtin.file:
+    path: /etc/angie/http.d/wazuh-dashboard.conf
+    state: absent
+  when: not (wazuh_lb_ssl_termination_enabled | default(false))
+  notify: Reload angie
+
+# ── Final validation ──────────────────────────────────────────────────────────
+
+- name: Validate full Angie configuration
   ansible.builtin.command: angie -t
   register: angie_config_test
   changed_when: false

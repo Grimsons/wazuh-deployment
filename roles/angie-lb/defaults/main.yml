@@ -4,9 +4,13 @@
 # Angie is an nginx-compatible web server and load balancer maintained by
 # the original nginx developers: https://en.angie.software/angie/
 #
-# The LB uses TCP passthrough (stream module) for all Wazuh traffic.
-# No TLS certificates are needed on the LB itself - TLS is end-to-end
-# between clients and the actual Wazuh nodes.
+# Default mode: TCP passthrough for all Wazuh traffic (no certs on the LB).
+#
+# Optional: SSL termination for the Dashboard only.
+#   - Browser → LB :443  uses the company/CA-signed certificate
+#   - LB → Dashboard     re-encrypts with HTTPS, accepting the dashboard's
+#                        self-signed cert (proxy_ssl_verify off)
+#   - All other ports (1514/1515/55000/9200) stay as TCP passthrough.
 
 # ═══════════════════════════════════════════════════════════════
 # Load Balancer Toggle
@@ -92,6 +96,72 @@ wazuh_lb_log_dir: "/var/log/angie"
 wazuh_lb_access_log: "{{ wazuh_lb_log_dir }}/wazuh-access.log"
 wazuh_lb_error_log: "{{ wazuh_lb_log_dir }}/wazuh-error.log"
 wazuh_lb_error_log_level: "warn"   # debug, info, notice, warn, error, crit
+
+# ═══════════════════════════════════════════════════════════════
+# Dashboard SSL Termination (company cert on the LB)
+# ═══════════════════════════════════════════════════════════════
+#
+# When false (default): dashboard traffic is TCP passthrough (stream block).
+# When true:            dashboard moves to the HTTP block so Angie can:
+#                         • terminate TLS from browsers using the company cert
+#                         • re-encrypt to the dashboard backend (accepting its
+#                           self-signed cert via proxy_ssl_verify off)
+#
+# Cert supply — choose ONE:
+#   A) Copy from Ansible controller: set wazuh_lb_ssl_cert_src and wazuh_lb_ssl_key_src
+#      (paths on the controller; Ansible copies them to the LB host)
+#   B) Already on the LB host:       leave _src empty, set wazuh_lb_ssl_cert_path
+#      and wazuh_lb_ssl_key_path to wherever the cert already lives
+#      (e.g. /etc/letsencrypt/live/<domain>/fullchain.pem)
+
+wazuh_lb_ssl_termination_enabled: false
+
+# ── Certificate source on the Ansible controller (option A) ──
+# Leave empty to use certs that are already on the LB host (option B).
+wazuh_lb_ssl_cert_src: ""     # e.g. "files/certs/lb/lb-fullchain.pem"
+wazuh_lb_ssl_key_src: ""      # e.g. "files/certs/lb/lb-key.pem"
+
+# ── Certificate destination on the LB host ────────────────────
+wazuh_lb_ssl_certs_dir: "/etc/angie/certs"
+wazuh_lb_ssl_cert_path: "{{ wazuh_lb_ssl_certs_dir }}/lb-fullchain.pem"
+wazuh_lb_ssl_key_path: "{{ wazuh_lb_ssl_certs_dir }}/lb-key.pem"
+
+# ── TLS policy for the browser → LB connection ────────────────
+wazuh_lb_ssl_protocols: "TLSv1.2 TLSv1.3"
+# PCI-DSS/HIPAA-compatible cipher suite
+wazuh_lb_ssl_ciphers: >-
+  TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256:
+  ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:
+  ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305
+
+# Prefer server cipher order (protects against BEAST/POODLE)
+wazuh_lb_ssl_prefer_server_ciphers: true
+
+# TLS session cache (improves performance for repeat connections)
+wazuh_lb_ssl_session_cache: "shared:SSL:10m"
+wazuh_lb_ssl_session_timeout: "1d"
+
+# OCSP stapling — set true and provide a trusted CA cert when using a
+# publicly-trusted certificate. Leave false for internal/private CAs.
+wazuh_lb_ssl_ocsp_stapling: false
+# wazuh_lb_ssl_trusted_cert_path: "/etc/angie/certs/ca-chain.pem"
+
+# ── LB → Dashboard backend re-encryption ─────────────────────
+# The dashboard's self-signed cert cannot be verified against a public CA.
+# Set to true only if you deploy a proper CA chain to the LB and configure
+# wazuh_lb_ssl_backend_trusted_cert below.
+wazuh_lb_backend_ssl_verify: false
+# wazuh_lb_ssl_backend_trusted_cert: "{{ wazuh_lb_ssl_certs_dir }}/wazuh-root-ca.pem"
+
+# ── HTTP → HTTPS redirect ─────────────────────────────────────
+# Listen on :80 and redirect to :443 (recommended for browser access).
+wazuh_lb_ssl_redirect_http: true
+wazuh_lb_http_port: 80
+
+# ── HTTP security headers injected by the LB ─────────────────
+# These supplement the headers the dashboard already sets.
+wazuh_lb_ssl_hsts_enabled: true
+wazuh_lb_ssl_hsts_max_age: 31536000       # 1 year
 
 # ═══════════════════════════════════════════════════════════════
 # Angie Worker Settings
