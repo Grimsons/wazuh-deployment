@@ -830,6 +830,61 @@ main() {
     fi
 
     # ═══════════════════════════════════════════════════════════════
+    # LOAD BALANCER CONFIGURATION
+    # ═══════════════════════════════════════════════════════════════
+    print_section "Load Balancer Configuration"
+
+    print_info "Angie LB distributes dashboard/agent/API traffic across multiple nodes."
+    print_info "Enable this for HA deployments or to front the dashboard with a company cert."
+    echo
+
+    prompt_yes_no "Enable Angie load balancer?" "no" "ENABLE_LB"
+
+    LB_NODE=""
+    LB_ADDRESS=""
+    LB_SSL_TERMINATION="false"
+    LB_SSL_CERT_SRC=""
+    LB_SSL_KEY_SRC=""
+    LB_SSL_CERT_PATH="/etc/angie/certs/lb-fullchain.pem"
+    LB_SSL_KEY_PATH="/etc/angie/certs/lb-key.pem"
+
+    if [ "$ENABLE_LB" = "true" ]; then
+        prompt_with_default "Load balancer host IP/hostname" "" "LB_NODE"
+        while [ -z "$LB_NODE" ]; do
+            print_error "Load balancer host is required when LB is enabled."
+            prompt_with_default "Load balancer host IP/hostname" "" "LB_NODE"
+        done
+        LB_ADDRESS="$LB_NODE"
+
+        echo
+        print_info "SSL Termination: company cert terminates on the LB (HTTPS to browsers),"
+        print_info "LB re-encrypts to the dashboard backend accepting its self-signed cert."
+        prompt_yes_no "Enable SSL termination on LB?" "no" "LB_SSL_TERMINATION"
+
+        if [ "$LB_SSL_TERMINATION" = "true" ]; then
+            echo
+            print_info "Certificate supply — choose ONE method:"
+            echo -e "  ${YELLOW}A)${NC} Copy cert/key from Ansible controller to the LB host"
+            echo -e "  ${YELLOW}B)${NC} Cert/key already present on the LB host (Let's Encrypt, etc.)"
+            echo
+            read -erp "$(echo -e "${CYAN}Select method ${NC}[${YELLOW}A${NC}]: ")" LB_CERT_METHOD
+            LB_CERT_METHOD="${LB_CERT_METHOD:-A}"
+
+            if [[ "${LB_CERT_METHOD,,}" = "a" ]]; then
+                prompt_with_default "Fullchain PEM path on controller" "files/certs/lb/lb-fullchain.pem" "LB_SSL_CERT_SRC"
+                prompt_with_default "Key PEM path on controller" "files/certs/lb/lb-key.pem" "LB_SSL_KEY_SRC"
+                LB_SSL_CERT_PATH="/etc/angie/certs/lb-fullchain.pem"
+                LB_SSL_KEY_PATH="/etc/angie/certs/lb-key.pem"
+            else
+                LB_SSL_CERT_SRC=""
+                LB_SSL_KEY_SRC=""
+                prompt_with_default "Fullchain PEM path on LB host" "/etc/angie/certs/lb-fullchain.pem" "LB_SSL_CERT_PATH"
+                prompt_with_default "Key PEM path on LB host" "/etc/angie/certs/lb-key.pem" "LB_SSL_KEY_PATH"
+            fi
+        fi
+    fi
+
+    # ═══════════════════════════════════════════════════════════════
     # BACKUP & MAINTENANCE
     # ═══════════════════════════════════════════════════════════════
     print_section "Backup & Maintenance"
@@ -972,6 +1027,15 @@ EOF
         done
     fi
 
+    if [ "$ENABLE_LB" = "true" ] && [ -n "$LB_NODE" ]; then
+        cat >> "$SCRIPT_DIR/inventory/hosts.yml" << EOF
+
+    wazuh_lb:
+      hosts:
+        ${LB_NODE}:
+EOF
+    fi
+
     # Add localhost
     cat >> "$SCRIPT_DIR/inventory/hosts.yml" << 'EOF'
 
@@ -1087,6 +1151,21 @@ EOF
                 echo "          ansible_ssh_pass: \"{{ vault_ssh_pass_${node//./_} }}\"" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
             fi
         done
+    fi
+
+    if [ "$ENABLE_LB" = "true" ] && [ -n "$LB_NODE" ]; then
+        cat >> "$SCRIPT_DIR/inventory/bootstrap.yml" << EOF
+
+    wazuh_lb:
+      hosts:
+        ${LB_NODE}:
+EOF
+        if [ -n "${HOST_SSH_USER[$LB_NODE]:-}" ]; then
+            echo "          ansible_user: \"{{ vault_ssh_user_${LB_NODE//./_} }}\"" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+        fi
+        if [ -n "${HOST_SSH_PASS[$LB_NODE]:-}" ]; then
+            echo "          ansible_ssh_pass: \"{{ vault_ssh_pass_${LB_NODE//./_} }}\"" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+        fi
     fi
 
     # Add localhost
@@ -1341,18 +1420,24 @@ EOF
     fi
 
     if [ "$ENABLE_SLACK" = "true" ]; then
-        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << EOF
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << 'EOF'
   - name: slack
-    hook_url: "${SLACK_WEBHOOK_URL}"
+    # SECURITY: webhook URL encrypted in group_vars/all/vault.yml
+    hook_url: "{{ vault_slack_webhook_url }}"
+EOF
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << EOF
     level: ${SLACK_ALERT_LEVEL:-10}
     alert_format: json
 EOF
     fi
 
     if [ "$ENABLE_VIRUSTOTAL" = "true" ]; then
-        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << EOF
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << 'EOF'
   - name: virustotal
-    api_key: "${VIRUSTOTAL_API_KEY}"
+    # SECURITY: API key encrypted in group_vars/all/vault.yml
+    api_key: "{{ vault_virustotal_api_key }}"
+EOF
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << 'EOF'
     group: "syscheck"
     alert_format: json
 EOF
@@ -1477,6 +1562,38 @@ wazuh_log_rotation_max_size: "100M"
 wazuh_log_rotation_compress: true
 EOF
 
+    # Add LB configuration block
+    if [ "$ENABLE_LB" = "true" ]; then
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << EOF
+
+# ═══════════════════════════════════════════════════════════════
+# Load Balancer (Angie)
+# ═══════════════════════════════════════════════════════════════
+wazuh_lb_enabled: true
+wazuh_lb_address: "${LB_ADDRESS}"
+wazuh_lb_ssl_termination_enabled: ${LB_SSL_TERMINATION}
+EOF
+        if [ "$LB_SSL_TERMINATION" = "true" ]; then
+            cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << EOF
+wazuh_lb_ssl_cert_src: "${LB_SSL_CERT_SRC}"
+wazuh_lb_ssl_key_src: "${LB_SSL_KEY_SRC}"
+wazuh_lb_ssl_cert_path: "${LB_SSL_CERT_PATH}"
+wazuh_lb_ssl_key_path: "${LB_SSL_KEY_PATH}"
+EOF
+        fi
+    else
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << 'EOF'
+
+# ═══════════════════════════════════════════════════════════════
+# Load Balancer (Angie) - disabled
+# ═══════════════════════════════════════════════════════════════
+# Set wazuh_lb_enabled: true and configure wazuh_lb_address to enable
+wazuh_lb_enabled: false
+# wazuh_lb_address: "192.168.1.5"
+# wazuh_lb_ssl_termination_enabled: false
+EOF
+    fi
+
     print_success "Group variables created: group_vars/all/main.yml"
 
     # Create ansible.cfg
@@ -1573,6 +1690,8 @@ EOF
         VAULT_BECOME_PASSWORD="${BECOME_PASS:-}" \
         VAULT_HOST_CREDENTIALS="$HOST_CREDENTIALS_STRING" \
         VAULT_CLUSTER_KEY="${MANAGER_CLUSTER_KEY:-}" \
+        VAULT_SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-}" \
+        VAULT_VIRUSTOTAL_API_KEY="${VIRUSTOTAL_API_KEY:-}" \
         bash "${SCRIPT_DIR}/scripts/manage-vault.sh" create
         print_success "Encrypted credentials stored in: group_vars/all/vault.yml"
 
@@ -1662,6 +1781,18 @@ EOF
         for node in "${AGENT_NODES_ARRAY[@]}"; do
             echo "  - $node"
         done
+    fi
+
+    if [ "$ENABLE_LB" = "true" ]; then
+        echo
+        echo -e "${GREEN}Load Balancer (Angie):${NC}"
+        echo "  - Host: ${LB_NODE}"
+        if [ "$LB_SSL_TERMINATION" = "true" ]; then
+            echo "  - Dashboard: SSL termination (company cert on LB)"
+        else
+            echo "  - Dashboard: TCP passthrough (TLS end-to-end)"
+        fi
+        echo "  - Agent/API ports: TCP passthrough"
     fi
 
     echo

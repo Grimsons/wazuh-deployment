@@ -97,6 +97,8 @@ init_vault() {
 #   VAULT_ANSIBLE_USER, VAULT_CONNECTION_PASSWORD, VAULT_BECOME_PASSWORD
 #   VAULT_HOST_CREDENTIALS (format: "host1:user1:pass1,host2:user2:pass2")
 #   VAULT_CLUSTER_KEY
+#   VAULT_SLACK_WEBHOOK_URL   (optional - Slack integration)
+#   VAULT_VIRUSTOTAL_API_KEY  (optional - VirusTotal integration)
 create_vault() {
     print_header "Creating Encrypted Vault"
 
@@ -115,6 +117,8 @@ create_vault() {
     local become_password="${VAULT_BECOME_PASSWORD:-}"
     local ansible_user="${VAULT_ANSIBLE_USER:-wazuh-deploy}"
     local cluster_key="${VAULT_CLUSTER_KEY:-}"
+    local slack_webhook="${VAULT_SLACK_WEBHOOK_URL:-}"
+    local virustotal_api_key="${VAULT_VIRUSTOTAL_API_KEY:-}"
 
     # Generate passwords if not provided
     if [ -z "$indexer_password" ]; then
@@ -189,6 +193,21 @@ vault_wazuh_agent_enrollment_password: \"${enrollment_password}\"
 # Manager cluster key (for multi-node deployments)
 vault_wazuh_manager_cluster_key: \"${cluster_key}\"
 "
+
+    # Append optional integration secrets only when provided
+    if [ -n "$slack_webhook" ]; then
+        vault_content+="
+# Slack integration webhook URL
+vault_slack_webhook_url: \"${slack_webhook}\"
+"
+    fi
+
+    if [ -n "$virustotal_api_key" ]; then
+        vault_content+="
+# VirusTotal integration API key
+vault_virustotal_api_key: \"${virustotal_api_key}\"
+"
+    fi
 
     # Write and encrypt
     echo "$vault_content" > "${VAULT_FILE}.tmp"

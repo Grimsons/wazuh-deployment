@@ -79,8 +79,8 @@ generate_root_ca() {
 generate_admin_cert() {
     print_info "Generating Admin certificate..."
 
-    # Generate private key
-    openssl genrsa -out "${CERTS_DIR}/admin-key.pem" 2048 2>/dev/null
+    # 4096-bit key; admin cert validity 2 years (730 days)
+    openssl genrsa -out "${CERTS_DIR}/admin-key.pem" 4096 2>/dev/null
 
     # Generate CSR
     openssl req -new -sha256 \
@@ -89,8 +89,8 @@ generate_admin_cert() {
         -subj "/C=US/ST=California/L=California/O=Wazuh/OU=Wazuh/CN=admin" \
         2>/dev/null
 
-    # Generate certificate
-    openssl x509 -req -sha256 -days 3650 \
+    # Generate certificate — 730 days (2 years)
+    openssl x509 -req -sha256 -days 730 \
         -in "${CERTS_DIR}/admin.csr" \
         -CA "${CERTS_DIR}/root-ca.pem" \
         -CAkey "${CERTS_DIR}/root-ca-key.pem" \
@@ -126,8 +126,8 @@ IP.2 = 127.0.0.1
 ${san_entries}
 EOF
 
-    # Generate private key
-    openssl genrsa -out "${CERTS_DIR}/${node_name}-key.pem" 2048 2>/dev/null
+    # 4096-bit key; node cert validity 825 days (~2.3 years, CA/B Forum best practice)
+    openssl genrsa -out "${CERTS_DIR}/${node_name}-key.pem" 4096 2>/dev/null
 
     # Generate CSR
     openssl req -new -sha256 \
@@ -136,8 +136,8 @@ EOF
         -subj "/C=US/ST=California/L=California/O=Wazuh/OU=Wazuh/CN=${node_name}" \
         2>/dev/null
 
-    # Generate certificate with SAN
-    openssl x509 -req -sha256 -days 3650 \
+    # Generate certificate with SAN — 825 days
+    openssl x509 -req -sha256 -days 825 \
         -in "${CERTS_DIR}/${node_name}.csr" \
         -CA "${CERTS_DIR}/root-ca.pem" \
         -CAkey "${CERTS_DIR}/root-ca-key.pem" \

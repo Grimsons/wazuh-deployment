@@ -584,6 +584,56 @@ configure_backup() {
     success "Backup configured: $BACKUP_SCHEDULE"
 }
 
+configure_load_balancer() {
+    section "Load Balancer Configuration"
+
+    info "Angie LB distributes dashboard/agent/API traffic across multiple nodes."
+    info "Enable for HA deployments or to front the dashboard with a company cert."
+    echo ""
+
+    ENABLE_LB="false"
+    LB_NODE=""
+    LB_ADDRESS=""
+    LB_SSL_TERMINATION="false"
+    LB_SSL_CERT_SRC=""
+    LB_SSL_KEY_SRC=""
+    LB_SSL_CERT_PATH="/etc/angie/certs/lb-fullchain.pem"
+    LB_SSL_KEY_PATH="/etc/angie/certs/lb-key.pem"
+
+    if gum confirm "Enable Angie load balancer?"; then
+        ENABLE_LB="true"
+        LB_NODE=$(gum input --prompt "Load balancer host IP/hostname: " --placeholder "192.168.1.5")
+        LB_ADDRESS="$LB_NODE"
+
+        echo ""
+        info "SSL Termination: company cert on LB (browsers see it), LB re-encrypts to dashboard."
+        if gum confirm "Enable SSL termination on LB?"; then
+            LB_SSL_TERMINATION="true"
+            local lb_cert_method
+            lb_cert_method=$(gum choose \
+                --header "Certificate Supply Method" \
+                "A  │ Copy cert/key from Ansible controller to LB" \
+                "B  │ Cert/key already on LB host (Let's Encrypt, etc.)")
+            lb_cert_method=$(echo "$lb_cert_method" | cut -d'│' -f1 | xargs)
+
+            if [[ "${lb_cert_method,,}" == "a"* ]]; then
+                LB_SSL_CERT_SRC=$(gum input --prompt "Fullchain PEM on controller: " --value "files/certs/lb/lb-fullchain.pem")
+                LB_SSL_KEY_SRC=$(gum input --prompt "Key PEM on controller: " --value "files/certs/lb/lb-key.pem")
+                LB_SSL_CERT_PATH="/etc/angie/certs/lb-fullchain.pem"
+                LB_SSL_KEY_PATH="/etc/angie/certs/lb-key.pem"
+            else
+                LB_SSL_CERT_SRC=""
+                LB_SSL_KEY_SRC=""
+                LB_SSL_CERT_PATH=$(gum input --prompt "Fullchain PEM on LB host: " --value "/etc/angie/certs/lb-fullchain.pem")
+                LB_SSL_KEY_PATH=$(gum input --prompt "Key PEM on LB host: " --value "/etc/angie/certs/lb-key.pem")
+            fi
+        fi
+        success "Load balancer configured: ${LB_NODE}"
+    else
+        info "Load balancer skipped"
+    fi
+}
+
 # ═══════════════════════════════════════════════════════════════
 # Generate Configuration
 # ═══════════════════════════════════════════════════════════════
@@ -695,8 +745,18 @@ EOF
         done
     fi
 
+    if [[ "${ENABLE_LB:-false}" == "true" ]] && [[ -n "${LB_NODE:-}" ]]; then
+        cat >> "$SCRIPT_DIR/inventory/hosts.yml" << EOF
+
+    wazuh_lb:
+      hosts:
+        ${LB_NODE}:
+EOF
+    fi
+
     cat >> "$SCRIPT_DIR/inventory/hosts.yml" << 'EOF'
 
+    # Local deployment host
     local:
       hosts:
         localhost:
@@ -744,7 +804,7 @@ EOF
 
         # Add SSH password if provided
         if [[ -n "${DEFAULT_SSH_PASS:-}" ]]; then
-            echo "    ansible_ssh_pass: \"{{ vault_bootstrap_ssh_pass }}\"" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
+            echo "    ansible_ssh_pass: \"{{ vault_ansible_connection_password }}\"" >> "$SCRIPT_DIR/inventory/bootstrap.yml"
         fi
 
         cat >> "$SCRIPT_DIR/inventory/bootstrap.yml" << EOF
@@ -801,8 +861,18 @@ EOF
             done
         fi
 
+        if [[ "${ENABLE_LB:-false}" == "true" ]] && [[ -n "${LB_NODE:-}" ]]; then
+            cat >> "$SCRIPT_DIR/inventory/bootstrap.yml" << EOF
+
+    wazuh_lb:
+      hosts:
+        ${LB_NODE}:
+EOF
+        fi
+
         cat >> "$SCRIPT_DIR/inventory/bootstrap.yml" << 'EOF'
 
+    # Local deployment host
     local:
       hosts:
         localhost:
@@ -903,6 +973,9 @@ EOF
 # ═══════════════════════════════════════════════════════════════
 wazuh_use_external_ca: ${EXTERNAL_CA:-false}
 wazuh_certs_path: "files/certs"
+wazuh_indexer_certs_path: /etc/wazuh-indexer/certs
+wazuh_manager_certs_path: /var/ossec/etc/certs
+wazuh_dashboard_certs_path: /etc/wazuh-dashboard/certs
 wazuh_ssl_verify_certificates: ${EXTERNAL_CA:-false}
 
 # ═══════════════════════════════════════════════════════════════
@@ -930,6 +1003,8 @@ wazuh_retention_cold_after_days: 30
 wazuh_close_cold_indices: true
 wazuh_monitoring_retention_days: 7
 wazuh_statistics_retention_days: 7
+wazuh_alerts_primary_shards: 1
+wazuh_alerts_replica_shards: 0
 
 # ═══════════════════════════════════════════════════════════════
 # Health Check & Timeout Settings
@@ -949,15 +1024,20 @@ wazuh_dashboard_health_check_delay: 10
 # ═══════════════════════════════════════════════════════════════
 wazuh_configure_firewall: true
 wazuh_configure_selinux: true
+wazuh_repo_gpg_key: "https://packages.wazuh.com/key/GPG-KEY-WAZUH"
+wazuh_repo_url_apt: "https://packages.wazuh.com/4.x/apt/"
+wazuh_repo_url_yum: "https://packages.wazuh.com/4.x/yum/"
 
 # ═══════════════════════════════════════════════════════════════
 # Backup & Maintenance
 # ═══════════════════════════════════════════════════════════════
 wazuh_backup_schedule: "${BACKUP_SCHEDULE:-daily}"
 wazuh_backup_hour: ${BACKUP_HOUR:-2}
+wazuh_backup_day: ${BACKUP_DAY:-0}
 wazuh_backup_retention: ${BACKUP_RETENTION:-7}
 wazuh_log_cleanup_enabled: ${ENABLE_LOG_CLEANUP:-true}
 wazuh_log_retention_days: ${LOG_RETENTION_DAYS:-30}
+wazuh_log_cleanup_schedule: "daily"
 
 # ═══════════════════════════════════════════════════════════════
 # Bootstrap Settings (used by --tags bootstrap)
@@ -968,7 +1048,131 @@ wazuh_bootstrap_user: "${INITIAL_SSH_USER:-root}"
 # Post-Deployment Security
 # ═══════════════════════════════════════════════════════════════
 wazuh_lockdown_deploy_user: true
+
+# ═══════════════════════════════════════════════════════════════
+# Log Rotation
+# ═══════════════════════════════════════════════════════════════
+wazuh_log_rotation_enabled: true
+wazuh_log_rotation_keep_days: 30
+wazuh_log_rotation_max_size: "100M"
+wazuh_log_rotation_compress: true
 EOF
+
+    # Add email alerts configuration if enabled
+    if [[ "${ENABLE_EMAIL_ALERTS:-false}" == "true" ]]; then
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << EOF
+
+# ═══════════════════════════════════════════════════════════════
+# Email Alerts Configuration
+# ═══════════════════════════════════════════════════════════════
+wazuh_email_notification_enabled: true
+wazuh_email_smtp_server: "${EMAIL_SMTP_SERVER}"
+wazuh_email_from: "${EMAIL_FROM}"
+wazuh_email_to: "${EMAIL_TO}"
+wazuh_email_alert_level: ${EMAIL_ALERT_LEVEL:-12}
+EOF
+    else
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << 'EOF'
+
+# Email alerts disabled
+wazuh_email_notification_enabled: false
+EOF
+    fi
+
+    # Add syslog output configuration if enabled
+    if [[ "${ENABLE_SYSLOG_OUTPUT:-false}" == "true" ]]; then
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << EOF
+
+# ═══════════════════════════════════════════════════════════════
+# Syslog Output Configuration
+# ═══════════════════════════════════════════════════════════════
+wazuh_syslog_output_enabled: true
+wazuh_syslog_output_server: "${SYSLOG_SERVER}"
+wazuh_syslog_output_port: ${SYSLOG_PORT:-514}
+wazuh_syslog_output_format: "${SYSLOG_FORMAT:-json}"
+EOF
+    else
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << 'EOF'
+
+# Syslog output disabled
+wazuh_syslog_output_enabled: false
+EOF
+    fi
+
+    # Add integrations configuration
+    local has_integrations=false
+    if [[ "${ENABLE_SLACK:-false}" == "true" ]] || [[ "${ENABLE_VIRUSTOTAL:-false}" == "true" ]]; then
+        has_integrations=true
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << 'EOF'
+
+# ═══════════════════════════════════════════════════════════════
+# Integrations
+# ═══════════════════════════════════════════════════════════════
+wazuh_integrations:
+EOF
+    fi
+
+    if [[ "${ENABLE_SLACK:-false}" == "true" ]]; then
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << 'EOF'
+  - name: slack
+    # SECURITY: webhook URL encrypted in group_vars/all/vault.yml
+    hook_url: "{{ vault_slack_webhook_url }}"
+EOF
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << EOF
+    level: ${SLACK_ALERT_LEVEL:-10}
+    alert_format: json
+EOF
+    fi
+
+    if [[ "${ENABLE_VIRUSTOTAL:-false}" == "true" ]]; then
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << 'EOF'
+  - name: virustotal
+    # SECURITY: API key encrypted in group_vars/all/vault.yml
+    api_key: "{{ vault_virustotal_api_key }}"
+    group: "syscheck"
+    alert_format: json
+EOF
+    fi
+
+    if [[ "$has_integrations" == "false" ]]; then
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << 'EOF'
+
+# No integrations configured
+wazuh_integrations: []
+EOF
+    fi
+
+    # Add LB configuration block
+    if [[ "${ENABLE_LB:-false}" == "true" ]]; then
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << EOF
+
+# ═══════════════════════════════════════════════════════════════
+# Load Balancer (Angie)
+# ═══════════════════════════════════════════════════════════════
+wazuh_lb_enabled: true
+wazuh_lb_address: "${LB_ADDRESS}"
+wazuh_lb_ssl_termination_enabled: ${LB_SSL_TERMINATION}
+EOF
+        if [[ "${LB_SSL_TERMINATION:-false}" == "true" ]]; then
+            cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << EOF
+wazuh_lb_ssl_cert_src: "${LB_SSL_CERT_SRC}"
+wazuh_lb_ssl_key_src: "${LB_SSL_KEY_SRC}"
+wazuh_lb_ssl_cert_path: "${LB_SSL_CERT_PATH}"
+wazuh_lb_ssl_key_path: "${LB_SSL_KEY_PATH}"
+EOF
+        fi
+    else
+        cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << 'EOF'
+
+# ═══════════════════════════════════════════════════════════════
+# Load Balancer (Angie) - disabled
+# ═══════════════════════════════════════════════════════════════
+# Set wazuh_lb_enabled: true and configure wazuh_lb_address to enable
+wazuh_lb_enabled: false
+# wazuh_lb_address: "192.168.1.5"
+# wazuh_lb_ssl_termination_enabled: false
+EOF
+    fi
 
     success "Created: group_vars/all/main.yml"
 
@@ -1011,16 +1215,57 @@ EOF
             GENERATED_API_PASSWORD=$(generate_password 24)
         fi
 
+        GENERATED_ENROLLMENT_PASSWORD=$(generate_password 24)
+
         VAULT_INDEXER_PASSWORD="$GENERATED_INDEXER_PASSWORD" \
         VAULT_API_PASSWORD="$GENERATED_API_PASSWORD" \
+        VAULT_ENROLLMENT_PASSWORD="$GENERATED_ENROLLMENT_PASSWORD" \
         VAULT_CLUSTER_KEY="${MANAGER_CLUSTER_KEY:-}" \
         VAULT_CONNECTION_PASSWORD="${DEFAULT_SSH_PASS:-}" \
         VAULT_ANSIBLE_USER="${ANSIBLE_USER:-wazuh-deploy}" \
+        VAULT_SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-}" \
+        VAULT_VIRUSTOTAL_API_KEY="${VIRUSTOTAL_API_KEY:-}" \
         bash "$SCRIPT_DIR/scripts/manage-vault.sh" create 2>/dev/null || true
 
         success "Vault initialized with encrypted credentials"
     else
         warn "Vault management script not found - credentials not encrypted"
+    fi
+
+    # ════════════════════════════════════════════════════════════
+    # Certificate Generation
+    # ════════════════════════════════════════════════════════════
+    section "SSL/TLS Certificates"
+
+    if [[ "${EXTERNAL_CA:-false}" == "true" ]]; then
+        info "External CA mode enabled"
+        mkdir -p "${SCRIPT_DIR}/files/certs"
+
+        if [[ -f "${SCRIPT_DIR}/files/certs/root-ca.pem" ]]; then
+            success "Found root-ca.pem"
+        else
+            warn "External CA certificates not found in files/certs/"
+            info "Please place your certificates before running deployment"
+            info "Required: root-ca.pem, admin.pem, admin-key.pem, and node certificates"
+        fi
+    else
+        if [[ -f "${SCRIPT_DIR}/generate-certs.sh" ]]; then
+            if [[ -f "${SCRIPT_DIR}/files/certs/root-ca.pem" ]]; then
+                warn "Certificates already exist in files/certs/"
+                if gum confirm "Regenerate certificates?"; then
+                    gum spin --spinner dot --title "Generating certificates..." -- bash "${SCRIPT_DIR}/generate-certs.sh" 2>/dev/null
+                    success "Certificates regenerated"
+                else
+                    info "Using existing certificates"
+                fi
+            else
+                gum spin --spinner dot --title "Generating self-signed certificates..." -- bash "${SCRIPT_DIR}/generate-certs.sh" 2>/dev/null
+                success "Certificates generated in files/certs/"
+            fi
+        else
+            warn "Certificate generation script not found: generate-certs.sh"
+            info "You will need to generate certificates manually"
+        fi
     fi
 
     success "Configuration generation complete!"
@@ -1029,92 +1274,284 @@ EOF
 # ═══════════════════════════════════════════════════════════════
 # Summary
 # ═══════════════════════════════════════════════════════════════
+
+# Colors for summary output (matching setup.sh)
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
 show_summary() {
-    header "Configuration Complete!"
+    # ─── Configuration Summary ───────────────────────────────────
+    echo -e "\n${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${CYAN}  Configuration Summary${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}\n"
 
-    gum style \
-        --border rounded \
-        --border-foreground "#4ECDC4" \
-        --padding "1 2" \
-        --margin "1" \
-        "$(cat << EOF
-📊 DEPLOYMENT SUMMARY
+    echo -e "${CYAN}Wazuh Version:${NC} ${WAZUH_VERSION}"
+    echo -e "${CYAN}Environment:${NC} ${ENVIRONMENT}"
+    echo
+    echo -e "${GREEN}Indexer Nodes (${INDEXER_COUNT}):${NC}"
+    for node in "${INDEXER_NODES_ARRAY[@]}"; do
+        echo "  - $node"
+    done
+    echo
+    echo -e "${GREEN}Manager Nodes (${MANAGER_COUNT}):${NC}"
+    for node in "${MANAGER_NODES_ARRAY[@]}"; do
+        echo "  - $node"
+    done
+    echo
+    echo -e "${GREEN}Dashboard Nodes (${#DASHBOARD_NODES_ARRAY[@]}):${NC}"
+    for node in "${DASHBOARD_NODES_ARRAY[@]}"; do
+        echo "  - $node"
+    done
 
-Profile:     ${SELECTED_PROFILE}
-Environment: ${ENVIRONMENT}
-Version:     ${WAZUH_VERSION}
+    if [[ "${DEPLOY_AGENTS:-false}" == "true" ]] && [[ -n "${AGENT_NODES:-}" ]]; then
+        echo
+        echo -e "${GREEN}Agent Nodes (${#AGENT_NODES_ARRAY[@]}):${NC}"
+        for node in "${AGENT_NODES_ARRAY[@]}"; do
+            echo "  - $node"
+        done
+    fi
 
-🖥️  INFRASTRUCTURE
-Indexers:    ${INDEXER_COUNT} node(s) - ${INDEXER_NODES}
-Managers:    ${MANAGER_COUNT} node(s) - ${MANAGER_NODES}
-Dashboards:  ${#DASHBOARD_NODES_ARRAY[@]} node(s) - ${DASHBOARD_NODES}
-Heap Size:   ${INDEXER_HEAP_SIZE}
-
-🔐 SECURITY
-Certificates: $([ "$USE_SELF_SIGNED_CERTS" == "true" ] && echo "Self-signed" || echo "External CA")
-Vault:        Enabled (encrypted credentials)
-
-📁 FILES CREATED
-• ansible.cfg
-• inventory/hosts.yml
-$([ "$SELECTED_PROFILE" != "minimal" ] && echo "• inventory/bootstrap.yml (initial access as ${INITIAL_SSH_USER:-root})")
-• group_vars/all/main.yml
-• group_vars/all/vault.yml (encrypted)
-$([ "${GENERATE_SSH_KEY:-false}" == "true" ] && echo "• keys/wazuh_ansible_key (SSH key pair)")
-$([ "${CREATE_PREP_PACKAGE:-false}" == "true" ] && echo "• client-prep/ (client preparation package)
-• wazuh-client-prep.sh (self-extracting installer)")
-EOF
-)"
-
-    echo ""
-    gum style --foreground "#FFE66D" --bold "🚀 NEXT STEPS"
-    echo ""
-    if [[ "$SELECTED_PROFILE" != "minimal" ]]; then
-        echo "  1. Review configuration files"
-        echo ""
-        echo "  2. First run (bootstrap + deploy):"
-        if [[ -n "${DEFAULT_SSH_PASS:-}" ]]; then
-            echo "     $(gum style --foreground '#4ECDC4' 'ansible-playbook site.yml --tags bootstrap,all --ask-pass')"
+    if [[ "${ENABLE_LB:-false}" == "true" ]]; then
+        echo
+        echo -e "${GREEN}Load Balancer (Angie):${NC}"
+        echo "  - Host: ${LB_NODE}"
+        if [[ "${LB_SSL_TERMINATION:-false}" == "true" ]]; then
+            echo "  - Dashboard: SSL termination (company cert on LB)"
         else
-            echo "     $(gum style --foreground '#4ECDC4' 'ansible-playbook site.yml --tags bootstrap,all')"
+            echo "  - Dashboard: TCP passthrough (TLS end-to-end)"
         fi
-        echo ""
-        echo "     This connects as ${INITIAL_SSH_USER:-root}, creates ${ANSIBLE_USER}, then deploys everything."
-        echo ""
-        if [[ "${CREATE_PREP_PACKAGE:-false}" == "true" ]]; then
-            echo "  3. (Optional) Prepare target hosts manually:"
-            echo "     $(gum style --foreground '#4ECDC4' 'scp -r client-prep/ root@TARGET_HOST:/tmp/')"
-            echo "     $(gum style --foreground '#4ECDC4' 'ssh root@TARGET_HOST \"cd /tmp/client-prep && sudo ./install.sh\"')"
-            echo ""
-            echo "     Or use self-extracting script:"
-            echo "     $(gum style --foreground '#4ECDC4' 'scp wazuh-client-prep.sh root@TARGET_HOST:/tmp/')"
-            echo "     $(gum style --foreground '#4ECDC4' 'ssh root@TARGET_HOST \"sudo bash /tmp/wazuh-client-prep.sh\"')"
-            echo ""
-            echo "  4. Subsequent deployments (no bootstrap needed):"
-        else
-            echo "  3. Subsequent deployments (no bootstrap needed):"
-        fi
-        echo "     $(gum style --foreground '#4ECDC4' 'ansible-playbook site.yml')"
-        echo ""
+        echo "  - Agent/API ports: TCP passthrough"
+    fi
+
+    echo
+    echo -e "${CYAN}SSH Configuration:${NC}"
+    if [[ "${GENERATE_SSH_KEY:-false}" == "true" ]]; then
+        echo "  - Initial SSH user: ${INITIAL_SSH_USER:-root}"
+        echo "  - Ansible deployment user: ${ANSIBLE_USER:-wazuh-deploy} (will be created)"
+        echo "  - SSH key: ${ANSIBLE_SSH_KEY:-keys/wazuh_ansible_key} (will be generated)"
     else
-        echo "  1. Review configuration files"
-        echo ""
-        echo "  2. Run deployment:"
-        echo "     $(gum style --foreground '#4ECDC4' 'ansible-playbook site.yml')"
-        echo ""
+        echo "  - SSH user: ${ANSIBLE_USER:-$(whoami)}"
+        echo "  - SSH key: ${ANSIBLE_SSH_KEY:-~/.ssh/id_rsa}"
+    fi
+    echo "  - SSH port: ${ANSIBLE_SSH_PORT:-22}"
+
+    echo
+    echo -e "${CYAN}Security:${NC}"
+    echo "  - Ansible Vault: Enabled (encrypted credentials)"
+    echo "  - Vault password: .vault_password"
+    echo "  - Encrypted vault: group_vars/all/vault.yml"
+    if [[ "${EXTERNAL_CA:-false}" == "true" ]]; then
+        echo "  - Certificates: External CA (user-provided)"
+    else
+        echo "  - Certificates: Self-signed (auto-generated)"
+    fi
+    if [[ "${CUSTOM_PASSWORDS:-false}" == "true" ]]; then
+        echo "  - Passwords: Custom (user-provided)"
+    else
+        echo "  - Passwords: Auto-generated"
     fi
 
+    echo
+    echo -e "${CYAN}Security Features Enabled:${NC}"
+    [[ "${ENABLE_VULN_DETECTION:-true}" == "true" ]] && echo "  - Vulnerability Detection"
+    [[ "${ENABLE_FIM:-true}" == "true" ]] && echo "  - File Integrity Monitoring"
+    [[ "${ENABLE_ROOTKIT:-true}" == "true" ]] && echo "  - Rootkit Detection"
+    [[ "${ENABLE_SCA:-true}" == "true" ]] && echo "  - Security Configuration Assessment (SCA)"
+    [[ "${ENABLE_SYSCOLLECTOR:-true}" == "true" ]] && echo "  - System Inventory (Syscollector)"
+    [[ "${ENABLE_LOG_COLLECTION:-true}" == "true" ]] && echo "  - Log Collection"
+    [[ "${ENABLE_ACTIVE_RESPONSE:-false}" == "true" ]] && echo "  - Active Response"
+
+    echo
+    echo -e "${CYAN}Alerting & Integrations:${NC}"
+    if [[ "${ENABLE_EMAIL_ALERTS:-false}" == "true" ]]; then
+        echo "  - Email Alerts: ${EMAIL_TO} (via ${EMAIL_SMTP_SERVER})"
+    fi
+    if [[ "${ENABLE_SYSLOG_OUTPUT:-false}" == "true" ]]; then
+        echo "  - Syslog Output: ${SYSLOG_SERVER}:${SYSLOG_PORT:-514} (${SYSLOG_FORMAT:-json})"
+    fi
+    if [[ "${ENABLE_SLACK:-false}" == "true" ]]; then
+        echo "  - Slack Notifications (level >= ${SLACK_ALERT_LEVEL:-10})"
+    fi
+    if [[ "${ENABLE_VIRUSTOTAL:-false}" == "true" ]]; then
+        echo "  - VirusTotal Integration"
+    fi
+    if [[ "${ENABLE_EMAIL_ALERTS:-false}" != "true" ]] && [[ "${ENABLE_SYSLOG_OUTPUT:-false}" != "true" ]] && \
+       [[ "${ENABLE_SLACK:-false}" != "true" ]] && [[ "${ENABLE_VIRUSTOTAL:-false}" != "true" ]]; then
+        echo "  - None configured (alerts will only appear in Wazuh Dashboard)"
+    fi
+
+    echo
+    echo -e "${CYAN}Backup & Maintenance:${NC}"
+    case "${BACKUP_SCHEDULE:-daily}" in
+        daily)
+            echo "  - Automated Backups: Daily at ${BACKUP_HOUR:-2}:00, keep ${BACKUP_RETENTION:-7} backups"
+            ;;
+        weekly)
+            local days=("Sunday" "Monday" "Tuesday" "Wednesday" "Thursday" "Friday" "Saturday")
+            echo "  - Automated Backups: Weekly on ${days[${BACKUP_DAY:-0}]} at ${BACKUP_HOUR:-2}:00, keep ${BACKUP_RETENTION:-7} backups"
+            ;;
+        disabled)
+            echo "  - Automated Backups: Disabled (manual only)"
+            ;;
+    esac
+    if [[ "${ENABLE_LOG_CLEANUP:-true}" == "true" ]]; then
+        echo "  - Log Cleanup: daily, keep ${LOG_RETENTION_DAYS:-30} days"
+    else
+        echo "  - Log Cleanup: Disabled"
+    fi
+
+    # ─── Next Steps ──────────────────────────────────────────────
+    echo -e "\n${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${CYAN}  Next Steps${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}\n"
+
+    echo -e "1. Review the generated configuration files:"
+    echo -e "   ${CYAN}inventory/hosts.yml${NC}       - Main inventory (SSH key auth)"
+    echo -e "   ${CYAN}inventory/bootstrap.yml${NC}   - Bootstrap inventory (password auth)"
+    echo -e "   ${CYAN}group_vars/all/main.yml${NC}   - Variables file"
+    echo -e "   ${CYAN}group_vars/all/vault.yml${NC}  - Encrypted credentials"
+    echo -e "   ${CYAN}ansible.cfg${NC}            - Ansible configuration"
+    echo -e "   ${CYAN}.vault_password${NC}        - Vault encryption key (KEEP SECURE!)"
+    echo
+
+    if [[ "${CREATE_PREP_PACKAGE:-false}" == "true" ]]; then
+        echo -e "2. ${GREEN}Prepare target machines${NC} (choose one method):"
+        echo
+        echo -e "   ${YELLOW}Method A: Copy and run the preparation folder${NC}"
+        echo -e "   scp -r client-prep/ root@TARGET_HOST:/tmp/"
+        echo -e "   ssh root@TARGET_HOST 'cd /tmp/client-prep && sudo ./install.sh'"
+        echo
+        echo -e "   ${YELLOW}Method B: Use the self-extracting script${NC}"
+        echo -e "   scp wazuh-client-prep.sh root@TARGET_HOST:/tmp/"
+        echo -e "   ssh root@TARGET_HOST 'sudo bash /tmp/wazuh-client-prep.sh'"
+        echo
+        echo -e "   ${YELLOW}Method C: Use the deployment script for multiple hosts${NC}"
+        echo -e "   ./scripts/deploy-prep.sh -f hosts.txt"
+        echo -e "   ./scripts/deploy-prep.sh 192.168.1.10 192.168.1.11 192.168.1.12"
+        echo
+        echo -e "3. Test connectivity to your hosts:"
+    else
+        echo -e "2. Test connectivity to your hosts:"
+    fi
+    echo -e "   ${YELLOW}ansible all -m ping -i inventory/bootstrap.yml --vault-password-file .vault_password${NC}"
+    echo
+
+    if [[ "${CREATE_PREP_PACKAGE:-false}" == "true" ]]; then
+        echo -e "4. Bootstrap + deploy (one command):"
+    else
+        echo -e "3. Bootstrap + deploy (one command):"
+    fi
+    echo -e "   ${YELLOW}ansible-playbook site.yml --tags bootstrap,all${NC}"
+    echo
+    echo -e "   This first connects as '${CYAN}${INITIAL_SSH_USER:-root}${NC}' to create the '${CYAN}${ANSIBLE_USER:-wazuh-deploy}${NC}' user"
+    echo -e "   with SSH key auth and passwordless sudo, then runs the full deployment."
+    echo
+    echo -e "   Subsequent deployments (no bootstrap needed):"
+    echo -e "   ${YELLOW}ansible-playbook site.yml${NC}"
+    echo
+    echo -e "   Or deploy components individually:"
+    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-indexer.yml --vault-password-file .vault_password${NC}"
+    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-manager.yml --vault-password-file .vault_password${NC}"
+    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-dashboard.yml --vault-password-file .vault_password${NC}"
+    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-agents.yml --vault-password-file .vault_password${NC}"
+    echo
+
+    if [[ "${CREATE_PREP_PACKAGE:-false}" == "true" ]]; then
+        echo -e "6. After deployment, view your credentials:"
+    else
+        echo -e "5. After deployment, view your credentials:"
+    fi
+    echo -e "   ${YELLOW}./scripts/manage-vault.sh view${NC}"
+    echo
+
+    if [[ "${CREATE_PREP_PACKAGE:-false}" == "true" ]]; then
+        echo -e "7. Certificate management:"
+    else
+        echo -e "6. Certificate management:"
+    fi
+    echo -e "   ${YELLOW}ansible-playbook playbooks/certificate-management.yml --tags check-expiry${NC}"
+    echo -e "   ${YELLOW}ansible-playbook playbooks/certificate-management.yml --tags rotate${NC}"
+    echo
+
+    # ─── SSH Key Information ─────────────────────────────────────
+    if [[ "${GENERATE_SSH_KEY:-false}" == "true" ]]; then
+        echo -e "\n${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+        echo -e "${CYAN}  SSH Key Information${NC}"
+        echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}\n"
+        echo -e "SSH keys have been generated for Ansible deployment:"
+        echo -e "  Private key: ${CYAN}${ANSIBLE_SSH_KEY:-keys/wazuh_ansible_key}${NC}"
+        echo -e "  Public key:  ${CYAN}${ANSIBLE_SSH_KEY:-keys/wazuh_ansible_key}.pub${NC}"
+        echo
+        echo -e "${YELLOW}Keep the private key secure! It provides access to all managed hosts.${NC}"
+        echo
+    fi
+
+    # ─── Credential Management ───────────────────────────────────
+    echo -e "\n${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${CYAN}  Credential Management${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}\n"
+    echo -e "Manage encrypted credentials with:"
+    echo -e "  ${YELLOW}./scripts/manage-vault.sh view${NC}    - View current credentials"
+    echo -e "  ${YELLOW}./scripts/manage-vault.sh edit${NC}    - Edit credentials"
+    echo -e "  ${YELLOW}./scripts/manage-vault.sh rotate${NC}  - Rotate all credentials"
+    echo -e "  ${YELLOW}./scripts/manage-vault.sh rekey${NC}   - Change vault password"
+    echo
+
+    echo -e "${YELLOW}⚠ SECURITY REMINDERS:${NC}"
+    echo -e "  - Back up ${CYAN}.vault_password${NC} securely (required to decrypt credentials)"
+    echo -e "  - Keep ${CYAN}keys/wazuh_ansible_key${NC} private (provides host access)"
+    echo
+
+    # ─── Vault Password ───────────────────────────────────────────
     if [[ -f "$SCRIPT_DIR/.vault_password" ]]; then
-        gum style \
-            --border rounded \
-            --border-foreground "#FF6B6B" \
-            --padding "1 2" \
-            "⚠️  SAVE YOUR VAULT PASSWORD!
-
-$(cat "$SCRIPT_DIR/.vault_password")
-
-Store this securely - you'll need it for deployment!"
+        echo -e "\n${RED}════════════════════════════════════════════════════════════════${NC}"
+        echo -e "${RED}  ANSIBLE VAULT PASSWORD - SAVE THIS NOW!${NC}"
+        echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
+        echo
+        echo -e "  ${YELLOW}Vault Password:${NC} ${CYAN}$(cat "$SCRIPT_DIR/.vault_password")${NC}"
+        echo
+        echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
+        echo -e "${YELLOW}⚠ WARNING: You will need this password to:${NC}"
+        echo -e "  - Deploy or redeploy the Wazuh cluster"
+        echo -e "  - View or edit encrypted credentials"
+        echo -e "  - Make any changes that require credential access"
+        echo
+        echo -e "${YELLOW}⚠ Store this password securely (password manager, secure vault)${NC}"
+        echo -e "${YELLOW}⚠ The .vault_password file will be needed on this machine${NC}"
+        echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
+        echo
     fi
+
+    # ─── Wazuh Admin Credentials ─────────────────────────────────
+    echo -e "\n${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${CYAN}  WAZUH ADMIN CREDENTIALS${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}\n"
+    echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}  SAVE THESE CREDENTIALS - THEY ARE STORED IN THE VAULT${NC}"
+    echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
+    echo
+    echo -e "  ${CYAN}Wazuh Dashboard / Indexer Admin:${NC}"
+    echo -e "    Username: ${YELLOW}${INDEXER_ADMIN_USER:-admin}${NC}"
+    echo -e "    Password: ${YELLOW}${GENERATED_INDEXER_PASSWORD}${NC}"
+    echo
+    echo -e "  ${CYAN}Wazuh API:${NC}"
+    echo -e "    Username: ${YELLOW}${API_USER:-wazuh}${NC}"
+    echo -e "    Password: ${YELLOW}${GENERATED_API_PASSWORD}${NC}"
+    echo
+    echo -e "  ${CYAN}Dashboard URL:${NC} https://${DASHBOARD_NODES_ARRAY[0]}:${DASHBOARD_PORT:-443}"
+    echo -e "  ${CYAN}API URL:${NC} https://${MANAGER_NODES_ARRAY[0]}:${MANAGER_API_PORT:-55000}"
+    echo
+    echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${YELLOW}⚠ These credentials are encrypted in the vault.${NC}"
+    echo -e "${YELLOW}⚠ Use './scripts/manage-vault.sh view' to see them later.${NC}"
+    echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
+    echo
+
+    echo -e "${GREEN}✓ Setup complete!${NC}"
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -1187,6 +1624,7 @@ main() {
         configure_ssh
         configure_features
         configure_integrations
+        configure_load_balancer
     else
         # Minimal defaults
         CUSTOM_PASSWORDS="false"
@@ -1210,6 +1648,14 @@ main() {
         ENABLE_SYSLOG_OUTPUT="false"
         ENABLE_SLACK="false"
         ENABLE_VIRUSTOTAL="false"
+        ENABLE_LB="false"
+        LB_NODE=""
+        LB_ADDRESS=""
+        LB_SSL_TERMINATION="false"
+        LB_SSL_CERT_SRC=""
+        LB_SSL_KEY_SRC=""
+        LB_SSL_CERT_PATH="/etc/angie/certs/lb-fullchain.pem"
+        LB_SSL_KEY_PATH="/etc/angie/certs/lb-key.pem"
     fi
 
     configure_backup
