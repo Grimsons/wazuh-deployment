@@ -1,0 +1,66 @@
+---
+# Configure Angie as a TCP/SSL-passthrough load balancer for all Wazuh components.
+#
+# Architecture overview:
+#   Agents / Browsers
+#        │
+#        ▼
+#   Angie LB  (this host)
+#   ├── :443  ─────────────▶  wazuh_dashboards  :443   (HTTPS passthrough)
+#   ├── :1514 ─────────────▶  wazuh_managers    :1514  (agent events, TCP)
+#   ├── :1515 ─────────────▶  wazuh_managers    :1515  (agent enrollment, TCP)
+#   ├── :55000 ────────────▶  wazuh_managers    :55000 (API, HTTPS passthrough)
+#   └── :9200  ────────────▶  wazuh_indexers    :9200  (optional, HTTPS passthrough)
+
+- name: Ensure log directory exists
+  ansible.builtin.file:
+    path: "{{ wazuh_lb_log_dir }}"
+    state: directory
+    owner: angie
+    group: adm
+    mode: "0750"
+
+- name: Remove default Angie HTTP site (avoids port conflicts)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/angie/http.d/default.conf
+  notify: Reload angie
+
+- name: Deploy main angie.conf
+  ansible.builtin.template:
+    src: angie.conf.j2
+    dest: /etc/angie/angie.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "angie -t -c %s"
+  notify: Reload angie
+
+- name: Ensure stream.d directory exists
+  ansible.builtin.file:
+    path: /etc/angie/stream.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy Wazuh stream load-balancer config
+  ansible.builtin.template:
+    src: stream-wazuh.conf.j2
+    dest: /etc/angie/stream.d/wazuh.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "angie -t -c /etc/angie/angie.conf"
+  notify: Reload angie
+
+- name: Validate final Angie configuration
+  ansible.builtin.command: angie -t
+  register: angie_config_test
+  changed_when: false
+
+- name: Display configuration test result
+  ansible.builtin.debug:
+    msg: "{{ angie_config_test.stderr | default(angie_config_test.stdout) }}"

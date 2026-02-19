@@ -1,0 +1,29 @@
+---
+# Angie Load Balancer - Main Task Entry Point
+
+- name: Gather facts if not already done
+  ansible.builtin.setup:
+    gather_subset:
+      - '!all'
+      - '!min'
+      - os_family
+      - distribution
+      - distribution_version
+      - distribution_major_version
+  when: ansible_os_family is not defined
+
+- name: Install Angie
+  ansible.builtin.import_tasks: install.yml
+  tags:
+    - lb-install
+
+- name: Configure Angie
+  ansible.builtin.import_tasks: configure.yml
+  tags:
+    - lb-configure
+
+- name: Configure firewall for LB
+  ansible.builtin.import_tasks: firewall.yml
+  tags:
+    - lb-firewall
+    - firewall

@@ -87,6 +87,57 @@ wazuh_dashboard_nodes:
   - ip: 192.168.1.30
 
 # ═══════════════════════════════════════════════════════════════
+# Angie Load Balancer Settings
+# ═══════════════════════════════════════════════════════════════
+# Angie is an nginx-compatible load balancer: https://en.angie.software/angie/
+#
+# When enabled, all Wazuh traffic is routed through a dedicated LB host
+# defined in the [wazuh_lb] inventory group. The LB uses TCP passthrough
+# (no TLS termination) — certificates live only on the Wazuh nodes.
+#
+# KEY BENEFIT — Agent stability:
+#   Agents are configured to connect to wazuh_lb_address instead of manager IPs.
+#   You can add, remove, or replace manager nodes without ever reconfiguring agents.
+#
+# Minimum supported cluster: 1 indexer + 1 manager + 1 dashboard
+#   (single-node mode: LB simply proxies, no actual load balancing needed)
+#
+# To enable:
+#   1. Uncomment wazuh_lb_enabled and wazuh_lb_address below
+#   2. Add the LB host to [wazuh_lb] in your inventory
+#   3. Run: ansible-playbook site.yml --tags lb,agent
+#      (the agent tag pushes the updated connection address to all Ansible-managed agents)
+
+wazuh_lb_enabled: false
+
+# The IP or hostname clients use to reach the LB.
+# Must be reachable by agents, browsers, and API clients.
+# wazuh_lb_address: "192.168.1.5"
+
+# ── Listen ports (defaults match Wazuh defaults — change only if needed) ──
+# wazuh_lb_dashboard_port: 443
+# wazuh_lb_agent_port: 1514
+# wazuh_lb_enrollment_port: 1515
+# wazuh_lb_api_port: 55000
+
+# ── Optional: expose the indexer REST API through the LB ──────────────────
+# Useful for Grafana, custom dashboards, or Elastic-compatible tools.
+# wazuh_lb_indexer_enabled: false
+# wazuh_lb_indexer_port: 9200
+
+# ── Health checks ─────────────────────────────────────────────────────────
+# Angie probes each backend with TCP-connect checks and removes failed nodes.
+# wazuh_lb_health_checks_enabled: true
+# wazuh_lb_health_check_interval: 10    # seconds between probes
+# wazuh_lb_health_check_fails: 2        # consecutive failures → mark down
+# wazuh_lb_health_check_passes: 1       # consecutive successes → mark up
+
+# ── Load balancing algorithm ──────────────────────────────────────────────
+# Options: least_conn (default), round_robin (omit), hash, random
+# least_conn works best for persistent agent connections.
+# wazuh_lb_algorithm: "least_conn"
+
+# ═══════════════════════════════════════════════════════════════
 # SSL/TLS Configuration
 # ═══════════════════════════════════════════════════════════════
 

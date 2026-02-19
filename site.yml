@@ -450,6 +450,23 @@
     - wazuh-dashboard
 
 # ═══════════════════════════════════════════════════════════════
+# Step 3b: Deploy Angie Load Balancer (optional)
+# Runs only when the [wazuh_lb] inventory group is populated AND
+# wazuh_lb_enabled is true. Safe to skip for direct-connect setups.
+# ═══════════════════════════════════════════════════════════════
+- name: Deploy Angie Load Balancer
+  hosts: wazuh_lb
+  become: true
+  gather_facts: false
+  roles:
+    - role: angie-lb
+      when: wazuh_lb_enabled | default(false) | bool
+  tags:
+    - lb
+    - loadbalancer
+    - angie
+
+# ═══════════════════════════════════════════════════════════════
 # Gate: Validate Dashboard Before Agent Deployment
 # ═══════════════════════════════════════════════════════════════
 - name: "Validation Gate: Dashboard HTTP Health"

@@ -1,0 +1,11 @@
+---
+- name: Restart angie
+  ansible.builtin.systemd:
+    name: angie
+    state: restarted
+    daemon_reload: true
+
+- name: Reload angie
+  ansible.builtin.systemd:
+    name: angie
+    state: reloaded

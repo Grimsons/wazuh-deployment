@@ -1,0 +1,266 @@
+---
+# Add Angie Load Balancer to an existing Wazuh deployment
+#
+# Use this playbook when you already have Wazuh running with agents directly
+# connected to manager nodes and you want to insert a load balancer in front
+# of everything without disrupting the existing environment.
+#
+# What this playbook does:
+#   1. Validates that wazuh_lb_enabled and wazuh_lb_address are configured
+#   2. Deploys and configures Angie on the [wazuh_lb] inventory host
+#   3. Pushes updated ossec.conf to all Ansible-managed agents, pointing them
+#      to the LB address instead of the manager IPs directly
+#   4. Displays a summary with instructions for non-Ansible agents
+#
+# Usage:
+#   # Step 1: Add a host to [wazuh_lb] in inventory/hosts.yml
+#   # Step 2: Set in group_vars/all.yml:
+#   #   wazuh_lb_enabled: true
+#   #   wazuh_lb_address: "<lb-ip>"
+#   # Step 3: Run:
+#   ansible-playbook playbooks/add-lb-to-existing.yml
+#
+# Non-Ansible agents (GPO, SCCM, manual, Intune):
+#   After this playbook runs, update those agents separately.
+#   See the summary task at the bottom for exact instructions.
+
+# ═══════════════════════════════════════════════════════════════
+# Preflight: validate LB configuration is present
+# ═══════════════════════════════════════════════════════════════
+- name: "Preflight: Validate load balancer configuration"
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Assert wazuh_lb_enabled is true
+      ansible.builtin.assert:
+        that:
+          - wazuh_lb_enabled | default(false) | bool
+        fail_msg: |
+          ══════════════════════════════════════════════════════════════
+          wazuh_lb_enabled is not set to true in group_vars/all.yml.
+
+          Before running this playbook:
+            1. Set  wazuh_lb_enabled: true
+            2. Set  wazuh_lb_address: "<your-lb-ip-or-hostname>"
+            3. Add the LB host to [wazuh_lb] in inventory/hosts.yml
+          ══════════════════════════════════════════════════════════════
+        success_msg: "wazuh_lb_enabled: true — proceeding"
+
+    - name: Assert wazuh_lb_address is configured
+      ansible.builtin.assert:
+        that:
+          - wazuh_lb_address is defined
+          - wazuh_lb_address | length > 0
+        fail_msg: |
+          ══════════════════════════════════════════════════════════════
+          wazuh_lb_address is not set in group_vars/all.yml.
+
+          Set it to the IP or hostname agents and browsers will use
+          to reach the load balancer, e.g.:
+            wazuh_lb_address: "192.168.1.5"
+          ══════════════════════════════════════════════════════════════
+        success_msg: "wazuh_lb_address: {{ wazuh_lb_address }} — OK"
+
+    - name: Assert [wazuh_lb] inventory group is not empty
+      ansible.builtin.assert:
+        that:
+          - groups['wazuh_lb'] is defined
+          - groups['wazuh_lb'] | length > 0
+        fail_msg: |
+          ══════════════════════════════════════════════════════════════
+          The [wazuh_lb] inventory group is empty.
+
+          Add the LB host to inventory/hosts.yml under wazuh_lb:
+            wazuh_lb:
+              hosts:
+                {{ wazuh_lb_address }}:
+          ══════════════════════════════════════════════════════════════
+        success_msg: "LB host(s): {{ groups['wazuh_lb'] | join(', ') }}"
+
+# ═══════════════════════════════════════════════════════════════
+# Step 1: Deploy Angie load balancer
+# ═══════════════════════════════════════════════════════════════
+- name: Deploy Angie load balancer
+  hosts: wazuh_lb
+  become: true
+  gather_facts: true
+  roles:
+    - role: angie-lb
+  tags:
+    - lb
+    - angie
+
+# ═══════════════════════════════════════════════════════════════
+# Step 2: Validate Angie is routing correctly before touching agents
+# ═══════════════════════════════════════════════════════════════
+- name: "Validation: LB can reach manager agent port"
+  hosts: wazuh_lb
+  gather_facts: false
+  tags:
+    - lb
+    - validation
+  tasks:
+    - name: Check connectivity from LB to each manager (port 1514)
+      ansible.builtin.wait_for:
+        host: "{{ item }}"
+        port: "{{ wazuh_manager_agent_port | default(1514) }}"
+        timeout: 10
+      loop: "{{ groups['wazuh_managers'] | default([]) }}"
+      register: lb_to_manager_check
+      failed_when: false
+
+    - name: Check connectivity from LB to each dashboard (port 443)
+      ansible.builtin.wait_for:
+        host: "{{ item }}"
+        port: "{{ wazuh_dashboard_port | default(443) }}"
+        timeout: 10
+      loop: "{{ groups['wazuh_dashboards'] | default([]) }}"
+      register: lb_to_dashboard_check
+      failed_when: false
+
+    - name: Warn if any backend is unreachable from LB
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: LB cannot reach {{ item.item }}:{{ item.port | default('?') }}.
+          Check firewall rules on the backend and the LB.
+          Agents will not be updated until all backends are reachable.
+      loop: "{{ (lb_to_manager_check.results | default([])) + (lb_to_dashboard_check.results | default([])) }}"
+      when: item.failed | default(false)
+
+# ═══════════════════════════════════════════════════════════════
+# Step 3: Push updated agent config to Ansible-managed agents
+# Changes <server> address from manager IPs → LB address
+# ═══════════════════════════════════════════════════════════════
+- name: Update Ansible-managed agents to connect through LB
+  hosts: wazuh_agents
+  become: true
+  gather_facts: true
+  tags:
+    - agent
+    - agent-update
+  tasks:
+    - name: Display agent update notice
+      ansible.builtin.debug:
+        msg: |
+          ══════════════════════════════════════════════════════════════
+          Updating agent on {{ inventory_hostname }}
+          Old target: direct manager IPs
+          New target: {{ wazuh_lb_address }} (load balancer)
+          ══════════════════════════════════════════════════════════════
+      run_once: false
+
+    - name: Deploy updated ossec.conf (Linux)
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/wazuh-agent/templates/ossec.conf.j2"
+        dest: /var/ossec/etc/ossec.conf
+        owner: root
+        group: wazuh
+        mode: "0640"
+        backup: true
+      when: ansible_system == "Linux"
+      notify: Restart wazuh-agent
+
+    - name: Deploy updated ossec.conf (macOS)
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/wazuh-agent/templates/ossec-macos.conf.j2"
+        dest: /Library/Ossec/etc/ossec.conf
+        owner: root
+        group: wheel
+        mode: "0640"
+        backup: true
+      when: ansible_system == "Darwin"
+      notify: Restart wazuh-agent
+
+    - name: Deploy updated ossec.conf (Windows)
+      ansible.windows.win_template:
+        src: "{{ playbook_dir }}/../roles/wazuh-agent/templates/ossec-windows.conf.j2"
+        dest: 'C:\Program Files (x86)\ossec-agent\ossec.conf'
+        backup: true
+      when: ansible_system == "Win32NT"
+      notify: Restart wazuh-agent (Windows)
+
+  handlers:
+    - name: Restart wazuh-agent
+      ansible.builtin.systemd:
+        name: wazuh-agent
+        state: restarted
+
+    - name: Restart wazuh-agent (Windows)
+      ansible.windows.win_service:
+        name: WazuhSvc
+        state: restarted
+
+# ═══════════════════════════════════════════════════════════════
+# Summary: what was done and what still needs manual attention
+# ═══════════════════════════════════════════════════════════════
+- name: Deployment summary
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Display summary and non-Ansible agent instructions
+      ansible.builtin.debug:
+        msg: |
+          ══════════════════════════════════════════════════════════════
+                    ANGIE LOAD BALANCER — RETROFIT COMPLETE
+          ══════════════════════════════════════════════════════════════
+
+          Load balancer:  {{ wazuh_lb_address }}  ({{ groups['wazuh_lb'] | join(', ') }})
+
+          Routing table:
+            :{{ wazuh_lb_dashboard_port | default(443) }}   → Dashboard  ({{ groups['wazuh_dashboards'] | default([]) | join(', ') }})
+            :{{ wazuh_lb_agent_port | default(1514) }}  → Managers   ({{ groups['wazuh_managers'] | default([]) | join(', ') }})
+            :{{ wazuh_lb_enrollment_port | default(1515) }}  → Managers   (enrollment)
+            :{{ wazuh_lb_api_port | default(55000) }} → Managers   (API)
+
+          Ansible-managed agents updated:  {{ groups['wazuh_agents'] | default([]) | length }} host(s)
+
+          ══════════════════════════════════════════════════════════════
+          NON-ANSIBLE AGENTS — MANUAL UPDATE REQUIRED
+          ══════════════════════════════════════════════════════════════
+
+          Any agents deployed via GPO, SCCM, Intune, or manually still
+          point to the old manager IP(s). Update them using ONE of:
+
+          ► Windows (GPO / SCCM / Intune):
+            Push a new ossec.conf (or a registry/file-preference policy)
+            replacing the <address> in the <server> block with:
+              {{ wazuh_lb_address }}
+
+            File location:
+              C:\Program Files (x86)\ossec-agent\ossec.conf
+
+            Example <client> block for the new config:
+              <client>
+                <server>
+                  <address>{{ wazuh_lb_address }}</address>
+                  <port>{{ wazuh_lb_agent_port | default(1514) }}</port>
+                  <protocol>tcp</protocol>
+                </server>
+              </client>
+
+            Restart the service after pushing:
+              Restart-Service WazuhSvc
+
+          ► Linux (manual / custom CM):
+            Edit /var/ossec/etc/ossec.conf on each agent.
+            Change <address> in the <server> block to {{ wazuh_lb_address }}
+            then: systemctl restart wazuh-agent
+
+          ► New agents (all deployment methods):
+            Set  WAZUH_MANAGER={{ wazuh_lb_address }}
+            during installation. New agents will automatically enroll
+            through the load balancer.
+
+          After agents reconnect you can verify in the Wazuh Dashboard
+          (Agents → check "Last keep alive" timestamps).
+
+          ══════════════════════════════════════════════════════════════
+          FUTURE SCALING
+          ══════════════════════════════════════════════════════════════
+          To add manager / indexer / dashboard nodes:
+            1. Add the new host to inventory/hosts.yml
+            2. Run: ansible-playbook site.yml --tags manager   (or indexer/dashboard)
+            3. Run: ansible-playbook site.yml --tags lb
+               (regenerates Angie config with the new node in the upstream)
+            Agents require zero changes.
+          ══════════════════════════════════════════════════════════════

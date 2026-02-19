@@ -1,0 +1,91 @@
+---
+# Install Angie from the official package repository.
+# https://en.angie.software/angie/docs/installation/
+
+# ── Debian / Ubuntu ──────────────────────────────────────────────────────────
+- name: Install Angie prerequisites (Debian/Ubuntu)
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - gnupg
+      - curl
+    state: present
+    update_cache: true
+  when: ansible_os_family == "Debian"
+
+- name: Add Angie GPG key (Debian/Ubuntu)
+  ansible.builtin.get_url:
+    url: https://angie.software/keys/angie-signing.gpg
+    dest: /etc/apt/keyrings/angie-signing.gpg
+    mode: "0644"
+    owner: root
+    group: root
+  when: ansible_os_family == "Debian"
+
+- name: Add Angie APT repository (Debian/Ubuntu)
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [signed-by=/etc/apt/keyrings/angie-signing.gpg]
+      https://download.angie.software/angie/{{ ansible_distribution | lower }}/
+      {{ ansible_distribution_release }} main
+    state: present
+    filename: angie
+    update_cache: true
+  when: ansible_os_family == "Debian"
+
+- name: Install Angie (Debian/Ubuntu)
+  ansible.builtin.apt:
+    name: angie
+    state: present
+    update_cache: true
+  when: ansible_os_family == "Debian"
+  notify: Restart angie
+
+# ── RHEL / CentOS / Rocky / AlmaLinux ───────────────────────────────────────
+- name: Add Angie YUM/DNF repository (RedHat family)
+  ansible.builtin.yum_repository:
+    name: angie
+    description: Angie - stable
+    baseurl: "https://download.angie.software/angie/rhel/$releasever/$basearch/"
+    gpgcheck: true
+    gpgkey: https://angie.software/keys/angie-signing.gpg
+    enabled: true
+    state: present
+  when: ansible_os_family == "RedHat"
+
+- name: Install Angie (RedHat family)
+  ansible.builtin.dnf:
+    name: angie
+    state: present
+    update_cache: true
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 8
+  notify: Restart angie
+
+- name: Install Angie via yum (RHEL 7 / CentOS 7)
+  ansible.builtin.yum:
+    name: angie
+    state: present
+    update_cache: true
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int < 8
+  notify: Restart angie
+
+# ── Common ───────────────────────────────────────────────────────────────────
+- name: Ensure Angie is enabled and started
+  ansible.builtin.systemd:
+    name: angie
+    enabled: true
+    state: started
+
+- name: Verify Angie version
+  ansible.builtin.command: angie -v
+  register: angie_version
+  changed_when: false
+
+- name: Display installed Angie version
+  ansible.builtin.debug:
+    msg: "Angie installed: {{ angie_version.stderr | default(angie_version.stdout) }}"

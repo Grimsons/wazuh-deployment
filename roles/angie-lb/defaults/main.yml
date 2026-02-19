@@ -1,0 +1,104 @@
+---
+# Angie Load Balancer - Default Variables
+#
+# Angie is an nginx-compatible web server and load balancer maintained by
+# the original nginx developers: https://en.angie.software/angie/
+#
+# The LB uses TCP passthrough (stream module) for all Wazuh traffic.
+# No TLS certificates are needed on the LB itself - TLS is end-to-end
+# between clients and the actual Wazuh nodes.
+
+# ═══════════════════════════════════════════════════════════════
+# Load Balancer Toggle
+# ═══════════════════════════════════════════════════════════════
+
+# Master switch: enable Angie LB deployment
+wazuh_lb_enabled: false
+
+# IP or hostname that clients (agents, browsers) use to reach the LB.
+# When wazuh_lb_enabled is true, agents are automatically configured to
+# connect here instead of directly to manager IPs.
+# Set this to the LB host's externally reachable address.
+# wazuh_lb_address: "192.168.1.5"
+
+# ═══════════════════════════════════════════════════════════════
+# Load Balancer Listen Ports
+# These are the ports Angie listens on. Normally left as defaults.
+# ═══════════════════════════════════════════════════════════════
+
+# Dashboard HTTPS (proxied to wazuh_dashboards group)
+wazuh_lb_dashboard_port: 443
+
+# Agent event data (proxied to wazuh_managers group)
+wazuh_lb_agent_port: 1514
+
+# Agent enrollment / registration (proxied to wazuh_managers group)
+wazuh_lb_enrollment_port: 1515
+
+# Wazuh Manager REST API (proxied to wazuh_managers group)
+wazuh_lb_api_port: 55000
+
+# Wazuh Indexer REST API - disabled by default.
+# Enable if external tools (Grafana, Elastic-compatible clients) need
+# to reach the indexer through the LB.
+wazuh_lb_indexer_enabled: false
+wazuh_lb_indexer_port: 9200
+
+# ═══════════════════════════════════════════════════════════════
+# Load Balancing Algorithm
+# ═══════════════════════════════════════════════════════════════
+
+# Algorithm for distributing connections across backends.
+# Options: round_robin (omit keyword), least_conn, hash, random
+# For persistent agent connections least_conn is a good default.
+wazuh_lb_algorithm: "least_conn"
+
+# ═══════════════════════════════════════════════════════════════
+# Timeout Settings
+# ═══════════════════════════════════════════════════════════════
+
+# How long to wait for a backend to accept a connection
+wazuh_lb_connect_timeout: "10s"
+
+# How long an idle proxied connection lives.
+# Agent connections are persistent and long-lived; set generously.
+wazuh_lb_agent_timeout: "3600s"
+
+# Shorter timeout for API / enrollment connections
+wazuh_lb_api_timeout: "60s"
+
+# ═══════════════════════════════════════════════════════════════
+# Health Checks
+# ═══════════════════════════════════════════════════════════════
+
+# Enable active TCP health checks on upstream backends.
+# Angie performs TCP-connect probes to detect failed nodes.
+wazuh_lb_health_checks_enabled: true
+
+# How often to probe each backend (seconds)
+wazuh_lb_health_check_interval: 10
+
+# Number of consecutive failures before marking a backend down
+wazuh_lb_health_check_fails: 2
+
+# Number of consecutive successes to bring a backend back up
+wazuh_lb_health_check_passes: 1
+
+# ═══════════════════════════════════════════════════════════════
+# Logging
+# ═══════════════════════════════════════════════════════════════
+
+wazuh_lb_log_dir: "/var/log/angie"
+wazuh_lb_access_log: "{{ wazuh_lb_log_dir }}/wazuh-access.log"
+wazuh_lb_error_log: "{{ wazuh_lb_log_dir }}/wazuh-error.log"
+wazuh_lb_error_log_level: "warn"   # debug, info, notice, warn, error, crit
+
+# ═══════════════════════════════════════════════════════════════
+# Angie Worker Settings
+# ═══════════════════════════════════════════════════════════════
+
+# auto = one worker per CPU core
+wazuh_lb_worker_processes: "auto"
+
+# Max simultaneous connections per worker
+wazuh_lb_worker_connections: 4096

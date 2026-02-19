@@ -1,0 +1,109 @@
+---
+# Open firewall ports on the Angie LB host.
+# Also updates manager/indexer/dashboard firewall rules to accept traffic
+# from the LB IP instead of (or in addition to) direct client IPs.
+
+# ── LB host: open listening ports ────────────────────────────────────────────
+
+- name: Open LB ports (UFW - Debian/Ubuntu)
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+    comment: "Wazuh LB"
+  loop:
+    - "{{ wazuh_lb_dashboard_port | string }}"
+    - "{{ wazuh_lb_agent_port | string }}"
+    - "{{ wazuh_lb_enrollment_port | string }}"
+    - "{{ wazuh_lb_api_port | string }}"
+  when: ansible_os_family == "Debian"
+  failed_when: false
+
+- name: Open LB indexer port (UFW - Debian/Ubuntu)
+  community.general.ufw:
+    rule: allow
+    port: "{{ wazuh_lb_indexer_port | string }}"
+    proto: tcp
+    comment: "Wazuh LB indexer proxy"
+  when:
+    - ansible_os_family == "Debian"
+    - wazuh_lb_indexer_enabled | default(false)
+  failed_when: false
+
+- name: Open LB ports (firewalld - RedHat family)
+  ansible.posix.firewalld:
+    port: "{{ item }}/tcp"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop:
+    - "{{ wazuh_lb_dashboard_port | string }}"
+    - "{{ wazuh_lb_agent_port | string }}"
+    - "{{ wazuh_lb_enrollment_port | string }}"
+    - "{{ wazuh_lb_api_port | string }}"
+  when: ansible_os_family == "RedHat"
+  failed_when: false
+
+- name: Open LB indexer port (firewalld - RedHat family)
+  ansible.posix.firewalld:
+    port: "{{ wazuh_lb_indexer_port | string }}/tcp"
+    permanent: true
+    immediate: true
+    state: enabled
+  when:
+    - ansible_os_family == "RedHat"
+    - wazuh_lb_indexer_enabled | default(false)
+  failed_when: false
+
+# ── Manager hosts: allow traffic from LB IP ───────────────────────────────────
+# When the LB is in front of managers, agent/API traffic originates from
+# the LB IP. We allow the LB IP on manager ports via delegation.
+
+- name: Allow LB IP on manager agent port (UFW)
+  community.general.ufw:
+    rule: allow
+    src: "{{ wazuh_lb_address }}"
+    port: "{{ item | string }}"
+    proto: tcp
+    comment: "Wazuh LB → manager"
+  loop:
+    - "{{ wazuh_manager_agent_port | default(1514) }}"
+    - 1515
+    - "{{ wazuh_manager_api_port | default(55000) }}"
+  delegate_to: "{{ item2 }}"
+  loop_control:
+    loop_var: item2
+  with_items: "{{ groups['wazuh_managers'] | default([]) }}"
+  when:
+    - wazuh_lb_address is defined
+    - ansible_os_family == "Debian"
+  failed_when: false
+
+- name: Allow LB IP on dashboard port (UFW)
+  community.general.ufw:
+    rule: allow
+    src: "{{ wazuh_lb_address }}"
+    port: "{{ wazuh_dashboard_port | default(443) | string }}"
+    proto: tcp
+    comment: "Wazuh LB → dashboard"
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['wazuh_dashboards'] | default([]) }}"
+  when:
+    - wazuh_lb_address is defined
+    - ansible_os_family == "Debian"
+  failed_when: false
+
+- name: Allow LB IP on indexer port (UFW)
+  community.general.ufw:
+    rule: allow
+    src: "{{ wazuh_lb_address }}"
+    port: "{{ wazuh_indexer_http_port | default(9200) | string }}"
+    proto: tcp
+    comment: "Wazuh LB → indexer"
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['wazuh_indexers'] | default([]) }}"
+  when:
+    - wazuh_lb_address is defined
+    - wazuh_lb_indexer_enabled | default(false)
+    - ansible_os_family == "Debian"
+  failed_when: false

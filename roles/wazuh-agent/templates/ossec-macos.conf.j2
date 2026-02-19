@@ -4,6 +4,14 @@
 -->
 <ossec_config>
   <client>
+{% if wazuh_lb_enabled | default(false) %}
+    <!-- Routing through Angie load balancer: {{ wazuh_lb_address }} -->
+    <server>
+      <address>{{ wazuh_lb_address }}</address>
+      <port>{{ wazuh_lb_agent_port | default(wazuh_manager_agent_port | default(1514)) }}</port>
+      <protocol>tcp</protocol>
+    </server>
+{% else %}
 {% for node in wazuh_manager_nodes %}
     <server>
       <address>{{ node.ip }}</address>
@@ -11,6 +19,7 @@
       <protocol>{{ wazuh_agent_protocol | default('tcp') }}</protocol>
     </server>
 {% endfor %}
+{% endif %}
     <config-profile>macos, macos{{ ansible_distribution_major_version }}</config-profile>
     <notify_time>{{ wazuh_agent_notify_time | default(10) }}</notify_time>
     <time-reconnect>{{ wazuh_agent_time_reconnect | default(60) }}</time-reconnect>
@@ -54,8 +63,14 @@
   <!-- Agent Enrollment -->
   <enrollment>
     <enabled>yes</enabled>
+{% if wazuh_lb_enabled | default(false) %}
+    <!-- Enrollment through Angie load balancer -->
+    <manager_address>{{ wazuh_lb_address }}</manager_address>
+    <port>{{ wazuh_lb_enrollment_port | default(1515) }}</port>
+{% else %}
     <manager_address>{{ wazuh_manager_address | default(wazuh_manager_nodes[0].ip, true) }}</manager_address>
     <port>1515</port>
+{% endif %}
     <agent_name>{{ ansible_hostname }}</agent_name>
 {% if wazuh_authd_use_password | default(true) %}
     <authorization_pass_path>/Library/Ossec/etc/authd.pass</authorization_pass_path>

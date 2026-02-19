@@ -39,6 +39,14 @@ all:
       hosts:
         192.168.1.30:
 
+    # Angie Load Balancer (optional but recommended for clusters)
+    # The LB is the single stable endpoint for agents, browsers, and API clients.
+    # Agents connect here; you can add/remove manager nodes without touching agents.
+    # Remove this group entirely to deploy without a load balancer.
+    wazuh_lb:
+      hosts:
+        # 192.168.1.5:   # Set wazuh_lb_address to this IP in group_vars/all.yml
+
     # Wazuh Agent hosts (endpoints to monitor)
     wazuh_agents:
       hosts:
