@@ -6,7 +6,7 @@
 all:
   vars:
     ansible_user: wazuh-deploy
-    ansible_ssh_private_key_file: keys/wazuh_ansible_key
+    ansible_ssh_private_key_file: "{{ inventory_dir }}/../keys/wazuh_ansible_key"
     ansible_port: 22
     ansible_become: true
 

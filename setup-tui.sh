@@ -638,7 +638,7 @@ EOF
 
     # Add SSH private key path if key was generated
     if [[ "${GENERATE_SSH_KEY:-false}" == "true" ]]; then
-        echo "    ansible_ssh_private_key_file: ${ANSIBLE_SSH_KEY:-keys/wazuh_ansible_key}" >> "$SCRIPT_DIR/inventory/hosts.yml"
+        echo "    ansible_ssh_private_key_file: ${ANSIBLE_SSH_KEY:-${SCRIPT_DIR}/keys/wazuh_ansible_key}" >> "$SCRIPT_DIR/inventory/hosts.yml"
     fi
 
     cat >> "$SCRIPT_DIR/inventory/hosts.yml" << EOF
