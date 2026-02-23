@@ -444,7 +444,23 @@
           index.refresh_interval: "5s"
           plugins.index_state_management.rollover_alias: "{{ wazuh_alerts_alias | default('wazuh-alerts') }}"
         mappings:
+          dynamic_templates:
+            - strings_as_keyword:
+                match_mapping_type: string
+                mapping:
+                  type: keyword
+                  ignore_above: 1024
           properties:
+            "@timestamp":
+              type: date
+            timestamp:
+              type: date
+            cluster:
+              properties:
+                name:
+                  type: keyword
+                node:
+                  type: keyword
             manager:
               properties:
                 name:
@@ -456,6 +472,10 @@
                       ignore_above: 256
             agent:
               properties:
+                id:
+                  type: keyword
+                ip:
+                  type: keyword
                 name:
                   type: text
                   fielddata: true
@@ -463,19 +483,24 @@
                     keyword:
                       type: keyword
                       ignore_above: 256
-                id:
+                version:
                   type: keyword
-                ip:
+            decoder:
+              properties:
+                name:
                   type: keyword
+                parent:
+                  type: keyword
+                fts:
+                  type: long
+                accumulate:
+                  type: long
             rule:
               properties:
-                groups:
-                  type: text
-                  fielddata: true
-                  fields:
-                    keyword:
-                      type: keyword
-                      ignore_above: 256
+                id:
+                  type: keyword
+                level:
+                  type: long
                 description:
                   type: text
                   fielddata: true
@@ -483,6 +508,127 @@
                     keyword:
                       type: keyword
                       ignore_above: 256
+                groups:
+                  type: text
+                  fielddata: true
+                  fields:
+                    keyword:
+                      type: keyword
+                      ignore_above: 256
+                cve:
+                  type: keyword
+                info:
+                  type: keyword
+                frequency:
+                  type: long
+                firedtimes:
+                  type: long
+                mail:
+                  type: boolean
+                pci_dss:
+                  type: keyword
+                gdpr:
+                  type: keyword
+                gpg13:
+                  type: keyword
+                hipaa:
+                  type: keyword
+                nist_800_53:
+                  type: keyword
+                tsc:
+                  type: keyword
+                mitre:
+                  properties:
+                    id:
+                      type: keyword
+                    tactic:
+                      type: keyword
+                    technique:
+                      type: keyword
+            GeoLocation:
+              properties:
+                city_name:
+                  type: keyword
+                country_name:
+                  type: keyword
+                region_name:
+                  type: keyword
+                real_region_name:
+                  type: keyword
+                postal_code:
+                  type: keyword
+                ip:
+                  type: keyword
+                latitude:
+                  type: double
+                longitude:
+                  type: double
+                location:
+                  type: geo_point
+                area_code:
+                  type: long
+                dma_code:
+                  type: long
+            syscheck:
+              properties:
+                path:
+                  type: keyword
+                mode:
+                  type: keyword
+                event:
+                  type: keyword
+                diff:
+                  type: keyword
+                hard_links:
+                  type: keyword
+                tags:
+                  type: keyword
+                size_before:
+                  type: long
+                size_after:
+                  type: long
+                mtime_before:
+                  type: date
+                  format: date_optional_time
+                mtime_after:
+                  type: date
+                  format: date_optional_time
+                inode_before:
+                  type: keyword
+                inode_after:
+                  type: keyword
+                md5_before:
+                  type: keyword
+                md5_after:
+                  type: keyword
+                sha1_before:
+                  type: keyword
+                sha1_after:
+                  type: keyword
+                sha256_before:
+                  type: keyword
+                sha256_after:
+                  type: keyword
+                uid_before:
+                  type: keyword
+                uid_after:
+                  type: keyword
+                gid_before:
+                  type: keyword
+                gid_after:
+                  type: keyword
+                uname_before:
+                  type: keyword
+                uname_after:
+                  type: keyword
+                gname_before:
+                  type: keyword
+                gname_after:
+                  type: keyword
+                perm_before:
+                  type: keyword
+                perm_after:
+                  type: keyword
       priority: 50
     status_code: [200]
     headers:
@@ -510,7 +656,23 @@
           index.refresh_interval: "5s"
           plugins.index_state_management.rollover_alias: "{{ wazuh_archives_alias | default('wazuh-archives') }}"
         mappings:
+          dynamic_templates:
+            - strings_as_keyword:
+                match_mapping_type: string
+                mapping:
+                  type: keyword
+                  ignore_above: 1024
           properties:
+            "@timestamp":
+              type: date
+            timestamp:
+              type: date
+            cluster:
+              properties:
+                name:
+                  type: keyword
+                node:
+                  type: keyword
             manager:
               properties:
                 name:
@@ -522,6 +684,10 @@
                       ignore_above: 256
             agent:
               properties:
+                id:
+                  type: keyword
+                ip:
+                  type: keyword
                 name:
                   type: text
                   fielddata: true
@@ -529,19 +695,24 @@
                     keyword:
                       type: keyword
                       ignore_above: 256
-                id:
+                version:
                   type: keyword
-                ip:
+            decoder:
+              properties:
+                name:
                   type: keyword
+                parent:
+                  type: keyword
+                fts:
+                  type: long
+                accumulate:
+                  type: long
             rule:
               properties:
-                groups:
-                  type: text
-                  fielddata: true
-                  fields:
-                    keyword:
-                      type: keyword
-                      ignore_above: 256
+                id:
+                  type: keyword
+                level:
+                  type: long
                 description:
                   type: text
                   fielddata: true
@@ -549,6 +720,127 @@
                     keyword:
                       type: keyword
                       ignore_above: 256
+                groups:
+                  type: text
+                  fielddata: true
+                  fields:
+                    keyword:
+                      type: keyword
+                      ignore_above: 256
+                cve:
+                  type: keyword
+                info:
+                  type: keyword
+                frequency:
+                  type: long
+                firedtimes:
+                  type: long
+                mail:
+                  type: boolean
+                pci_dss:
+                  type: keyword
+                gdpr:
+                  type: keyword
+                gpg13:
+                  type: keyword
+                hipaa:
+                  type: keyword
+                nist_800_53:
+                  type: keyword
+                tsc:
+                  type: keyword
+                mitre:
+                  properties:
+                    id:
+                      type: keyword
+                    tactic:
+                      type: keyword
+                    technique:
+                      type: keyword
+            GeoLocation:
+              properties:
+                city_name:
+                  type: keyword
+                country_name:
+                  type: keyword
+                region_name:
+                  type: keyword
+                real_region_name:
+                  type: keyword
+                postal_code:
+                  type: keyword
+                ip:
+                  type: keyword
+                latitude:
+                  type: double
+                longitude:
+                  type: double
+                location:
+                  type: geo_point
+                area_code:
+                  type: long
+                dma_code:
+                  type: long
+            syscheck:
+              properties:
+                path:
+                  type: keyword
+                mode:
+                  type: keyword
+                event:
+                  type: keyword
+                diff:
+                  type: keyword
+                hard_links:
+                  type: keyword
+                tags:
+                  type: keyword
+                size_before:
+                  type: long
+                size_after:
+                  type: long
+                mtime_before:
+                  type: date
+                  format: date_optional_time
+                mtime_after:
+                  type: date
+                  format: date_optional_time
+                inode_before:
+                  type: keyword
+                inode_after:
+                  type: keyword
+                md5_before:
+                  type: keyword
+                md5_after:
+                  type: keyword
+                sha1_before:
+                  type: keyword
+                sha1_after:
+                  type: keyword
+                sha256_before:
+                  type: keyword
+                sha256_after:
+                  type: keyword
+                uid_before:
+                  type: keyword
+                uid_after:
+                  type: keyword
+                gid_before:
+                  type: keyword
+                gid_after:
+                  type: keyword
+                uname_before:
+                  type: keyword
+                uname_after:
+                  type: keyword
+                gname_before:
+                  type: keyword
+                gname_after:
+                  type: keyword
+                perm_before:
+                  type: keyword
+                perm_after:
+                  type: keyword
       priority: 50
     status_code: [200]
     headers:
@@ -751,13 +1043,13 @@
 # Update Mappings on Existing Indices
 # ═══════════════════════════════════════════════════════════════
 # Existing indices created before the rollover template won't have
-# the .keyword subfields needed for aggregations (e.g. manager.name).
-# This adds the keyword subfield mappings to all existing wazuh-alerts
-# and wazuh-archives indices so the dashboard can aggregate on them.
-# Enable fielddata on text fields that the Wazuh Dashboard aggregates on.
-# Existing indices may have different type mappings (e.g. agent.id as text),
-# so we only update fielddata on known text fields without changing types.
-- name: Enable fielddata for aggregation on existing alerts/archives indices
+# the full field mappings needed for dashboard aggregations.
+# This updates all existing wazuh-alerts and wazuh-archives indices
+# with the complete set of field mappings matching the official
+# Wazuh template. We only update fielddata on known text fields
+# and add new keyword/numeric/date fields - we do NOT attempt to
+# change existing field types (e.g. text -> keyword) as that would fail.
+- name: Update field mappings on existing alerts/archives indices
   ansible.builtin.uri:
     url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/{{ item.index }}/_mapping"
     method: PUT
@@ -768,6 +1060,12 @@
     body_format: json
     body:
       properties:
+        cluster:
+          properties:
+            name:
+              type: keyword
+            node:
+              type: keyword
         manager:
           properties:
             name:
@@ -778,14 +1076,144 @@
             name:
               type: text
               fielddata: true
+            version:
+              type: keyword
+        decoder:
+          properties:
+            name:
+              type: keyword
+            parent:
+              type: keyword
+            fts:
+              type: long
+            accumulate:
+              type: long
         rule:
           properties:
+            id:
+              type: keyword
+            level:
+              type: long
             groups:
               type: text
               fielddata: true
             description:
               type: text
               fielddata: true
+            cve:
+              type: keyword
+            info:
+              type: keyword
+            frequency:
+              type: long
+            firedtimes:
+              type: long
+            mail:
+              type: boolean
+            pci_dss:
+              type: keyword
+            gdpr:
+              type: keyword
+            gpg13:
+              type: keyword
+            hipaa:
+              type: keyword
+            nist_800_53:
+              type: keyword
+            tsc:
+              type: keyword
+            mitre:
+              properties:
+                id:
+                  type: keyword
+                tactic:
+                  type: keyword
+                technique:
+                  type: keyword
+        GeoLocation:
+          properties:
+            city_name:
+              type: keyword
+            country_name:
+              type: keyword
+            region_name:
+              type: keyword
+            real_region_name:
+              type: keyword
+            postal_code:
+              type: keyword
+            ip:
+              type: keyword
+            latitude:
+              type: double
+            longitude:
+              type: double
+            location:
+              type: geo_point
+            area_code:
+              type: long
+            dma_code:
+              type: long
+        syscheck:
+          properties:
+            path:
+              type: keyword
+            mode:
+              type: keyword
+            event:
+              type: keyword
+            diff:
+              type: keyword
+            hard_links:
+              type: keyword
+            tags:
+              type: keyword
+            size_before:
+              type: long
+            size_after:
+              type: long
+            mtime_before:
+              type: date
+              format: date_optional_time
+            mtime_after:
+              type: date
+              format: date_optional_time
+            inode_before:
+              type: keyword
+            inode_after:
+              type: keyword
+            md5_before:
+              type: keyword
+            md5_after:
+              type: keyword
+            sha1_before:
+              type: keyword
+            sha1_after:
+              type: keyword
+            sha256_before:
+              type: keyword
+            sha256_after:
+              type: keyword
+            uid_before:
+              type: keyword
+            uid_after:
+              type: keyword
+            gid_before:
+              type: keyword
+            gid_after:
+              type: keyword
+            uname_before:
+              type: keyword
+            uname_after:
+              type: keyword
+            gname_before:
+              type: keyword
+            gname_after:
+              type: keyword
+            perm_before:
+              type: keyword
+            perm_after:
+              type: keyword
     status_code: [200]
     headers:
       Content-Type: "application/json"
