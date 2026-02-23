@@ -4,11 +4,11 @@
 - name: Include OS-specific variables
   ansible.builtin.include_vars: "{{ item }}"
   with_first_found:
-    - "{{ ansible_distribution }}-{{ ansible_distribution_major_version }}.yml"
-    - "{{ ansible_distribution }}.yml"
-    - "{{ ansible_os_family }}.yml"
-    - "default.yml"
-  ignore_errors: true
+    - files:
+        - "{{ ansible_distribution }}-{{ ansible_distribution_major_version }}.yml"
+        - "{{ ansible_distribution }}.yml"
+        - "{{ ansible_os_family }}.yml"
+      skip: true
 
 - name: Install prerequisites
   ansible.builtin.include_tasks: prerequisites.yml
@@ -50,8 +50,8 @@
   ansible.builtin.wait_for:
     port: "{{ wazuh_dashboard_port }}"
     host: "{{ ansible_default_ipv4.address }}"
-    delay: 10
-    timeout: 300
+    delay: "{{ wazuh_dashboard_health_check_delay }}"
+    timeout: "{{ wazuh_dashboard_startup_timeout }}"
   become: true
 
 - name: Verify Wazuh Dashboard service is running
@@ -60,19 +60,22 @@
   become: true
   register: dashboard_service_status
   until: dashboard_service_status.status.ActiveState == "active"
-  retries: 30
-  delay: 10
+  retries: "{{ wazuh_dashboard_health_check_retries }}"
+  delay: "{{ wazuh_dashboard_health_check_delay }}"
 
 - name: Wait for Wazuh Dashboard to be ready
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/app/login"
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/api/status"
+    user: "{{ wazuh_indexer_admin_user | default('admin') }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
     status_code: [200, 302]
   register: dashboard_health
-  until: dashboard_health.status in [200, 302]
-  retries: 30
-  delay: 10
-  ignore_errors: true
+  until: dashboard_health.status | default(0) in [200, 302]
+  retries: "{{ wazuh_dashboard_health_check_retries }}"
+  delay: "{{ wazuh_dashboard_health_check_delay }}"
+  failed_when: false
 
 - name: Get dashboard service status if health check failed
   ansible.builtin.command: systemctl status wazuh-dashboard --no-pager -l
@@ -80,7 +83,7 @@
   register: dashboard_status
   changed_when: false
   failed_when: false
-  when: dashboard_health.status is not defined or dashboard_health.status not in [200, 302]
+  when: dashboard_health.status | default(0) not in [200, 302]
 
 - name: Get dashboard journal logs if health check failed
   ansible.builtin.command: journalctl -u wazuh-dashboard --no-pager -n 50
@@ -88,7 +91,7 @@
   register: dashboard_journal
   changed_when: false
   failed_when: false
-  when: dashboard_health.status is not defined or dashboard_health.status not in [200, 302]
+  when: dashboard_health.status | default(0) not in [200, 302]
 
 - name: Display dashboard diagnostic info
   ansible.builtin.debug:
@@ -98,12 +101,24 @@
 
       === Journal Logs ===
       {{ dashboard_journal.stdout | default('No logs available') }}
-  when: dashboard_health.status is not defined or dashboard_health.status not in [200, 302]
+  when: dashboard_health.status | default(0) not in [200, 302]
 
 - name: Fail if dashboard is not healthy
   ansible.builtin.fail:
-    msg: "Wazuh Dashboard failed to start. See diagnostic info above."
-  when: dashboard_health.status is not defined or dashboard_health.status not in [200, 302]
+    msg: |
+      Wazuh Dashboard is not responding to health checks after {{ wazuh_dashboard_health_check_retries | default(30) * wazuh_dashboard_health_check_delay | default(10) }}s.
+      Last status: {{ dashboard_health.status | default('no response') }}
+
+      Common causes:
+        1. Indexer is not running or unreachable (dashboard depends on it)
+        2. SSL certificate mismatch between dashboard and indexer
+        3. Dashboard needs more startup time (increase wazuh_dashboard_health_check_retries)
+
+      Check indexer connectivity from dashboard host:
+        curl -k https://<indexer-ip>:9200 -u admin:<password>
+
+      See diagnostic info above for service status and logs.
+  when: dashboard_health.status | default(0) not in [200, 302]
 
 - name: Setup index patterns
   ansible.builtin.include_tasks: index_patterns.yml

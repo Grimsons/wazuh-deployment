@@ -1,11 +1,61 @@
 ---
 # Wazuh Indexer - JVM Configuration
 
+# ═══════════════════════════════════════════════════════════════
+# Automatic Heap Size Calculation
+# ═══════════════════════════════════════════════════════════════
+# When wazuh_indexer_heap_size is "auto", calculate optimal heap:
+# - 50% of available RAM
+# - Maximum 32GB (JVM compressed OOPs limit)
+# - Minimum 1GB for stability
+
+- name: Get total system memory in MB
+  ansible.builtin.set_fact:
+    total_memory_mb: "{{ ansible_memtotal_mb }}"
+  when: wazuh_indexer_heap_size == "auto"
+
+- name: Calculate optimal heap size (50% of RAM, min 1GB, max 32GB)
+  ansible.builtin.set_fact:
+    calculated_heap_mb: >-
+      {{
+        [
+          [((total_memory_mb | int) * 0.5) | int, 1024] | max,
+          32768
+        ] | min
+      }}
+  when: wazuh_indexer_heap_size == "auto"
+
+- name: Set heap size string from calculation
+  ansible.builtin.set_fact:
+    wazuh_indexer_heap_size_final: >-
+      {% if (calculated_heap_mb | int) >= 1024 %}{{ ((calculated_heap_mb | int) / 1024) | int }}g{% else %}{{ calculated_heap_mb }}m{% endif %}
+  when: wazuh_indexer_heap_size == "auto"
+
+- name: Use specified heap size when not auto
+  ansible.builtin.set_fact:
+    wazuh_indexer_heap_size_final: "{{ wazuh_indexer_heap_size }}"
+  when: wazuh_indexer_heap_size != "auto"
+
+- name: Display calculated heap size
+  ansible.builtin.debug:
+    msg: |
+      JVM Heap Size Configuration:
+      ├─ Total System RAM: {{ ansible_memtotal_mb }} MB
+      ├─ Calculated Heap: {{ calculated_heap_mb | default('N/A') }} MB
+      └─ Final Heap Size: {{ wazuh_indexer_heap_size_final }}
+
+      Note: OpenSearch recommends 50% of RAM, max 32GB for compressed OOPs
+  when: wazuh_indexer_heap_size == "auto"
+
+# ═══════════════════════════════════════════════════════════════
+# Apply JVM Settings
+# ═══════════════════════════════════════════════════════════════
+
 - name: Configure JVM heap size (Xms)
   ansible.builtin.lineinfile:
     path: /etc/wazuh-indexer/jvm.options
     regexp: '^-Xms'
-    line: "-Xms{{ wazuh_indexer_heap_size }}"
+    line: "-Xms{{ wazuh_indexer_heap_size_final }}"
   become: true
   notify: restart wazuh-indexer
 
@@ -13,7 +63,7 @@
   ansible.builtin.lineinfile:
     path: /etc/wazuh-indexer/jvm.options
     regexp: '^-Xmx'
-    line: "-Xmx{{ wazuh_indexer_heap_size }}"
+    line: "-Xmx{{ wazuh_indexer_heap_size_final }}"
   become: true
   notify: restart wazuh-indexer
 

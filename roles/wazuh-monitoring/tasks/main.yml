@@ -1,0 +1,38 @@
+---
+# Wazuh Monitoring Role - Main Tasks
+# ═══════════════════════════════════════════════════════════════
+
+- name: Display monitoring setup info
+  ansible.builtin.debug:
+    msg: "Setting up Wazuh monitoring with Prometheus exporters"
+  when: wazuh_monitoring_enabled | default(true)
+
+# ─────────────────────────────────────────────────────────────────
+# OpenSearch/Indexer Prometheus Exporter
+# ─────────────────────────────────────────────────────────────────
+- name: Setup indexer Prometheus exporter
+  ansible.builtin.include_tasks: indexer-exporter.yml
+  when:
+    - wazuh_monitoring_enabled | default(true)
+    - wazuh_indexer_exporter_enabled | default(true)
+    - "'wazuh_indexers' in group_names"
+
+# ─────────────────────────────────────────────────────────────────
+# Wazuh Manager API Exporter
+# ─────────────────────────────────────────────────────────────────
+- name: Setup manager Prometheus exporter
+  ansible.builtin.include_tasks: manager-exporter.yml
+  when:
+    - wazuh_monitoring_enabled | default(true)
+    - wazuh_manager_exporter_enabled | default(true)
+    - "'wazuh_managers' in group_names"
+
+# ─────────────────────────────────────────────────────────────────
+# Grafana Dashboard Provisioning
+# ─────────────────────────────────────────────────────────────────
+- name: Setup Grafana dashboard
+  ansible.builtin.include_tasks: grafana-dashboard.yml
+  when:
+    - wazuh_monitoring_enabled | default(true)
+    - wazuh_grafana_dashboard_enabled | default(true)
+    - "'wazuh_dashboards' in group_names or wazuh_grafana_host is defined"

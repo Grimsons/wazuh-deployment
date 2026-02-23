@@ -5,9 +5,27 @@
 wazuh_manager_package_name: "wazuh-manager"
 wazuh_manager_service_name: "wazuh-manager"
 
+# Repository settings
+wazuh_repo_gpg_key: "https://packages.wazuh.com/key/GPG-KEY-WAZUH"
+wazuh_repo_url_apt: "https://packages.wazuh.com/4.x/apt/"
+wazuh_repo_url_yum: "https://packages.wazuh.com/4.x/yum/"
+
 # Manager configuration
 wazuh_manager_config_path: /var/ossec/etc/ossec.conf
 wazuh_manager_log_path: /var/ossec/logs
+
+# ═══════════════════════════════════════════════════════════════
+# API Authentication Settings
+# ═══════════════════════════════════════════════════════════════
+# Default password used for initial API authentication (Wazuh ships with this)
+# This password is automatically changed to a secure random password during deployment
+# DO NOT change this unless Wazuh changes their default
+wazuh_api_default_password: "wazuh"
+
+# Startup check timeouts (configurable for slow systems)
+wazuh_api_check_retries: 30
+wazuh_api_check_delay: 10
+wazuh_service_start_timeout: 300
 
 # API settings
 wazuh_manager_api_bind_addr: "0.0.0.0"
@@ -105,6 +123,52 @@ wazuh_log_collection_enabled: true
 # Active response
 wazuh_active_response_enabled: true
 wazuh_active_response_ca_verification: true
+
+# Active response triggers (empty = detection only, no automatic blocking)
+# Example:
+# wazuh_active_responses:
+#   - command: firewall-drop
+#     rules_id: "5763"         # SSH brute force
+#     timeout: 1800
+#   - command: firewall-drop
+#     rules_group: "web_attack"
+#     timeout: 600
+#   - command: firewall-drop
+#     level: 12                # All high-severity alerts
+#     location: all
+#     timeout: 3600
+wazuh_active_responses: []
+
+# Remote syslog listeners (for network devices: Cisco DNA Center, firewalls, etc.)
+# Example:
+# wazuh_syslog_listeners:
+#   - port: 514
+#     protocol: udp
+#     allowed_ips: "10.0.0.0/8"
+#   - port: 1514
+#     protocol: tcp
+#     allowed_ips: "192.168.1.0/24"
+wazuh_syslog_listeners: []
+
+# CDB lists loaded in the ruleset (paths relative to /var/ossec/)
+wazuh_cdb_lists:
+  - "etc/lists/audit-keys"
+  - "etc/lists/amazon/aws-eventnames"
+  - "etc/lists/security-eventchannel"
+  - "etc/lists/malicious-ioc/malware-hashes"
+  - "etc/lists/malicious-ioc/malicious-ip"
+  - "etc/lists/malicious-ioc/malicious-domains"
+
+# Custom content deployment (rules, decoders, CDB lists from files/)
+wazuh_custom_content_enabled: true
+
+# Alerting profile: none | basic | full
+# none:  no email or integration alerts (default - detection only)
+# basic: email alerts for level 12+ (requires wazuh_email_notification_enabled + wazuh_email_* vars)
+# full:  email for level 10+, Slack for level 10+ (also requires wazuh_slack_hook_url)
+wazuh_alerting_profile: "none"
+# Slack webhook URL - used by 'full' alerting profile and explicit Slack integration
+# wazuh_slack_hook_url: "https://hooks.slack.com/services/xxx/yyy/zzz"
 
 # Security Configuration Assessment (SCA)
 wazuh_sca_enabled: true
@@ -296,6 +360,70 @@ wazuh_command_monitoring_enabled: false
 #     interval: "30m"
 wazuh_command_monitoring_commands: []
 
+# ═══════════════════════════════════════════════════════════════
+# Anti-Flooding / Performance Tuning
+# ═══════════════════════════════════════════════════════════════
+# These settings control event rate limiting and queue sizes to prevent
+# agent flooding from overwhelming the manager. Tune based on your
+# deployment size and hardware.
+
+# -- Manager Global EPS Limit (analysisd) --
+# Maximum events per second the analysis engine will process
+# 0 = unlimited (default). Set to a value if you need to cap processing.
+# For large deployments (500+ agents), consider 5000-10000
+wazuh_analysisd_max_eps: 0
+# Timeframe in seconds for EPS calculation (default: 10)
+wazuh_analysisd_eps_timeframe: 10
+
+# -- Remote Agent Queue --
+# Incoming event queue from agents (remoted daemon)
+# If this fills up, agent events are dropped until space is available
+# Default 131072 is fine for most deployments (up to ~500 agents)
+# For 1000+ agents, consider 262144 or 524288
+wazuh_remote_queue_size: 131072
+# How long to wait before closing idle agent sessions
+wazuh_remote_rids_closing_time: "5m"
+
+# -- FIM Rate Limits --
+# File integrity monitoring event processing rate (events/second)
+wazuh_fim_max_eps: 200
+# FIM database synchronization rate limit
+wazuh_fim_sync_max_eps: 10
+
+# -- Internal Options (local_internal_options.conf) --
+# Enable deployment of local_internal_options.conf for daemon tuning
+wazuh_internal_options_enabled: true
+
+# Analysisd thread counts (0 = auto based on CPU cores)
+wazuh_analysisd_event_threads: 0
+wazuh_analysisd_rule_matching_threads: 0
+wazuh_analysisd_dbsync_threads: 0
+
+# Analysisd internal queue sizes (increase for high-throughput)
+# Default 16384 handles ~500 agents. For 1000+ agents, use 32768-65536
+wazuh_analysisd_decode_queue_size: 16384
+wazuh_analysisd_process_queue_size: 16384
+wazuh_analysisd_dbsync_queue_size: 16384
+
+# Remoted daemon tuning
+# Worker threads: 1 thread per ~250 active agents (default: 4)
+wazuh_remoted_worker_pool: 4
+wazuh_remoted_recv_timeout: 1
+
+# Wazuh DB worker threads (0 = use Wazuh default, must be > 0 if set)
+wazuh_db_worker_pool: 0
+
+# Logcollector max files
+wazuh_logcollector_max_files: 256
+
+# Additional internal options (advanced - list of key/value pairs)
+# Example:
+# wazuh_internal_options:
+#   - key: "analysisd.min_rotate_interval"
+#     value: "600"
+#   - key: "remoted.guess_agent_group"
+#     value: "0"
+
 # Indexer connection
 wazuh_indexer_connection_enabled: true
 
@@ -305,6 +433,292 @@ wazuh_filebeat_archives_enabled: false
 # Filebeat version - should be compatible with Wazuh version
 # See: https://documentation.wazuh.com/current/installation-guide/wazuh-indexer/step-by-step.html
 wazuh_filebeat_version: "7.10.2"
+
+# ═══════════════════════════════════════════════════════════════
+# Default Agent Groups
+# ═══════════════════════════════════════════════════════════════
+# Pre-created during deployment so they appear in the Dashboard UI
+# immediately. Agents are assigned to groups after enrollment via
+# the Dashboard, API, or agent_groups CLI.
+#
+# Group shared agent.conf is ADDITIVE to the agent's local ossec.conf.
+# Only role-specific extras are defined here - the base agent templates
+# already handle platform-specific log sources, FIM, and modules.
+#
+# Override or extend in group_vars/all.yml to customize for your environment.
+wazuh_agent_groups:
+
+  # ── Linux Groups ──────────────────────────────────────────────
+
+  - name: "linux-servers"
+    os: "Linux"
+    description: "General-purpose Linux servers (baseline)"
+    config:
+      syscheck:
+        directories:
+          - path: "/opt"
+            check_all: true
+          - path: "/root/.ssh"
+            realtime: true
+          - path: "/var/spool/cron"
+            realtime: true
+            report_changes: true
+          - path: "/etc/cron.d"
+            realtime: true
+            report_changes: true
+      localfile:
+        - location: "/var/log/faillog"
+          format: "syslog"
+        - location: "/var/log/lastlog"
+          format: "syslog"
+      labels:
+        - key: "group.type"
+          value: "server"
+        - key: "group.os"
+          value: "linux"
+
+  - name: "linux-web-servers"
+    os: "Linux"
+    description: "Linux web servers (Nginx, Apache, HAProxy)"
+    config:
+      syscheck:
+        directories:
+          - path: "/var/www"
+            realtime: true
+            report_changes: true
+          - path: "/etc/nginx"
+            realtime: true
+            report_changes: true
+          - path: "/etc/apache2"
+            realtime: true
+            report_changes: true
+          - path: "/etc/httpd"
+            realtime: true
+            report_changes: true
+          - path: "/etc/haproxy"
+            realtime: true
+            report_changes: true
+          - path: "/etc/letsencrypt"
+            check_all: true
+        ignore:
+          - path: "/var/www/html/cache"
+            type: "sregex"
+          - "/var/www/html/storage/logs"
+          - "/var/www/html/storage/framework/sessions"
+      localfile:
+        - location: "/var/log/nginx/access.log"
+          format: "syslog"
+        - location: "/var/log/nginx/error.log"
+          format: "syslog"
+        - location: "/var/log/apache2/access.log"
+          format: "apache"
+        - location: "/var/log/apache2/error.log"
+          format: "apache"
+        - location: "/var/log/httpd/access_log"
+          format: "apache"
+        - location: "/var/log/httpd/error_log"
+          format: "apache"
+      labels:
+        - key: "group.type"
+          value: "server"
+        - key: "group.os"
+          value: "linux"
+        - key: "group.role"
+          value: "web-server"
+
+  - name: "linux-db-servers"
+    os: "Linux"
+    description: "Linux database servers (MySQL, PostgreSQL, MongoDB)"
+    config:
+      syscheck:
+        directories:
+          - path: "/etc/mysql"
+            realtime: true
+            report_changes: true
+          - path: "/etc/postgresql"
+            realtime: true
+            report_changes: true
+          - path: "/etc/mongod.conf"
+            check_all: true
+          - path: "/etc/redis"
+            realtime: true
+            report_changes: true
+        ignore:
+          - "/var/lib/mysql"
+          - "/var/lib/postgresql"
+          - "/var/lib/mongodb"
+      localfile:
+        - location: "/var/log/mysql/error.log"
+          format: "syslog"
+        - location: "/var/log/mysql/slow-query.log"
+          format: "syslog"
+        - location: "/var/log/postgresql/postgresql-*.log"
+          format: "syslog"
+        - location: "/var/log/mongodb/mongod.log"
+          format: "json"
+        - location: "/var/log/redis/redis-server.log"
+          format: "syslog"
+      labels:
+        - key: "group.type"
+          value: "server"
+        - key: "group.os"
+          value: "linux"
+        - key: "group.role"
+          value: "database"
+
+  - name: "linux-docker-hosts"
+    os: "Linux"
+    description: "Linux Docker/container hosts"
+    config:
+      syscheck:
+        directories:
+          - path: "/etc/docker"
+            realtime: true
+            report_changes: true
+          - path: "/root/.docker"
+            check_all: true
+          - path: "/etc/containerd"
+            realtime: true
+            report_changes: true
+      localfile:
+        - location: "/var/log/docker.log"
+          format: "syslog"
+      wodle:
+        - name: "docker-listener"
+          enabled: true
+          interval: "60s"
+      labels:
+        - key: "group.type"
+          value: "server"
+        - key: "group.os"
+          value: "linux"
+        - key: "group.role"
+          value: "docker-host"
+
+  # ── Windows Groups ────────────────────────────────────────────
+
+  - name: "windows-servers"
+    os: "Windows"
+    description: "General-purpose Windows servers (baseline)"
+    config:
+      syscheck:
+        directories:
+          - path: "C:\\Windows\\System32\\inetsrv"
+            check_all: true
+          - path: "C:\\inetpub\\wwwroot"
+            realtime: true
+            report_changes: true
+      labels:
+        - key: "group.type"
+          value: "server"
+        - key: "group.os"
+          value: "windows"
+
+  - name: "windows-dc"
+    os: "Windows"
+    description: "Windows Domain Controllers (Active Directory)"
+    config:
+      syscheck:
+        directories:
+          - path: "C:\\Windows\\NTDS"
+            check_all: true
+          - path: "C:\\Windows\\SYSVOL"
+            realtime: true
+          - path: "C:\\Windows\\System32\\GroupPolicy"
+            realtime: true
+            report_changes: true
+          - path: "C:\\Windows\\System32\\dns"
+            check_all: true
+        windows_registry:
+          - key: "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\NTDS\\Parameters"
+            arch: "both"
+          - key: "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\SecurityProviders"
+            arch: "both"
+          - key: "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\Netlogon\\Parameters"
+            arch: "both"
+          - key: "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System\\Kerberos"
+            arch: "both"
+      localfile:
+        # Directory Service - filter routine internal processing events (1-8)
+        # Keep replication errors (1000+), NTDS events, and security-relevant entries
+        - location: "Directory Service"
+          format: "eventchannel"
+          query: "Event/System[EventID != 1 and EventID != 2 and EventID != 3 and EventID != 4 and EventID != 5 and EventID != 6 and EventID != 7 and EventID != 8]"
+        # DNS Server - filter routine query/response events (256-260) that produce
+        # thousands of eps on busy DCs. Keep zone transfer, dynamic update, and errors.
+        - location: "DNS Server"
+          format: "eventchannel"
+          query: "Event/System[EventID != 256 and EventID != 257 and EventID != 258 and EventID != 259 and EventID != 260]"
+        - location: "DFS Replication"
+          format: "eventchannel"
+        - location: "Microsoft-Windows-ActiveDirectory_DomainService/Diagnostic"
+          format: "eventchannel"
+        # Group Policy operational - track GPO application changes
+        - location: "Microsoft-Windows-GroupPolicy/Operational"
+          format: "eventchannel"
+      labels:
+        - key: "group.type"
+          value: "server"
+        - key: "group.os"
+          value: "windows"
+        - key: "group.role"
+          value: "domain-controller"
+        - key: "group.criticality"
+          value: "critical"
+
+  - name: "windows-workstations"
+    os: "Windows"
+    description: "Windows end-user desktops and laptops"
+    config:
+      syscheck:
+        directories:
+          - path: "C:\\Users\\*\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup"
+            realtime: true
+          - path: "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Startup"
+            realtime: true
+          - path: "C:\\Users\\*\\Downloads"
+            check_all: true
+            restrict: ".*\\.exe$|.*\\.msi$|.*\\.ps1$|.*\\.bat$|.*\\.cmd$|.*\\.vbs$|.*\\.js$"
+        ignore:
+          - "C:\\Users\\*\\AppData\\Local\\Temp"
+          - "C:\\Users\\*\\AppData\\Local\\Microsoft\\Windows\\INetCache"
+      localfile:
+        - location: "Microsoft-Windows-PrintService/Operational"
+          format: "eventchannel"
+        - location: "Microsoft-Windows-DeviceGuard/Operational"
+          format: "eventchannel"
+      labels:
+        - key: "group.type"
+          value: "workstation"
+        - key: "group.os"
+          value: "windows"
+
+  # ── macOS Groups ──────────────────────────────────────────────
+
+  - name: "macos-endpoints"
+    os: "macOS"
+    description: "macOS workstations and laptops"
+    config:
+      syscheck:
+        directories:
+          - path: "/Users/*/Library/Preferences"
+            check_all: true
+          - path: "/Users/*/.zshrc"
+            realtime: true
+            report_changes: true
+          - path: "/Users/*/.bash_profile"
+            realtime: true
+            report_changes: true
+          - path: "/usr/local/Cellar"
+            check_all: true
+        ignore:
+          - "/Users/*/Library/Preferences/ByHost"
+          - "/Users/*/Library/Preferences/com.apple.LaunchServices"
+      labels:
+        - key: "group.type"
+          value: "endpoint"
+        - key: "group.os"
+          value: "macos"
 
 # Log rotation settings
 wazuh_log_rotation_enabled: true

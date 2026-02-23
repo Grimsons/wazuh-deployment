@@ -1,0 +1,124 @@
+<!--
+  Cloud Provider Detection Rules (AWS, Azure, GCP)
+  Rule ID range: 800500-800549
+
+  AWS rules use Wazuh built-in AWS decoder rules as parents:
+    - 80200 = AWS CloudTrail generic event
+    - 80202 = AWS CloudTrail error
+    - 80300+ = other AWS events
+
+  Prerequisites:
+    - AWS/Azure/GCP integrations enabled in group_vars/all/main.yml
+    - Appropriate IAM roles/credentials configured
+-->
+<group name="cloud,aws,custom_cloud_rules,">
+
+  <!-- ═══════════ AWS Console Login ═══════════ -->
+
+  <!-- AWS Console login failure -->
+  <rule id="800500" level="5">
+    <if_sid>80202</if_sid>
+    <field name="aws.eventName">^ConsoleLogin$</field>
+    <field name="aws.responseElements.ConsoleLogin">^Failure$</field>
+    <description>AWS: Console login failure for $(aws.userIdentity.arn)</description>
+    <mitre>
+      <id>T1078</id>
+    </mitre>
+    <group>cloud,aws,authentication_failed,</group>
+  </rule>
+
+  <!-- AWS Console login brute force: 5+ failures in 5 minutes -->
+  <rule id="800501" level="10" frequency="5" timeframe="300">
+    <if_matched_sid>800500</if_matched_sid>
+    <description>AWS: Brute force - 5+ console login failures in 5 minutes</description>
+    <mitre>
+      <id>T1110</id>
+    </mitre>
+    <group>cloud,aws,brute_force,</group>
+  </rule>
+
+  <!-- AWS root account login -->
+  <rule id="800502" level="10">
+    <if_sid>80200</if_sid>
+    <field name="aws.eventName">^ConsoleLogin$</field>
+    <field name="aws.userIdentity.type">^Root$</field>
+    <description>AWS: Root account console login detected</description>
+    <mitre>
+      <id>T1078.004</id>
+    </mitre>
+    <group>cloud,aws,root_login,</group>
+  </rule>
+
+  <!-- ═══════════ AWS IAM Changes ═══════════ -->
+
+  <!-- IAM policy change -->
+  <rule id="800503" level="8">
+    <if_sid>80200</if_sid>
+    <field name="aws.eventName">PutUserPolicy|PutGroupPolicy|PutRolePolicy|AttachUserPolicy|AttachGroupPolicy|AttachRolePolicy|CreatePolicy|DeletePolicy</field>
+    <description>AWS: IAM policy changed - $(aws.eventName) by $(aws.userIdentity.arn)</description>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+    <group>cloud,aws,iam_change,</group>
+  </rule>
+
+  <!-- ═══════════ AWS S3 / Storage ═══════════ -->
+
+  <!-- S3 bucket policy change -->
+  <rule id="800504" level="8">
+    <if_sid>80200</if_sid>
+    <field name="aws.eventName">PutBucketPolicy|DeleteBucketPolicy|PutBucketAcl|PutBucketPublicAccessBlock</field>
+    <description>AWS: S3 bucket policy change - $(aws.eventName) on $(aws.requestParameters.bucketName)</description>
+    <mitre>
+      <id>T1537</id>
+    </mitre>
+    <group>cloud,aws,s3_change,</group>
+  </rule>
+
+  <!-- ═══════════ AWS Security Group ═══════════ -->
+
+  <!-- Security group modification -->
+  <rule id="800505" level="8">
+    <if_sid>80200</if_sid>
+    <field name="aws.eventName">AuthorizeSecurityGroupIngress|AuthorizeSecurityGroupEgress|RevokeSecurityGroupIngress|RevokeSecurityGroupEgress|CreateSecurityGroup|DeleteSecurityGroup</field>
+    <description>AWS: Security group modified - $(aws.eventName) by $(aws.userIdentity.arn)</description>
+    <mitre>
+      <id>T1562.007</id>
+    </mitre>
+    <group>cloud,aws,security_group,</group>
+  </rule>
+
+  <!-- ═══════════ AWS CloudTrail Tampering ═══════════ -->
+
+  <!-- CloudTrail stopped or deleted -->
+  <rule id="800506" level="14">
+    <if_sid>80200</if_sid>
+    <field name="aws.eventName">StopLogging|DeleteTrail|UpdateTrail|PutEventSelectors</field>
+    <description>AWS: CloudTrail logging modified - $(aws.eventName) - POSSIBLE TAMPERING</description>
+    <mitre>
+      <id>T1562.008</id>
+    </mitre>
+    <group>cloud,aws,audit_tampering,attack,</group>
+  </rule>
+
+  <!-- ═══════════ AWS Unauthorized Access ═══════════ -->
+
+  <!-- AccessDenied grouping -->
+  <rule id="800507" level="5">
+    <if_sid>80202</if_sid>
+    <field name="aws.errorCode">AccessDenied|UnauthorizedAccess|Client.UnauthorizedAccess</field>
+    <description>AWS: Access denied - $(aws.eventName) by $(aws.userIdentity.arn)</description>
+    <group>cloud,aws,access_denied,</group>
+  </rule>
+
+  <!-- Repeated AccessDenied: 10+ in 5 minutes (reconnaissance/privilege testing) -->
+  <rule id="800508" level="10" frequency="10" timeframe="300">
+    <if_matched_sid>800507</if_matched_sid>
+    <description>AWS: Possible privilege escalation attempt - 10+ access denied events in 5 minutes</description>
+    <mitre>
+      <id>T1580</id>
+    </mitre>
+    <group>cloud,aws,recon,</group>
+  </rule>
+
+</group>

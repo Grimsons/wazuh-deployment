@@ -733,7 +733,10 @@ ${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/sbin/ufw, /usr/bin/firewall-cmd
 ${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/sbin/semanage, /usr/sbin/setsebool, /usr/sbin/restorecon
 
 # Required for Ansible facts and become
-${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /bin/sh, /bin/bash
+# Note: Restrict to Ansible module runner paths to prevent arbitrary shell access
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/bin/python3 /tmp/.ansible/tmp/*/AnsiballZ_*.py
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/bin/python /tmp/.ansible/tmp/*/AnsiballZ_*.py
+${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/bin/python3 /root/.ansible/tmp/*/AnsiballZ_*.py
 EOF
         print_info "Configured restricted sudo permissions"
         audit_log "SUDO_RESTRICTED" "Restricted sudo configured for: $ANSIBLE_USER"
@@ -1113,22 +1116,13 @@ cleanup_system() {
             ;;
     esac
 
-    # Clean old logs (common to all)
-    find /var/log -type f -name "*.gz" -delete 2>/dev/null || true
-    find /var/log -type f -name "*.1" -delete 2>/dev/null || true
+    # Clean old rotated logs older than 30 days (preserve recent for forensics)
+    find /var/log -type f -name "*.gz" -mtime +30 -delete 2>/dev/null || true
+    find /var/log -type f -name "*.1" -mtime +30 -delete 2>/dev/null || true
     journalctl --vacuum-time=7d 2>/dev/null || true
 
-    # Clear temp files (exclude our own directory if running from /tmp)
-    local script_dir
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-    if [[ "$script_dir" == /tmp/* ]]; then
-        # Running from /tmp, exclude our directory
-        find /tmp -mindepth 1 -maxdepth 1 ! -name "$(basename "$script_dir")" -exec rm -rf {} \; 2>/dev/null || true
-    else
-        rm -rf /tmp/* 2>/dev/null || true
-    fi
-    rm -rf /var/tmp/* 2>/dev/null || true
+    # Clear only wazuh-related temp files (do NOT remove other users' temp files)
+    rm -rf /tmp/wazuh-prep /tmp/wazuh-client-prep* 2>/dev/null || true
 
     print_success "System cleaned up"
 }

@@ -1,5 +1,6 @@
 ---
 # Wazuh Indexer - Firewall Configuration
+# Dynamically allows access only from cluster components (managers, dashboards, indexers)
 
 - name: Check if firewalld is installed
   ansible.builtin.command: which firewall-cmd
@@ -13,42 +14,45 @@
   changed_when: false
   failed_when: false
 
-# Auto-detect network subnet from default interface
-- name: Get default network interface
+# Build dynamic list of allowed IPs from cluster configuration
+- name: Build list of indexer node IPs (for inter-indexer communication)
   ansible.builtin.set_fact:
-    default_interface: "{{ ansible_default_ipv4.interface | default('eth0') }}"
-    default_ip: "{{ ansible_default_ipv4.address | default('0.0.0.0') }}"
-    default_netmask: "{{ ansible_default_ipv4.netmask | default('255.255.255.0') }}"
-    default_network: "{{ ansible_default_ipv4.network | default('0.0.0.0') }}"
+    indexer_node_ips: "{{ wazuh_indexer_nodes | map(attribute='ip') | list }}"
 
-- name: Calculate CIDR prefix from netmask
+- name: Build list of manager node IPs (need to send data to indexer)
   ansible.builtin.set_fact:
-    cidr_prefix: >-
-      {%- set netmask_map = {
-        '255.255.255.255': '32', '255.255.255.254': '31', '255.255.255.252': '30',
-        '255.255.255.248': '29', '255.255.255.240': '28', '255.255.255.224': '27',
-        '255.255.255.192': '26', '255.255.255.128': '25', '255.255.255.0': '24',
-        '255.255.254.0': '23', '255.255.252.0': '22', '255.255.248.0': '21',
-        '255.255.240.0': '20', '255.255.224.0': '19', '255.255.192.0': '18',
-        '255.255.128.0': '17', '255.255.0.0': '16', '255.254.0.0': '15',
-        '255.252.0.0': '14', '255.248.0.0': '13', '255.240.0.0': '12',
-        '255.224.0.0': '11', '255.192.0.0': '10', '255.128.0.0': '9',
-        '255.0.0.0': '8'
-      } -%}
-      {{ netmask_map.get(default_netmask, '24') }}
+    manager_node_ips: "{{ wazuh_manager_nodes | map(attribute='ip') | list }}"
 
-- name: Set auto-detected subnet
+- name: Build list of dashboard node IPs (need to query indexer)
   ansible.builtin.set_fact:
-    auto_detected_subnet: "{{ default_network }}/{{ cidr_prefix }}"
+    dashboard_node_ips: "{{ wazuh_dashboard_nodes | map(attribute='ip') | list }}"
 
-- name: Display detected network
+# Combine all IPs that need HTTP access (9200)
+- name: Build list of IPs allowed for HTTP port (9200)
+  ansible.builtin.set_fact:
+    indexer_http_allowed_ips: "{{ (indexer_node_ips + manager_node_ips + dashboard_node_ips + (wazuh_indexer_additional_allowed_ips | default([]))) | unique }}"
+
+# Only indexers need transport port access (9300)
+- name: Build list of IPs allowed for transport port (9300)
+  ansible.builtin.set_fact:
+    indexer_transport_allowed_ips: "{{ (indexer_node_ips + (wazuh_indexer_additional_transport_ips | default([]))) | unique }}"
+
+- name: Display allowed IPs for indexer
   ansible.builtin.debug:
-    msg: "Auto-detected subnet: {{ auto_detected_subnet }} (Interface: {{ default_interface }}, IP: {{ default_ip }})"
+    msg: |
+      Indexer Firewall - Dynamic IP Configuration:
+      ═══════════════════════════════════════════════════════════════
+      HTTP Port ({{ wazuh_indexer_http_port }}) allowed from:
+        - Indexers: {{ indexer_node_ips | join(', ') }}
+        - Managers: {{ manager_node_ips | join(', ') }}
+        - Dashboards: {{ dashboard_node_ips | join(', ') }}
+        {% if wazuh_indexer_additional_allowed_ips | default([]) | length > 0 %}
+        - Additional: {{ wazuh_indexer_additional_allowed_ips | join(', ') }}
+        {% endif %}
 
-# Use auto-detected subnet if not explicitly configured
-- name: Set allowed networks (use auto-detect if not configured)
-  ansible.builtin.set_fact:
-    effective_cluster_networks: "{{ wazuh_allowed_cluster_networks | default([auto_detected_subnet]) }}"
+      Transport Port ({{ wazuh_indexer_transport_port | default(9300) }}) allowed from:
+        - Indexers only: {{ indexer_transport_allowed_ips | join(', ') }}
+      ═══════════════════════════════════════════════════════════════
 
 # Install UFW on Debian/Ubuntu if not present and no firewalld
 - name: Install UFW (Debian/Ubuntu)
@@ -132,25 +136,29 @@
         proto: tcp
       become: true
 
-    - name: Allow Wazuh Indexer HTTP port from cluster networks
+    # HTTP port (9200) - Allow from managers, dashboards, and other indexers
+    - name: Allow Wazuh Indexer HTTP port from cluster components
       community.general.ufw:
         rule: allow
         port: "{{ wazuh_indexer_http_port }}"
         proto: tcp
         from_ip: "{{ item }}"
+        comment: "Wazuh Indexer HTTP - {{ item }}"
       become: true
-      loop: "{{ effective_cluster_networks }}"
+      loop: "{{ indexer_http_allowed_ips }}"
 
-    - name: Allow Wazuh Indexer transport port from cluster networks
+    # Transport port (9300) - Only allow from other indexers
+    - name: Allow Wazuh Indexer transport port from other indexers
       community.general.ufw:
         rule: allow
         port: "{{ wazuh_indexer_transport_port | default(9300) }}"
         proto: tcp
         from_ip: "{{ item }}"
+        comment: "Wazuh Indexer Transport - {{ item }}"
       become: true
-      loop: "{{ effective_cluster_networks }}"
+      loop: "{{ indexer_transport_allowed_ips }}"
 
-# Firewalld (RHEL/CentOS)
+# Firewalld (RHEL/CentOS) - Using rich rules for source IP restrictions
 - name: Configure firewalld rules
   when: firewalld_check.rc == 0
   block:
@@ -168,19 +176,23 @@
         state: enabled
       become: true
 
-    - name: Allow Wazuh Indexer HTTP port
+    # HTTP port (9200) - Allow from managers, dashboards, and other indexers
+    - name: Allow Wazuh Indexer HTTP port from cluster components (firewalld)
       ansible.posix.firewalld:
-        port: "{{ wazuh_indexer_http_port }}/tcp"
+        rich_rule: 'rule family="ipv4" source address="{{ item }}" port port="{{ wazuh_indexer_http_port }}" protocol="tcp" accept'
         permanent: true
         state: enabled
       become: true
+      loop: "{{ indexer_http_allowed_ips }}"
 
-    - name: Allow Wazuh Indexer transport port
+    # Transport port (9300) - Only allow from other indexers
+    - name: Allow Wazuh Indexer transport port from other indexers (firewalld)
       ansible.posix.firewalld:
-        port: "{{ wazuh_indexer_transport_port | default(9300) }}/tcp"
+        rich_rule: 'rule family="ipv4" source address="{{ item }}" port port="{{ wazuh_indexer_transport_port | default(9300) }}" protocol="tcp" accept'
         permanent: true
         state: enabled
       become: true
+      loop: "{{ indexer_transport_allowed_ips }}"
 
     - name: Reload firewalld
       ansible.builtin.command: firewall-cmd --reload

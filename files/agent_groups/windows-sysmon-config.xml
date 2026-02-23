@@ -1,0 +1,175 @@
+<!--
+  Sysmon Configuration for Wazuh Agent Groups
+  Based on SwiftOnSecurity/sysmon-config with technique_id annotations for MITRE ATT&CK mapping.
+
+  Deploy to Windows agents via Wazuh agent group or manually:
+    sysmon.exe -accepteula -i sysmon-config.xml
+
+  Events enabled:
+    1  - Process creation
+    3  - Network connection
+    5  - Process terminated
+    6  - Driver loaded
+    7  - Image loaded (DLL)
+    8  - CreateRemoteThread (process injection)
+    10 - ProcessAccess (credential dumping)
+    11 - FileCreate
+    12 - RegistryEvent (Object create/delete)
+    13 - RegistryEvent (Value set)
+    14 - RegistryEvent (Key/Value rename)
+    15 - FileCreateStreamHash (ADS)
+    17 - PipeEvent (Pipe created)
+    18 - PipeEvent (Pipe connected)
+    22 - DNSEvent (DNS query)
+    23 - FileDelete
+-->
+<Sysmon schemaversion="4.90">
+  <HashAlgorithms>md5,sha256,IMPHASH</HashAlgorithms>
+  <CheckRevocation>False</CheckRevocation>
+
+  <EventFiltering>
+
+    <!-- Event 1: Process Creation - Log all with technique annotations -->
+    <RuleGroup name="" groupRelation="or">
+      <ProcessCreate onmatch="exclude">
+        <!-- Exclude noisy system processes -->
+        <Image condition="is">C:\Windows\System32\conhost.exe</Image>
+        <Image condition="is">C:\Windows\System32\wbem\WmiPrvSE.exe</Image>
+        <ParentImage condition="is">C:\Windows\System32\services.exe</ParentImage>
+      </ProcessCreate>
+    </RuleGroup>
+
+    <!-- Event 3: Network Connection -->
+    <RuleGroup name="" groupRelation="or">
+      <NetworkConnect onmatch="exclude">
+        <!-- Exclude Wazuh agent traffic -->
+        <Image condition="end with">ossec-agent.exe</Image>
+        <DestinationPort condition="is">1514</DestinationPort>
+      </NetworkConnect>
+    </RuleGroup>
+
+    <!-- Event 5: Process Terminated -->
+    <RuleGroup name="" groupRelation="or">
+      <ProcessTerminate onmatch="include">
+        <Image condition="begin with">C:\Users</Image>
+        <Image condition="begin with">C:\Temp</Image>
+        <Image condition="begin with">C:\Windows\Temp</Image>
+      </ProcessTerminate>
+    </RuleGroup>
+
+    <!-- Event 6: Driver Loaded -->
+    <RuleGroup name="technique_id=T1014,technique_name=Rootkit" groupRelation="or">
+      <DriverLoad onmatch="exclude">
+        <Signature condition="contains">Microsoft</Signature>
+        <Signature condition="contains">Windows</Signature>
+      </DriverLoad>
+    </RuleGroup>
+
+    <!-- Event 7: Image Loaded (DLL) -->
+    <RuleGroup name="" groupRelation="or">
+      <ImageLoad onmatch="include">
+        <!-- Detect unsigned DLLs loaded from user directories -->
+        <ImageLoaded condition="begin with">C:\Users</ImageLoaded>
+        <ImageLoaded condition="begin with">C:\Temp</ImageLoaded>
+        <ImageLoaded condition="contains">\AppData\</ImageLoaded>
+      </ImageLoad>
+    </RuleGroup>
+
+    <!-- Event 8: CreateRemoteThread - Process Injection Detection -->
+    <RuleGroup name="technique_id=T1055,technique_name=Process Injection" groupRelation="or">
+      <CreateRemoteThread onmatch="exclude">
+        <!-- Exclude known legitimate remote thread creators -->
+        <SourceImage condition="is">C:\Windows\System32\csrss.exe</SourceImage>
+        <SourceImage condition="is">C:\Windows\System32\lsass.exe</SourceImage>
+        <SourceImage condition="is">C:\Windows\System32\svchost.exe</SourceImage>
+        <SourceImage condition="end with">\MsMpEng.exe</SourceImage>
+      </CreateRemoteThread>
+    </RuleGroup>
+
+    <!-- Event 10: ProcessAccess - Credential Dumping Detection -->
+    <RuleGroup name="technique_id=T1003,technique_name=Credential Dumping" groupRelation="or">
+      <ProcessAccess onmatch="include">
+        <!-- Detect access to LSASS -->
+        <TargetImage condition="is">C:\Windows\System32\lsass.exe</TargetImage>
+      </ProcessAccess>
+    </RuleGroup>
+
+    <!-- Event 11: FileCreate -->
+    <RuleGroup name="" groupRelation="or">
+      <FileCreate onmatch="include">
+        <!-- Monitor executable creation in suspicious locations -->
+        <TargetFilename condition="end with">.exe</TargetFilename>
+        <TargetFilename condition="end with">.dll</TargetFilename>
+        <TargetFilename condition="end with">.ps1</TargetFilename>
+        <TargetFilename condition="end with">.bat</TargetFilename>
+        <TargetFilename condition="end with">.cmd</TargetFilename>
+        <TargetFilename condition="end with">.vbs</TargetFilename>
+        <TargetFilename condition="end with">.js</TargetFilename>
+        <TargetFilename condition="end with">.hta</TargetFilename>
+        <TargetFilename condition="end with">.scr</TargetFilename>
+        <TargetFilename condition="contains">\Startup\</TargetFilename>
+      </FileCreate>
+    </RuleGroup>
+
+    <!-- Events 12/13/14: Registry -->
+    <RuleGroup name="" groupRelation="or">
+      <RegistryEvent onmatch="include">
+        <!-- Run keys - persistence -->
+        <TargetObject condition="contains">\CurrentVersion\Run</TargetObject>
+        <TargetObject condition="contains">\CurrentVersion\RunOnce</TargetObject>
+        <!-- Services -->
+        <TargetObject condition="contains">\Services\</TargetObject>
+        <!-- Scheduled tasks -->
+        <TargetObject condition="contains">\Schedule\TaskCache</TargetObject>
+        <!-- COM objects -->
+        <TargetObject condition="contains">\InprocServer32</TargetObject>
+        <!-- Image File Execution Options (debugger persistence) -->
+        <TargetObject condition="contains">\Image File Execution Options\</TargetObject>
+        <!-- AppInit DLLs -->
+        <TargetObject condition="contains">\AppInit_DLLs</TargetObject>
+        <!-- Security providers -->
+        <TargetObject condition="contains">\SecurityProviders</TargetObject>
+      </RegistryEvent>
+    </RuleGroup>
+
+    <!-- Event 15: FileCreateStreamHash (Alternate Data Streams) -->
+    <RuleGroup name="technique_id=T1564.004,technique_name=NTFS File Attributes" groupRelation="or">
+      <FileCreateStreamHash onmatch="include">
+        <TargetFilename condition="contains">:</TargetFilename>
+      </FileCreateStreamHash>
+    </RuleGroup>
+
+    <!-- Events 17/18: Named Pipes -->
+    <RuleGroup name="" groupRelation="or">
+      <PipeEvent onmatch="include">
+        <!-- Known malicious pipe names -->
+        <PipeName condition="begin with">\PSHost</PipeName>
+        <PipeName condition="begin with">\MSSE-</PipeName>
+        <PipeName condition="begin with">\msagent_</PipeName>
+        <PipeName condition="begin with">\postex_</PipeName>
+        <PipeName condition="begin with">\status_</PipeName>
+      </PipeEvent>
+    </RuleGroup>
+
+    <!-- Event 22: DNS Query -->
+    <RuleGroup name="" groupRelation="or">
+      <DnsQuery onmatch="exclude">
+        <!-- Exclude common legitimate DNS -->
+        <QueryName condition="end with">.microsoft.com</QueryName>
+        <QueryName condition="end with">.windows.com</QueryName>
+        <QueryName condition="end with">.windowsupdate.com</QueryName>
+        <QueryName condition="end with">.office.com</QueryName>
+      </DnsQuery>
+    </RuleGroup>
+
+    <!-- Event 23: FileDelete -->
+    <RuleGroup name="" groupRelation="or">
+      <FileDelete onmatch="include">
+        <TargetFilename condition="end with">.exe</TargetFilename>
+        <TargetFilename condition="end with">.dll</TargetFilename>
+        <TargetFilename condition="contains">\Windows\Temp\</TargetFilename>
+      </FileDelete>
+    </RuleGroup>
+
+  </EventFiltering>
+</Sysmon>

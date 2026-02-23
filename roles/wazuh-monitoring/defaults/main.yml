@@ -1,0 +1,104 @@
+---
+# Wazuh Monitoring Role - Default Variables
+# ═══════════════════════════════════════════════════════════════
+
+# Enable/disable monitoring components
+wazuh_monitoring_enabled: true
+wazuh_indexer_exporter_enabled: true
+wazuh_manager_exporter_enabled: true
+
+# ─────────────────────────────────────────────────────────────────
+# OpenSearch/Indexer Prometheus Exporter
+# ─────────────────────────────────────────────────────────────────
+# The OpenSearch Prometheus exporter plugin version
+# Should match your OpenSearch version (Wazuh 4.x uses OpenSearch 2.x)
+wazuh_opensearch_prometheus_plugin_version: "2.11.1.0"
+
+# Port for the indexer metrics endpoint
+wazuh_indexer_metrics_port: 9114
+
+# Metrics to collect from indexer
+wazuh_indexer_metrics:
+  cluster_health: true
+  node_stats: true
+  index_stats: true
+  jvm_stats: true
+
+# ─────────────────────────────────────────────────────────────────
+# Wazuh Manager API Exporter
+# ─────────────────────────────────────────────────────────────────
+# Port for the manager exporter to listen on
+wazuh_manager_exporter_port: 9115
+
+# How often to scrape the Wazuh API (seconds)
+wazuh_manager_exporter_scrape_interval: 30
+
+# Wazuh API connection settings (usually localhost on manager)
+wazuh_api_host: "localhost"
+wazuh_api_port: 55000
+wazuh_api_protocol: "https"
+
+# API credentials - should come from vault
+# wazuh_api_user: "wazuh-wui"
+# wazuh_api_password: "{{ vault_wazuh_api_password }}"
+
+# Exporter installation directory
+wazuh_exporter_install_dir: "/opt/wazuh-exporter"
+
+# Exporter user/group
+wazuh_exporter_user: "wazuh-exporter"
+wazuh_exporter_group: "wazuh-exporter"
+
+# ─────────────────────────────────────────────────────────────────
+# Prometheus Scrape Config (for reference)
+# ─────────────────────────────────────────────────────────────────
+# Add these targets to your Prometheus configuration:
+#
+# scrape_configs:
+#   - job_name: 'wazuh-indexer'
+#     static_configs:
+#       - targets: ['indexer1:9114', 'indexer2:9114']
+#     metrics_path: /_prometheus/metrics
+#     scheme: https
+#     tls_config:
+#       insecure_skip_verify: true
+#
+#   - job_name: 'wazuh-manager'
+#     static_configs:
+#       - targets: ['manager1:9115']
+
+# ─────────────────────────────────────────────────────────────────
+# Grafana Dashboard
+# ─────────────────────────────────────────────────────────────────
+# Whether to auto-provision the Grafana dashboard
+wazuh_grafana_dashboard_enabled: true
+
+# Grafana provisioning directory (if using provisioning)
+wazuh_grafana_provisioning_dir: "/etc/grafana/provisioning/dashboards"
+
+# Grafana API for dashboard import (alternative method)
+# wazuh_grafana_url: "http://localhost:3000"
+# wazuh_grafana_api_key: "{{ vault_grafana_api_key }}"
+
+# ─────────────────────────────────────────────────────────────────
+# Alert Thresholds (for Grafana alerts)
+# ─────────────────────────────────────────────────────────────────
+wazuh_alert_thresholds:
+  # Cluster health
+  cluster_status_yellow_warn: true
+  cluster_status_red_critical: true
+
+  # Agent connectivity
+  disconnected_agents_warn: 5
+  disconnected_agents_critical: 20
+
+  # Disk usage
+  disk_usage_warn_percent: 75
+  disk_usage_critical_percent: 90
+
+  # Events
+  events_per_second_warn: 10000
+
+  # JVM heap
+  jvm_heap_usage_warn_percent: 80
+  jvm_heap_usage_critical_percent: 95

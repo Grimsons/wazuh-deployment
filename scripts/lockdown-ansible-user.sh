@@ -34,7 +34,7 @@ fi
 print_info "Locking down user: $ANSIBLE_USER"
 
 # Create the unlock script that the user can run to restore access
-cat > "$UNLOCK_SCRIPT" << 'UNLOCKEOF'
+cat > "$UNLOCK_SCRIPT" << UNLOCKEOF
 #!/bin/bash
 # Wazuh Deployment - Unlock Script
 # Restores full sudo access to the ansible deployment user
@@ -42,33 +42,34 @@ cat > "$UNLOCK_SCRIPT" << 'UNLOCKEOF'
 
 set -euo pipefail
 
-ANSIBLE_USER="${SUDO_USER:-wazuh-deploy}"
-SUDOERS_FILE="/etc/sudoers.d/${ANSIBLE_USER}"
+# Hardcoded at lockdown time - always unlocks the correct deployment user
+ANSIBLE_USER="${ANSIBLE_USER}"
+SUDOERS_FILE="/etc/sudoers.d/\${ANSIBLE_USER}"
 LOCK_FLAG="/var/lib/wazuh-deploy/.locked"
 
 # Verify we're being run correctly
-if [[ $EUID -ne 0 ]]; then
+if [[ \$EUID -ne 0 ]]; then
     echo "This script must be run with sudo"
     exit 1
 fi
 
 # Restore full sudo access
-echo "${ANSIBLE_USER} ALL=(ALL) NOPASSWD: ALL" > "$SUDOERS_FILE"
-chmod 440 "$SUDOERS_FILE"
+echo "\${ANSIBLE_USER} ALL=(ALL) NOPASSWD: ALL" > "\$SUDOERS_FILE"
+chmod 440 "\$SUDOERS_FILE"
 
 # Validate sudoers syntax
-if ! visudo -c -f "$SUDOERS_FILE" &>/dev/null; then
+if ! visudo -c -f "\$SUDOERS_FILE" &>/dev/null; then
     echo "ERROR: Invalid sudoers syntax"
     exit 1
 fi
 
 # Remove lock flag
-rm -f "$LOCK_FLAG"
+rm -f "\$LOCK_FLAG"
 
 # Log the unlock
-logger -t wazuh-deploy "Ansible deployment user $ANSIBLE_USER unlocked by $(whoami)"
+logger -t wazuh-deploy "Ansible deployment user \$ANSIBLE_USER unlocked by \$(whoami)"
 
-echo "Deployment user $ANSIBLE_USER has been unlocked"
+echo "Deployment user \$ANSIBLE_USER has been unlocked"
 echo "Full sudo access has been restored"
 echo "Remember to run lockdown after deployment completes"
 UNLOCKEOF
@@ -90,9 +91,11 @@ cat > "$SUDOERS_FILE" << EOF
 # Allow unlocking for next deployment
 ${ANSIBLE_USER} ALL=(ALL) NOPASSWD: ${UNLOCK_SCRIPT}
 
-# Allow basic Ansible connectivity checks (gather_facts)
-${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/bin/python3, /usr/bin/python
-${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /bin/sh -c echo*
+# NOTE: Ansible's Python module system (gather_facts, stat, etc.) requires
+# 'sudo python3' which is equivalent to root shell access. We intentionally
+# do NOT allow this. Playbooks that need to work on locked-down hosts
+# (e.g. unlock-deploy-user.yml, health checks) must use the 'raw' module
+# with explicit sudo commands that match the rules above.
 
 # Allow checking Wazuh service status (read-only)
 ${ANSIBLE_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl status wazuh-*

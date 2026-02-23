@@ -114,8 +114,11 @@ When locked, the deployment user can only:
 # From control node - unlock all hosts
 ansible-playbook unlock-deploy-user.yml
 
+# Or use the make shortcut:
+make unlock
+
 # Manual unlock on single host
-ssh wazuh-deploy@HOST 'sudo /usr/local/bin/wazuh-unlock-deploy'
+ssh wazuh-deploy@<host-ip> 'sudo /usr/local/bin/wazuh-unlock-deploy'
 ```
 
 ### Disabling Lockdown
@@ -123,7 +126,7 @@ ssh wazuh-deploy@HOST 'sudo /usr/local/bin/wazuh-unlock-deploy'
 To disable automatic lockdown:
 
 ```yaml
-# In group_vars/all.yml
+# In group_vars/all/main.yml
 wazuh_lockdown_deploy_user: false
 ```
 
@@ -288,6 +291,37 @@ Wazuh includes rules and dashboards for:
 - TSC (SOC 2)
 - GPG13
 
+## Detection Rules
+
+### Included Rulesets
+
+This deployment ships with detection rules from two sources:
+
+1. **Project-specific rules** (ID range `800100-800299`) - Custom rules for Linux attack detection, PowerShell monitoring, and threat hunting
+2. **[SOCFortress Wazuh-Rules](https://github.com/socfortress/Wazuh-Rules)** - Community-maintained detection rules with MITRE ATT&CK mapping, covering:
+   - Windows Sysmon (13 event types, 1000+ rules)
+   - Linux auditd (64 rules)
+   - Sysmon for Linux (14 rules)
+   - Suricata IDS, YARA, and infrastructure health
+
+All rules are deployed to the Manager at `/var/ossec/etc/rules/` and `/var/ossec/etc/decoders/` during the manager role execution. No additional agent configuration is needed for rules to take effect - agents send events, and the manager evaluates them against all loaded rules.
+
+### Rule ID Ranges
+
+| Range | Source | Description |
+|-------|--------|-------------|
+| `1-99999` | Wazuh built-in | Default rules shipped with Wazuh |
+| `100000-199999` | [SOCFortress](https://github.com/socfortress/Wazuh-Rules) | Community detection rules |
+| `200000-699999` | [SOCFortress](https://github.com/socfortress/Wazuh-Rules) | Linux, infra, and response rules |
+| `800100-800299` | Project-specific | Custom attack detection and PowerShell rules |
+
+### Prerequisites for Full Detection Coverage
+
+- **Windows Sysmon rules**: Requires [Sysmon](https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon) installed on Windows agents with a comprehensive configuration (e.g., [SwiftOnSecurity/sysmon-config](https://github.com/SwiftOnSecurity/sysmon-config))
+- **Auditd rules**: Requires auditd configured on Linux agents (enabled by default in this deployment)
+- **Suricata rules**: Requires Suricata IDS/IPS forwarding logs to Wazuh
+- **YARA rules**: Requires YARA integration configured on agents
+
 ## Security Checklist
 
 ### Pre-Deployment
@@ -295,7 +329,7 @@ Wazuh includes rules and dashboards for:
 - [ ] Secure control node with encryption and access controls
 - [ ] Back up `.vault_password` file securely (offline storage recommended)
 - [ ] Generate certificates (done automatically by setup.sh)
-- [ ] Review `group_vars/all.yml` security settings
+- [ ] Review `group_vars/all/main.yml` security settings
 - [ ] Plan network segmentation
 
 ### Post-Deployment
@@ -313,7 +347,7 @@ Wazuh includes rules and dashboards for:
 - [ ] Monitor health check results
 - [ ] Review security alerts daily
 - [ ] Rotate credentials periodically (`./scripts/manage-vault.sh rotate`)
-- [ ] Monitor certificate expiration (`ansible-playbook playbooks/certificate-management.yml --tags check-expiry`)
+- [ ] Monitor certificate expiration (`make certs-check`)
 - [ ] Keep Wazuh version updated
 - [ ] Review and update firewall rules
 - [ ] Test disaster recovery procedures

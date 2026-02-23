@@ -1,0 +1,131 @@
+<!--
+  Windows Event Log Detection Rules (non-Sysmon)
+  Rule ID range: 800400-800449
+
+  Covers Windows Security/System event log entries that don't require Sysmon.
+  Uses Wazuh built-in Windows decoder rule IDs as parents:
+    - 60106 = Windows Security Event (generic)
+    - 18100-18104 = Windows System Event
+-->
+<group name="windows,custom_windows_events,">
+
+  <!-- ═══════════ Failed Logon Detection ═══════════ -->
+
+  <!-- Failed logon Event 4625 -->
+  <rule id="800400" level="5">
+    <if_sid>60106</if_sid>
+    <field name="win.system.eventID">^4625$</field>
+    <description>Windows: Failed logon attempt - Event 4625</description>
+    <group>authentication_failed,win_evt_logon,</group>
+  </rule>
+
+  <!-- Brute force: 5+ failed logons in 2 minutes from same source -->
+  <rule id="800401" level="10" frequency="5" timeframe="120">
+    <if_matched_sid>800400</if_matched_sid>
+    <same_source_ip />
+    <description>Windows: Brute force attack - 5+ failed logons from same source in 2 minutes</description>
+    <mitre>
+      <id>T1110</id>
+    </mitre>
+    <group>authentication_failed,brute_force,</group>
+  </rule>
+
+  <!-- ═══════════ Account Management ═══════════ -->
+
+  <!-- User account created Event 4720 -->
+  <rule id="800402" level="8">
+    <if_sid>60106</if_sid>
+    <field name="win.system.eventID">^4720$</field>
+    <description>Windows: User account created - Event 4720</description>
+    <mitre>
+      <id>T1136</id>
+    </mitre>
+    <group>account_change,win_evt_account,</group>
+  </rule>
+
+  <!-- User account deleted Event 4726 -->
+  <rule id="800403" level="8">
+    <if_sid>60106</if_sid>
+    <field name="win.system.eventID">^4726$</field>
+    <description>Windows: User account deleted - Event 4726</description>
+    <mitre>
+      <id>T1531</id>
+    </mitre>
+    <group>account_change,win_evt_account,</group>
+  </rule>
+
+  <!-- User added to privileged group Events 4728/4732/4756 -->
+  <rule id="800408" level="10">
+    <if_sid>60106</if_sid>
+    <field name="win.system.eventID">^4728$|^4732$|^4756$</field>
+    <description>Windows: User added to privileged group - Event $(win.system.eventID)</description>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+    <group>account_change,privilege_escalation,</group>
+  </rule>
+
+  <!-- ═══════════ Service Installation ═══════════ -->
+
+  <!-- New service installed Event 7045 -->
+  <rule id="800404" level="8">
+    <if_sid>18100,18101,18102,18103,18104</if_sid>
+    <field name="win.system.eventID">^7045$</field>
+    <description>Windows: New service installed - $(win.eventdata.serviceName)</description>
+    <mitre>
+      <id>T1543.003</id>
+    </mitre>
+    <group>service_install,persistence,</group>
+  </rule>
+
+  <!-- Suspicious service: cmd.exe, powershell, or encoded command in service path -->
+  <rule id="800405" level="12">
+    <if_sid>800404</if_sid>
+    <regex>cmd\.exe|powershell|cmd /c|cmd /k|cmd\.exe /c|-enc |-e |-EncodedCommand|%COMSPEC%</regex>
+    <description>Windows: Suspicious service installed with shell execution - $(win.eventdata.serviceName)</description>
+    <mitre>
+      <id>T1543.003</id>
+      <id>T1059</id>
+    </mitre>
+    <group>service_install,persistence,attack,</group>
+  </rule>
+
+  <!-- ═══════════ Scheduled Task ═══════════ -->
+
+  <!-- Scheduled task created Event 4698 -->
+  <rule id="800406" level="6">
+    <if_sid>60106</if_sid>
+    <field name="win.system.eventID">^4698$</field>
+    <description>Windows: Scheduled task created - Event 4698</description>
+    <mitre>
+      <id>T1053.005</id>
+    </mitre>
+    <group>scheduled_task,persistence,</group>
+  </rule>
+
+  <!-- Suspicious scheduled task: encoded commands or temp paths -->
+  <rule id="800407" level="12">
+    <if_sid>800406</if_sid>
+    <regex>-enc |-e |-EncodedCommand|\\Temp\\|\\tmp\\|powershell.*hidden|cmd\.exe /c</regex>
+    <description>Windows: Suspicious scheduled task with encoded/hidden command</description>
+    <mitre>
+      <id>T1053.005</id>
+      <id>T1059</id>
+    </mitre>
+    <group>scheduled_task,persistence,attack,</group>
+  </rule>
+
+  <!-- ═══════════ Audit Log Tampering ═══════════ -->
+
+  <!-- Audit log cleared Event 1102 -->
+  <rule id="800409" level="12">
+    <if_sid>60106</if_sid>
+    <field name="win.system.eventID">^1102$</field>
+    <description>Windows: Security audit log cleared - Event 1102</description>
+    <mitre>
+      <id>T1070.001</id>
+    </mitre>
+    <group>log_clearing,defense_evasion,attack,</group>
+  </rule>
+
+</group>

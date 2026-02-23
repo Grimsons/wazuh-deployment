@@ -50,12 +50,13 @@ create_snapshot() {
     local timestamp=$(date +%Y%m%dT%H%M%S)
     local snapshot_dir="$ROLLBACK_DIR/$timestamp"
 
-    print_header "Creating Pre-Deployment Snapshot"
+    # Send status messages to stderr so stdout only contains the timestamp
+    print_header "Creating Pre-Deployment Snapshot" >&2
 
     mkdir -p "$snapshot_dir"
 
     # Run backup playbook
-    print_info "Running backup playbook..."
+    print_info "Running backup playbook..." >&2
     cd "$PROJECT_DIR"
 
     if ansible-playbook playbooks/backup.yml \
@@ -63,8 +64,8 @@ create_snapshot() {
         -e "backup_timestamp=$timestamp" \
         -e "backup_indexer=true" \
         -e "backup_manager=true" \
-        -e "backup_dashboard=true" 2>&1; then
-        print_success "Snapshot created: $timestamp"
+        -e "backup_dashboard=true" >&2; then
+        print_success "Snapshot created: $timestamp" >&2
         echo "$timestamp" > "$LATEST_ROLLBACK_FILE"
         echo "$timestamp"
     else
@@ -161,7 +162,8 @@ do_rollback() {
 # Main deployment with snapshot
 do_deployment() {
     local playbook="${1:-site.yml}"
-    local extra_args="${@:2}"
+    shift || true
+    local extra_args=("$@")
 
     print_header "Wazuh Deployment with Rollback Support"
 
@@ -214,7 +216,7 @@ do_deployment() {
     print_info "Playbook: $playbook"
     echo
 
-    if ansible-playbook "$playbook" $extra_args; then
+    if ansible-playbook "$playbook" "${extra_args[@]}"; then
         print_success "Deployment completed successfully"
         echo
         print_info "If issues occur, rollback with: $0 --rollback"

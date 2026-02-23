@@ -5,6 +5,11 @@
 wazuh_indexer_package_name: "wazuh-indexer"
 wazuh_indexer_service_name: "wazuh-indexer"
 
+# Repository settings
+wazuh_repo_gpg_key: "https://packages.wazuh.com/key/GPG-KEY-WAZUH"
+wazuh_repo_url_apt: "https://packages.wazuh.com/4.x/apt/"
+wazuh_repo_url_yum: "https://packages.wazuh.com/4.x/yum/"
+
 # Indexer configuration
 wazuh_indexer_config_path: /etc/wazuh-indexer
 wazuh_indexer_data_path: /var/lib/wazuh-indexer
@@ -19,8 +24,24 @@ wazuh_indexer_network_host: "0.0.0.0"
 wazuh_indexer_cluster_name: "wazuh-cluster"
 wazuh_indexer_cluster_initial_master_nodes: []
 
+# ═══════════════════════════════════════════════════════════════
+# Authentication Settings
+# ═══════════════════════════════════════════════════════════════
+# Default password used for initial indexer authentication (OpenSearch default)
+# This password is automatically changed to a secure random password during deployment
+# DO NOT change this unless the Wazuh indexer default changes
+wazuh_indexer_default_password: "admin"
+
+# Startup check timeouts (configurable for slow systems or large clusters)
+wazuh_indexer_health_check_retries: 30
+wazuh_indexer_health_check_delay: 10
+wazuh_indexer_startup_timeout: 300
+
 # JVM settings
-wazuh_indexer_heap_size: "1g"
+# Heap size: "auto" calculates 50% of RAM (min 1GB, max 32GB)
+# Or specify manually: "1g", "4g", "16g", etc.
+# IMPORTANT: Max 32GB - over this, JVM can't use compressed OOPs
+wazuh_indexer_heap_size: "auto"
 wazuh_indexer_max_map_count: 262144
 # Memory lock - prevents JVM from being swapped (CRITICAL for production)
 wazuh_indexer_memory_lock: true
@@ -47,10 +68,52 @@ wazuh_indexer_certs_path: /etc/wazuh-indexer/certs
 
 # Index retention settings (ISM policy)
 wazuh_retention_enabled: true
-wazuh_retention_days: 1095           # 3 years total retention
-wazuh_retention_warm_after_days: 30  # Move to warm after 30 days
-wazuh_retention_cold_after_days: 90  # Move to cold after 90 days
+wazuh_retention_days: 365            # 1 year total retention (adjust based on compliance requirements)
+wazuh_retention_warm_after_days: 7   # Move to warm after 7 days
+wazuh_retention_cold_after_days: 30  # Move to cold after 30 days
 
 # Alerts index settings
 wazuh_indexer_alerts_shards: 1
 wazuh_indexer_alerts_replicas: 0
+
+# ═══════════════════════════════════════════════════════════════
+# Index Rollover Settings (Automatic Index Management)
+# ═══════════════════════════════════════════════════════════════
+# Rollover prevents reaching the 1000 open index limit by:
+# 1. Creating new indices based on size/age/document count
+# 2. Closing cold indices (closed indices don't count toward limit)
+# 3. Deleting old indices based on retention policy
+
+# Enable automatic index rollover (recommended for production)
+wazuh_rollover_enabled: true
+
+# Rollover triggers (any condition being met triggers rollover)
+# Recommended: 30GB per shard for optimal performance
+wazuh_rollover_max_size: "30gb"          # Rollover when index reaches this size
+wazuh_rollover_max_age: "1d"             # Rollover daily (creates predictable index names)
+wazuh_rollover_max_docs: 50000000        # Rollover at 50 million documents
+
+# Minimum rollover conditions (prevents too-frequent rollovers)
+wazuh_rollover_min_size: "1gb"           # Don't rollover if smaller than this
+wazuh_rollover_min_age: "1h"             # Don't rollover if younger than 1 hour
+wazuh_rollover_min_docs: 1               # Minimum docs before rollover (1 = always allow)
+
+# Index closing settings
+# When true, cold indices are CLOSED instead of just read-only
+# CRITICAL: Closed indices don't count toward the 1000 open index limit!
+wazuh_close_cold_indices: true
+
+# Force merge settings (reduces segment count, saves memory)
+wazuh_warm_force_merge_segments: 1       # Merge to 1 segment in warm state
+
+# Shard settings per index type
+wazuh_alerts_primary_shards: 1           # Primary shards for alerts indices
+wazuh_alerts_replica_shards: 0           # Replica shards for alerts indices (set > 0 for HA)
+wazuh_archives_primary_shards: 1         # Primary shards for archives indices
+wazuh_archives_replica_shards: 0         # Replica shards for archives indices
+
+# Index alias names (write aliases for rollover)
+wazuh_alerts_alias: "wazuh-alerts"
+wazuh_archives_alias: "wazuh-archives"
+wazuh_monitoring_alias: "wazuh-monitoring"
+wazuh_statistics_alias: "wazuh-statistics"

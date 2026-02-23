@@ -3,7 +3,10 @@
 # Wazuh Deployment - Ansible Vault Management Script
 # Manages encrypted credentials for secure deployment
 
-set -e
+set -euo pipefail
+
+# Ensure plaintext temp files are cleaned up on exit/interrupt
+trap 'rm -f "${VAULT_FILE:-}.tmp" "${VAULT_PASSWORD_FILE:-}.new"' EXIT INT TERM
 
 # Colors
 RED='\033[0;31m'
@@ -45,12 +48,17 @@ print_warning() {
 # Generate a secure random password
 generate_password() {
     local length="${1:-24}"
-    local password=$(LC_ALL=C tr -dc 'A-Za-z0-9!@#$%^&*()_+-=' < /dev/urandom | head -c "$length")
+    # Exclude YAML-breaking characters: ! # $ { } [ ] : , & * ? | > ' " ` %
+    # Use only YAML-safe characters for passwords
+    local password=$(LC_ALL=C tr -dc 'A-Za-z0-9@^_+=-' < /dev/urandom | head -c "$length")
     # Ensure complexity requirements
     local upper=$(LC_ALL=C tr -dc 'A-Z' < /dev/urandom | head -c 1)
     local lower=$(LC_ALL=C tr -dc 'a-z' < /dev/urandom | head -c 1)
     local number=$(LC_ALL=C tr -dc '0-9' < /dev/urandom | head -c 1)
-    local symbol=$(echo '!@#$%^&*' | fold -w1 | shuf | head -1)
+    local symbols='@^_+-='
+    local symbol_idx
+    symbol_idx=$(head -c 4 /dev/urandom | od -An -tu4 | tr -d ' ')
+    local symbol="${symbols:$((symbol_idx % ${#symbols})):1}"
     password="${password}${upper}${lower}${number}${symbol}"
     echo "$password" | fold -w1 | shuf | tr -d '\n'
 }

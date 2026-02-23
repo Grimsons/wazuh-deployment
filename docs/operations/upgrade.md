@@ -34,30 +34,33 @@ Before upgrading:
 
 ```bash
 # Upgrade to a specific version
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.10.0"
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0"
+
+# Or use the make shortcut:
+make upgrade
 ```
 
 ### Component-Specific Upgrades
 
 ```bash
 # Upgrade only indexers
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.10.0" --tags indexer
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0" --tags indexer
 
 # Upgrade only managers
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.10.0" --tags manager
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0" --tags manager
 
 # Upgrade only dashboard
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.10.0" --tags dashboard
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0" --tags dashboard
 ```
 
 ### Agent Upgrades
 
 ```bash
 # Upgrade all agents
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.10.0" --tags agents
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0" --tags agents
 
 # Upgrade specific agent group
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.10.0" --limit agent_group_web
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0" --limit agent_group_web
 ```
 
 ## Upgrade Variables
@@ -115,7 +118,7 @@ If upgrade fails:
 
 3. **Restore from backup** (if needed)
    ```bash
-   ansible-playbook playbooks/restore.yml -e "backup_timestamp=YYYYMMDD_HHMMSS"
+   ansible-playbook playbooks/restore.yml -e "restore_from=YYYYMMDD_HHMMSS"
    ```
 
 4. **Restart services**
@@ -134,7 +137,7 @@ If upgrade fails:
 
 2. **Verify version**
    ```bash
-   curl -k -u admin:password https://indexer:9200
+   curl -k -u admin:<your-password> https://<indexer-ip>:9200
    /var/ossec/bin/wazuh-control info
    ```
 
@@ -153,7 +156,7 @@ If upgrade fails:
 
 ```bash
 # Check cluster state
-curl -k -u admin:password https://indexer:9200/_cluster/health?pretty
+curl -k -u admin:<your-password> https://<indexer-ip>:9200/_cluster/health?pretty
 
 # Check node logs
 tail -100 /var/log/wazuh-indexer/wazuh-indexer.log
@@ -185,5 +188,9 @@ systemctl restart wazuh-agent
 |---------------|---------|----------|-----------|
 | 4.9.x | 2.11.x | 7.10.2 | 2.11.x |
 | 4.10.x | 2.13.x | 7.10.2 | 2.13.x |
+| 4.11.x | 2.14.x | 7.10.2 | 2.14.x |
+| 4.12.x | 2.16.x | 7.10.2 | 2.16.x |
+| 4.13.x | 2.17.x | 7.10.2 | 2.17.x |
+| 4.14.x | 2.18.x | 7.10.2 | 2.18.x |
 
 Always check [official documentation](https://documentation.wazuh.com/) for the latest compatibility information.

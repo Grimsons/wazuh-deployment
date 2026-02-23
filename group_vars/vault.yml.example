@@ -29,6 +29,15 @@ vault_ansible_user: "wazuh-deploy"
 vault_ansible_connection_password: ""
 
 # ═══════════════════════════════════════════════════════════════
+# Bootstrap SSH Password (Initial Setup Only)
+# ═══════════════════════════════════════════════════════════════
+# Used for:
+# - SSH password auth during bootstrap-hosts.yml (before SSH keys exist)
+# - Referenced by inventory/bootstrap.yml
+# - Not needed after bootstrap (hosts.yml uses SSH key auth)
+vault_bootstrap_ssh_pass: ""
+
+# ═══════════════════════════════════════════════════════════════
 # Indexer/Dashboard Admin Credentials
 # ═══════════════════════════════════════════════════════════════
 # Used for:
