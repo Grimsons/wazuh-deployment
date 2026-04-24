@@ -9,6 +9,28 @@
     fail_msg: "Cluster key must be at least 32 characters long"
   when: wazuh_manager_cluster_enabled | default(false)
 
+- name: Ensure cluster does not bind to all interfaces
+  ansible.builtin.assert:
+    that:
+      - wazuh_manager_cluster_bind_addr | default('') != '0.0.0.0'
+      - wazuh_manager_cluster_bind_addr | default('') != ''
+    fail_msg: >
+      wazuh_manager_cluster_bind_addr must be set to a specific interface IP,
+      not '0.0.0.0'. Binding to all interfaces exposes cluster port 1516
+      to untrusted networks. Set it to the private/management interface IP.
+  when: wazuh_manager_cluster_enabled | default(false)
+
+- name: Warn about Wazuh cluster authentication model
+  ansible.builtin.debug:
+    msg: >
+      SECURITY NOTE: Wazuh cluster uses AES-256 symmetric encryption with the
+      shared cluster key (wazuh_manager_cluster_key) for node authentication.
+      Mutual TLS between nodes is not natively supported by the Wazuh cluster
+      protocol. Ensure: (1) cluster key is vault-managed, (2) firewall restricts
+      port {{ wazuh_manager_cluster_port | default(1516) }} to known manager IPs
+      only, (3) cluster bind_addr is set to the private/management interface.
+  when: wazuh_manager_cluster_enabled | default(false)
+
 - name: Get master node IP
   ansible.builtin.set_fact:
     wazuh_manager_master_ip: "{{ item.ip }}"

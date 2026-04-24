@@ -270,7 +270,7 @@
         - name: OpenSearch Config | Remove existing SSL configuration lines in plugins.security.nodes_dn
           ansible.builtin.replace:
             path: /etc/wazuh-indexer/opensearch.yml
-            regexp: '(plugins\.security\.nodes_dn:\n)(?:\s*#?-\s*"CN=node-\d+,OU=Wazuh,O=Wazuh,L=California,C=US"\n?)+'
+            regexp: '(plugins\.security\.nodes_dn:\n)(?:\s*#?-\s*"CN=.*"\n?)+'
             replace: 'plugins.security.nodes_dn:\n'
 
         - name: OpenSearch Config | Update SSL configuration values in plugins.security.nodes_dn
@@ -281,7 +281,7 @@
               plugins.security.nodes_dn:
               {% for (key, value) in instances.items() %}
               {% if (value.role is defined and (value.role == 'indexer' or value.role == 'aio')) %}
-              - "CN={{ value.name }},OU=Wazuh,O=Wazuh,L=California,C=US"
+              - "CN={{ value.name }},OU={{ wazuh_cert_ou | default('Wazuh') }},O={{ wazuh_cert_org | default('Wazuh') }},L={{ wazuh_cert_location | default('California') }},ST={{ wazuh_cert_state | default('California') }},C={{ wazuh_cert_country | default('US') }}"
               {% endif %}
               {% endfor %}
 

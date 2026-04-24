@@ -150,8 +150,8 @@ if [[ -n "$SELECTED_PROFILE" ]]; then
     esac
 fi
 
-# Default values
-DEFAULT_WAZUH_VERSION="4.14.1"
+# Default values — derive from VERSION.json so this stays in sync automatically
+DEFAULT_WAZUH_VERSION=$(jq -r '.version' "$(dirname "$0")/VERSION.json" 2>/dev/null || echo "4.14.5")
 DEFAULT_INDEXER_HTTP_PORT="9200"
 DEFAULT_INDEXER_TRANSPORT_PORT="9300"
 DEFAULT_DASHBOARD_PORT="443"
@@ -210,10 +210,12 @@ sanitize_alphanum() {
 }
 
 sanitize_path() {
-    # Allow path characters but prevent traversal
     local path="$1"
-    # Remove any ../ sequences
-    path="${path//\.\.\//}"
+    # Iterative removal: single-pass misses crafted inputs like "..../"
+    while [[ "$path" == *".."* ]]; do
+        path="${path//\.\.\//}"
+        path="${path//\.\./}"
+    done
     echo "$path" | tr -cd 'a-zA-Z0-9._/-'
 }
 
@@ -323,7 +325,7 @@ prompt_hosts() {
 generate_password() {
     local length="${1:-24}"
     local password=""
-    local symbols='!@#$%^&*'
+    local symbols='@^_+-='
 
     # Generate base password with mixed characters
     local base_len=$((length - 4))
@@ -1187,6 +1189,9 @@ wazuh_api_password: "{{ vault_wazuh_api_password }}"
 
 # Agent enrollment password loaded from Ansible Vault
 wazuh_agent_enrollment_password: "{{ vault_wazuh_agent_enrollment_password }}"
+
+# Filebeat writer password (scoped indexer user — not admin)
+wazuh_filebeat_password: "{{ vault_wazuh_filebeat_password }}"
 EOF
 
     # Build per-host SSH credentials string for vault (format: host1:user1:pass1,host2:user2:pass2)
@@ -1259,6 +1264,15 @@ EOF
 # Certificate type: self-signed or external CA
 wazuh_use_external_ca: ${EXTERNAL_CA:-false}
 
+# Certificate Distinguished Name fields — read by generate-certs.sh to produce
+# unique, identifiable DNs per deployment instead of hardcoded "Wazuh/California".
+# Override these before running generate-certs.sh.
+wazuh_cert_country: "US"
+wazuh_cert_state: "California"
+wazuh_cert_location: "San Jose"
+wazuh_cert_org: "${ANSIBLE_USER:-wazuh}-deployment"
+wazuh_cert_ou: "Security Operations"
+
 # Local path where certificates are stored (source for Ansible copy)
 wazuh_certs_path: "files/certs"
 
@@ -1267,9 +1281,30 @@ wazuh_indexer_certs_path: /etc/wazuh-indexer/certs
 wazuh_manager_certs_path: /var/ossec/etc/certs
 wazuh_dashboard_certs_path: /etc/wazuh-dashboard/certs
 
-# SSL certificate verification (set to false for self-signed certs)
-# For external CA with proper chain, set to true
-wazuh_ssl_verify_certificates: ${EXTERNAL_CA:-false}
+# SSL certificate verification — always enabled; the internal CA is distributed to all nodes
+wazuh_ssl_verify_certificates: true
+wazuh_ssl_ca_bundle: "/etc/wazuh-indexer/certs/root-ca.pem"
+wazuh_ssl_verify_hostname: true
+wazuh_tls_minimum_version: "TLSv1.2"
+wazuh_tls_ciphers: "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
+
+# Dashboard security hardening
+wazuh_dashboard_session_timeout: 60
+wazuh_dashboard_ssl_verification_mode: "full"
+wazuh_dashboard_cookie_secure: true
+wazuh_dashboard_cookie_same_site: "Strict"
+wazuh_dashboard_xframe_options: "DENY"
+wazuh_dashboard_csp_strict: true
+
+# API security hardening (names match api.yaml.j2 template variables)
+wazuh_manager_api_max_login_attempts: 5
+wazuh_manager_api_block_time: 900
+wazuh_manager_api_max_requests_per_minute: 100
+wazuh_manager_api_https: true
+
+# Indexer security hardening (names match opensearch.yml.j2 template variables)
+wazuh_indexer_ssl_http_enabled: true
+wazuh_indexer_anonymous_auth_enabled: false
 
 # ═══════════════════════════════════════════════════════════════
 # Security Feature Toggles
@@ -1486,11 +1521,11 @@ EOF
 [defaults]
 inventory = inventory/hosts.yml
 roles_path = roles
-host_key_checking = False
+host_key_checking = True
 retry_files_enabled = False
 gathering = smart
 fact_caching = jsonfile
-fact_caching_connection = /tmp/ansible_facts_cache
+fact_caching_connection = ${HOME}/.cache/ansible/facts
 fact_caching_timeout = 3600
 vault_password_file = .vault_password
 
@@ -1501,7 +1536,7 @@ become_user = root
 
 [ssh_connection]
 pipelining = True
-ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o UserKnownHostsFile=/dev/null
+ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o ServerAliveInterval=30
 EOF
 
     print_success "Ansible configuration created: ansible.cfg"
@@ -1563,17 +1598,36 @@ EOF
             print_success "Vault password created: .vault_password"
         fi
 
-        # Create encrypted vault with credentials via environment variables
+        # Create encrypted vault — pass credentials via a mode-0600 temp file,
+        # not env vars (env vars leak via /proc/<pid>/environ).
         print_info "Creating encrypted vault with credentials..."
-        VAULT_INDEXER_PASSWORD="$GENERATED_INDEXER_PASSWORD" \
-        VAULT_API_PASSWORD="$GENERATED_API_PASSWORD" \
-        VAULT_ENROLLMENT_PASSWORD="$GENERATED_ENROLLMENT_PASSWORD" \
-        VAULT_ANSIBLE_USER="$ANSIBLE_USER" \
-        VAULT_CONNECTION_PASSWORD="${DEFAULT_SSH_PASS:-}" \
-        VAULT_BECOME_PASSWORD="${BECOME_PASS:-}" \
-        VAULT_HOST_CREDENTIALS="$HOST_CREDENTIALS_STRING" \
-        VAULT_CLUSTER_KEY="${MANAGER_CLUSTER_KEY:-}" \
-        bash "${SCRIPT_DIR}/scripts/manage-vault.sh" create
+        GENERATED_FILEBEAT_PASSWORD=$(generate_password 24)
+        print_info "Generated Filebeat writer password"
+
+        local _creds_tmp _creds_dir
+        # Use /dev/shm (tmpfs) so the temp file never touches disk — no need to shred.
+        # Fall back to mktemp if /dev/shm is not available (e.g. macOS).
+        if [[ -d /dev/shm ]]; then
+            _creds_dir="/dev/shm/wazuh-deploy-$$"
+            mkdir -p "$_creds_dir" && chmod 700 "$_creds_dir"
+            _creds_tmp="$_creds_dir/creds"
+        else
+            _creds_tmp="$(mktemp -t wazuh-creds.XXXXXX)"
+        fi
+        chmod 600 "$_creds_tmp"
+        {
+            printf 'VAULT_INDEXER_PASSWORD=%s\n'   "$GENERATED_INDEXER_PASSWORD"
+            printf 'VAULT_API_PASSWORD=%s\n'        "$GENERATED_API_PASSWORD"
+            printf 'VAULT_ENROLLMENT_PASSWORD=%s\n' "$GENERATED_ENROLLMENT_PASSWORD"
+            printf 'VAULT_ANSIBLE_USER=%s\n'        "$ANSIBLE_USER"
+            printf 'VAULT_CONNECTION_PASSWORD=%s\n' "${DEFAULT_SSH_PASS:-}"
+            printf 'VAULT_BECOME_PASSWORD=%s\n'     "${BECOME_PASS:-}"
+            printf 'VAULT_HOST_CREDENTIALS=%s\n'    "${HOST_CREDENTIALS_STRING:-}"
+            printf 'VAULT_CLUSTER_KEY=%s\n'         "${MANAGER_CLUSTER_KEY:-}"
+            printf 'VAULT_FILEBEAT_PASSWORD=%s\n'   "$GENERATED_FILEBEAT_PASSWORD"
+        } > "$_creds_tmp"
+        bash "${SCRIPT_DIR}/scripts/manage-vault.sh" create --creds-file "$_creds_tmp"
+        rm -rf "${_creds_dir:-}" "$_creds_tmp" 2>/dev/null || true
         print_success "Encrypted credentials stored in: group_vars/all/vault.yml"
 
         print_warning "IMPORTANT: Back up .vault_password securely!"
@@ -1834,48 +1888,24 @@ EOF
     echo -e "  - Keep ${CYAN}keys/wazuh_ansible_key${NC} private (provides host access)"
     echo
 
-    # Display vault password prominently
+    # Vault password — never printed to avoid terminal/scrollback/session-log exposure
     if [ -f "$SCRIPT_DIR/.vault_password" ]; then
-        print_header "CRITICAL: SAVE YOUR VAULT PASSWORD"
-        echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
-        echo -e "${RED}  ANSIBLE VAULT PASSWORD - SAVE THIS NOW!${NC}"
-        echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
-        echo
-        echo -e "  ${YELLOW}Vault Password:${NC} ${CYAN}$(cat "$SCRIPT_DIR/.vault_password")${NC}"
-        echo
-        echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
-        echo -e "${YELLOW}⚠ WARNING: You will need this password to:${NC}"
-        echo -e "  - Deploy or redeploy the Wazuh cluster"
-        echo -e "  - View or edit encrypted credentials"
-        echo -e "  - Make any changes that require credential access"
-        echo
-        echo -e "${YELLOW}⚠ Store this password securely (password manager, secure vault)${NC}"
-        echo -e "${YELLOW}⚠ The .vault_password file will be needed on this machine${NC}"
-        echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
+        print_header "VAULT PASSWORD — BACK UP SECURELY"
+        echo -e "${YELLOW}⚠ The vault password is saved in: ${CYAN}.vault_password${NC}"
+        echo -e "${YELLOW}⚠ Copy it to a password manager or offline vault now:${NC}"
+        echo -e "   ${CYAN}cat .vault_password${NC}"
+        echo -e "${YELLOW}⚠ Never commit this file. Required for all deploy/rotate operations.${NC}"
         echo
     fi
 
-    # Display admin credentials
+    # Service credentials are encrypted in the vault — never printed here
     print_header "WAZUH ADMIN CREDENTIALS"
-    echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}  SAVE THESE CREDENTIALS - THEY ARE STORED IN THE VAULT${NC}"
-    echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
-    echo
-    echo -e "  ${CYAN}Wazuh Dashboard / Indexer Admin:${NC}"
-    echo -e "    Username: ${YELLOW}${INDEXER_ADMIN_USER}${NC}"
-    echo -e "    Password: ${YELLOW}${GENERATED_INDEXER_PASSWORD}${NC}"
-    echo
-    echo -e "  ${CYAN}Wazuh API:${NC}"
-    echo -e "    Username: ${YELLOW}${API_USER}${NC}"
-    echo -e "    Password: ${YELLOW}${GENERATED_API_PASSWORD}${NC}"
+    echo -e "${GREEN}All credentials are encrypted in the Ansible Vault.${NC}"
+    echo -e "${GREEN}Retrieve them at any time with:${NC}"
+    echo -e "   ${CYAN}./scripts/manage-vault.sh view${NC}"
     echo
     echo -e "  ${CYAN}Dashboard URL:${NC} https://${DASHBOARD_NODES_ARRAY[0]}:${DASHBOARD_PORT}"
     echo -e "  ${CYAN}API URL:${NC} https://${MANAGER_NODES_ARRAY[0]}:${MANAGER_API_PORT}"
-    echo
-    echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${YELLOW}⚠ These credentials are encrypted in the vault.${NC}"
-    echo -e "${YELLOW}⚠ Use './scripts/manage-vault.sh view' to see them later.${NC}"
-    echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
     echo
 
     print_success "Setup complete!"

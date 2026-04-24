@@ -21,7 +21,7 @@
     user: "{{ wazuh_api_user }}"
     password: "{{ wazuh_api_default_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     return_content: true
   register: auth_response
   run_once: true
@@ -47,7 +47,7 @@
     method: GET
     headers:
       Authorization: "Bearer {{ wazuh_jwt_token }}"
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     return_content: true
   register: users_response
   when: wazuh_jwt_token is defined
@@ -68,7 +68,7 @@
     body_format: json
     body:
       password: "{{ wazuh_api_password }}"
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200]
   register: password_update
   until: password_update.status | default(0) == 200
@@ -107,7 +107,7 @@
     user: "{{ wazuh_api_user }}"
     password: "{{ wazuh_api_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     return_content: true
     status_code: [200, 401]
   register: rerun_auth_response
@@ -132,3 +132,18 @@
     - rerun_auth_response is not skipped
     - rerun_auth_response.status | default(0) != 200
   run_once: true
+
+- name: Assert default API credentials have been rotated
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}/security/user/authenticate"
+    method: POST
+    user: "{{ wazuh_api_user }}"
+    password: "{{ wazuh_api_default_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    status_code: [401, 403]
+  register: default_api_cred_check
+  failed_when: default_api_cred_check.status not in [401, 403]
+  changed_when: false
+  run_once: true
+  no_log: true

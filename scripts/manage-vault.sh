@@ -45,22 +45,38 @@ print_warning() {
     echo -e "${YELLOW}⚠ $1${NC}"
 }
 
-# Generate a secure random password
+# Escape a string for safe interpolation into a double-quoted YAML scalar.
+# Escapes backslashes, double-quotes, and rejects embedded newlines.
+yaml_escape() {
+    local s="$1"
+    if [[ "$s" == *$'\n'* ]]; then
+        print_error "yaml_escape: value contains a newline — refusing to interpolate"
+        return 1
+    fi
+    s="${s//\\/\\\\}"   # backslash first
+    s="${s//\"/\\\"}"   # then double-quote
+    printf '%s' "$s"
+}
+
+# Generate a secure random password of exactly the requested length
 generate_password() {
     local length="${1:-24}"
+    # Reserve 4 characters for mandatory complexity chars; fill the rest randomly.
     # Exclude YAML-breaking characters: ! # $ { } [ ] : , & * ? | > ' " ` %
-    # Use only YAML-safe characters for passwords
-    local password=$(LC_ALL=C tr -dc 'A-Za-z0-9@^_+=-' < /dev/urandom | head -c "$length")
-    # Ensure complexity requirements
-    local upper=$(LC_ALL=C tr -dc 'A-Z' < /dev/urandom | head -c 1)
-    local lower=$(LC_ALL=C tr -dc 'a-z' < /dev/urandom | head -c 1)
-    local number=$(LC_ALL=C tr -dc '0-9' < /dev/urandom | head -c 1)
-    local symbols='@^_+-='
+    local base_len=$(( length - 4 ))
+    [[ "$base_len" -lt 1 ]] && base_len=1
+    local password
+    password=$(LC_ALL=C tr -dc 'A-Za-z0-9@^_+=-' < /dev/urandom | head -c "$base_len")
+    local upper lower number symbol symbols
+    upper=$(LC_ALL=C tr -dc 'A-Z' < /dev/urandom | head -c 1)
+    lower=$(LC_ALL=C tr -dc 'a-z' < /dev/urandom | head -c 1)
+    number=$(LC_ALL=C tr -dc '0-9' < /dev/urandom | head -c 1)
+    symbols='@^_+-='
     local symbol_idx
-    symbol_idx=$(head -c 4 /dev/urandom | od -An -tu4 | tr -d ' ')
-    local symbol="${symbols:$((symbol_idx % ${#symbols})):1}"
-    password="${password}${upper}${lower}${number}${symbol}"
-    echo "$password" | fold -w1 | shuf | tr -d '\n'
+    symbol_idx=$(head -c 4 /dev/urandom | od -An -tu4 | tr -d ' \n')
+    symbol="${symbols:$((symbol_idx % ${#symbols})):1}"
+    printf '%s%s%s%s%s' "$password" "$upper" "$lower" "$number" "$symbol" | fold -w1 | shuf | tr -d '\n'
+    printf '\n'
 }
 
 # Initialize vault with a new password
@@ -91,13 +107,54 @@ init_vault() {
     fi
 }
 
-# Create or update vault file with credentials
-# Accepts environment variables for credentials:
+# Create or update vault file with credentials.
+# Preferred: pass --creds-file <path> (mode-0600 key=value file) to avoid
+# leaking secrets via /proc/<pid>/environ.
+# Fallback: reads VAULT_* environment variables when no --creds-file is given.
 #   VAULT_INDEXER_PASSWORD, VAULT_API_PASSWORD, VAULT_ENROLLMENT_PASSWORD
 #   VAULT_ANSIBLE_USER, VAULT_CONNECTION_PASSWORD, VAULT_BECOME_PASSWORD
 #   VAULT_HOST_CREDENTIALS (format: "host1:user1:pass1,host2:user2:pass2")
 #   VAULT_CLUSTER_KEY
 create_vault() {
+    local creds_file=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --creds-file)
+                creds_file="$2"
+                shift 2
+                ;;
+            *)
+                print_error "Unknown argument: $1"
+                exit 1
+                ;;
+        esac
+    done
+
+    if [[ -n "$creds_file" ]]; then
+        if [[ ! -f "$creds_file" ]]; then
+            print_error "Creds file not found: $creds_file"
+            exit 1
+        fi
+        # Source the key=value pairs into the environment of this function only
+        local line key value
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            key="${line%%=*}"
+            value="${line#*=}"
+            # Allow only expected VAULT_* keys to prevent arbitrary code injection
+            case "$key" in
+                VAULT_INDEXER_PASSWORD|VAULT_API_PASSWORD|VAULT_ENROLLMENT_PASSWORD|\
+                VAULT_ANSIBLE_USER|VAULT_CONNECTION_PASSWORD|VAULT_BECOME_PASSWORD|\
+                VAULT_HOST_CREDENTIALS|VAULT_CLUSTER_KEY|VAULT_FILEBEAT_PASSWORD)
+                    printf -v "$key" '%s' "$value"
+                    ;;
+                *)
+                    print_error "Unexpected key in creds file: $key"
+                    exit 1
+                    ;;
+            esac
+        done < "$creds_file"
+    fi
     print_header "Creating Encrypted Vault"
 
     if [ ! -f "$VAULT_PASSWORD_FILE" ]; then
@@ -115,6 +172,7 @@ create_vault() {
     local become_password="${VAULT_BECOME_PASSWORD:-}"
     local ansible_user="${VAULT_ANSIBLE_USER:-wazuh-deploy}"
     local cluster_key="${VAULT_CLUSTER_KEY:-}"
+    local filebeat_password="${VAULT_FILEBEAT_PASSWORD:-}"
 
     # Generate passwords if not provided
     if [ -z "$indexer_password" ]; then
@@ -136,6 +194,11 @@ create_vault() {
         cluster_key=$(generate_password 32)
     fi
 
+    if [ -z "$filebeat_password" ]; then
+        filebeat_password=$(generate_password 24)
+        print_info "Generated new Filebeat writer password"
+    fi
+
     # Build per-host SSH credentials content
     local host_creds_content=""
     if [ -n "${VAULT_HOST_CREDENTIALS:-}" ]; then
@@ -147,19 +210,35 @@ create_vault() {
                 local safe_host="${host//./_}"
                 # Store username for this host
                 if [ -n "$user" ]; then
+                    local escaped_user
+                    escaped_user="$(yaml_escape "$user")" || exit 1
                     host_creds_content+="
 # SSH user for host: ${host}
-vault_ssh_user_${safe_host}: \"${user}\""
+vault_ssh_user_${safe_host}: \"${escaped_user}\""
                 fi
                 # Store password for this host
                 if [ -n "$pass" ]; then
+                    local escaped_pass
+                    escaped_pass="$(yaml_escape "$pass")" || exit 1
                     host_creds_content+="
 # SSH password for host: ${host}
-vault_ssh_pass_${safe_host}: \"${pass}\""
+vault_ssh_pass_${safe_host}: \"${escaped_pass}\""
                 fi
             fi
         done
     fi
+
+    # Escape all operator-supplied values before YAML interpolation
+    local e_ansible_user e_connection_password e_become_password
+    local e_indexer_password e_api_password e_enrollment_password e_cluster_key e_filebeat_password
+    e_ansible_user="$(yaml_escape "$ansible_user")"           || exit 1
+    e_connection_password="$(yaml_escape "$connection_password")" || exit 1
+    e_become_password="$(yaml_escape "$become_password")"     || exit 1
+    e_indexer_password="$(yaml_escape "$indexer_password")"   || exit 1
+    e_api_password="$(yaml_escape "$api_password")"           || exit 1
+    e_enrollment_password="$(yaml_escape "$enrollment_password")" || exit 1
+    e_cluster_key="$(yaml_escape "$cluster_key")"             || exit 1
+    e_filebeat_password="$(yaml_escape "$filebeat_password")" || exit 1
 
     # Create vault content
     local vault_content="---
@@ -168,26 +247,29 @@ vault_ssh_pass_${safe_host}: \"${pass}\""
 # DO NOT COMMIT THIS FILE UNENCRYPTED!
 
 # Ansible SSH user for deployment
-vault_ansible_user: \"${ansible_user}\"
+vault_ansible_user: \"${e_ansible_user}\"
 
 # Ansible connection password (SSH/WinRM) - default for all hosts
-vault_ansible_connection_password: \"${connection_password}\"
+vault_ansible_connection_password: \"${e_connection_password}\"
 
 # Ansible become (sudo) password
-vault_ansible_become_password: \"${become_password}\"
+vault_ansible_become_password: \"${e_become_password}\"
 ${host_creds_content}
 
 # Indexer/Dashboard admin credentials
-vault_wazuh_indexer_admin_password: \"${indexer_password}\"
+vault_wazuh_indexer_admin_password: \"${e_indexer_password}\"
 
 # Wazuh API credentials
-vault_wazuh_api_password: \"${api_password}\"
+vault_wazuh_api_password: \"${e_api_password}\"
 
 # Agent enrollment password
-vault_wazuh_agent_enrollment_password: \"${enrollment_password}\"
+vault_wazuh_agent_enrollment_password: \"${e_enrollment_password}\"
 
 # Manager cluster key (for multi-node deployments)
-vault_wazuh_manager_cluster_key: \"${cluster_key}\"
+vault_wazuh_manager_cluster_key: \"${e_cluster_key}\"
+
+# Filebeat writer password (scoped indexer user for alert ingestion)
+vault_wazuh_filebeat_password: \"${e_filebeat_password}\"
 "
 
     # Write and encrypt
@@ -325,7 +407,8 @@ case "${1:-}" in
         init_vault
         ;;
     create)
-        create_vault
+        shift
+        create_vault "$@"
         ;;
     view)
         view_vault

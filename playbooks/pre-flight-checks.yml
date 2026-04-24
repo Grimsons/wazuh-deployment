@@ -90,6 +90,60 @@
           Vault Password: {{ '✓' if vault_password_file.stat.exists else '⚠ (unencrypted)' }}
           ══════════════════════════════════════════════════════════
 
+- name: Pre-Flight Checks - Security Assertions
+  hosts: localhost
+  gather_facts: false
+  tags: [always, security]
+  tasks:
+    - name: Assert wazuh_api_password is defined and not the known default
+      ansible.builtin.assert:
+        that:
+          - wazuh_api_password is defined
+          - wazuh_api_password | length > 0
+          - wazuh_api_password != wazuh_api_default_password | default('wazuh')
+        fail_msg: >
+          SECURITY: wazuh_api_password is missing, empty, or still set to the
+          Wazuh factory default ("wazuh"). Set a strong unique password in
+          group_vars/vault.yml under vault_wazuh_api_password before deploying.
+        success_msg: "API password check passed"
+
+    - name: Assert firewall is either Ansible-managed or externally acknowledged
+      ansible.builtin.assert:
+        that:
+          - (wazuh_configure_firewall | default(true)) or (wazuh_firewall_external_managed | default(false))
+        fail_msg: >
+          SECURITY: wazuh_configure_firewall is false but wazuh_firewall_external_managed
+          is also false. This means no one is enforcing firewall rules on ports 1514,
+          1515, 1516, and 55000. Either set wazuh_configure_firewall: true (recommended)
+          to let Ansible manage firewall rules, or set wazuh_firewall_external_managed: true
+          to acknowledge that an external firewall (cloud security groups, perimeter
+          firewall, etc.) is already restricting these ports.
+        success_msg: "Firewall management check passed"
+
+    - name: Assert cluster bind address is not 0.0.0.0 when cluster is enabled
+      ansible.builtin.assert:
+        that:
+          - wazuh_manager_cluster_bind_addr | default('') != '0.0.0.0'
+        fail_msg: >
+          SECURITY: wazuh_manager_cluster_bind_addr is '0.0.0.0'. The cluster
+          port ({{ wazuh_manager_cluster_port | default(1516) }}) would be exposed
+          on all interfaces. Set wazuh_manager_cluster_bind_addr to the private
+          management interface IP.
+        success_msg: "Cluster bind address check passed"
+      when: wazuh_manager_cluster_enabled | default(false)
+
+    - name: Assert cluster key is vault-sourced when cluster is enabled
+      ansible.builtin.assert:
+        that:
+          - wazuh_manager_cluster_key is defined
+          - wazuh_manager_cluster_key | length >= 32
+        fail_msg: >
+          SECURITY: wazuh_manager_cluster_key is not set or is shorter than 32
+          characters. Store a 32+ character random key in vault.yml under
+          vault_wazuh_manager_cluster_key.
+        success_msg: "Cluster key check passed"
+      when: wazuh_manager_cluster_enabled | default(false)
+
 - name: Pre-Flight Checks - Gather Facts
   hosts: all
   gather_facts: true

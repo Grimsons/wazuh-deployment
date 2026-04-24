@@ -6,7 +6,7 @@ cluster.name: {{ wazuh_indexer_cluster_name }}
 node.name: {{ indexer_node_name | default('indexer-1') }}
 
 # Network settings
-network.host: {{ wazuh_indexer_network_host | default('0.0.0.0') }}
+network.host: {{ wazuh_indexer_network_host | default(ansible_default_ipv4.address) }}
 http.port: {{ wazuh_indexer_http_port }}
 transport.port: {{ wazuh_indexer_transport_port }}
 
@@ -49,7 +49,9 @@ plugins.security.ssl.transport.enabled_ciphers:
 {% endif %}
 plugins.security.ssl.transport.enabled_protocols:
   - TLSv1.3
+{% if wazuh_tls_minimum_version | default('TLSv1.2') == 'TLSv1.2' %}
   - TLSv1.2
+{% endif %}
 
 # Security settings - HTTP layer (client connections)
 plugins.security.ssl.http.enabled: {{ wazuh_indexer_ssl_http_enabled | default(true) | lower }}
@@ -64,7 +66,9 @@ plugins.security.ssl.http.enabled_ciphers:
 {% endif %}
 plugins.security.ssl.http.enabled_protocols:
   - TLSv1.3
+{% if wazuh_tls_minimum_version | default('TLSv1.2') == 'TLSv1.2' %}
   - TLSv1.2
+{% endif %}
 
 plugins.security.nodes_dn:
 {% for node in wazuh_indexer_nodes %}
@@ -75,14 +79,20 @@ plugins.security.authcz.admin_dn:
   - "CN=admin,OU={{ wazuh_cert_ou | default('Wazuh') }},O={{ wazuh_cert_org | default('Wazuh') }},L={{ wazuh_cert_location | default('California') }},ST={{ wazuh_cert_state | default('California') }},C={{ wazuh_cert_country | default('US') }}"
 
 plugins.security.allow_unsafe_democertificates: false
-plugins.security.allow_default_init_securityindex: true
+plugins.security.allow_default_init_securityindex: {{ wazuh_indexer_allow_default_init | default(false) | lower }}
+plugins.security.anonymous_auth_enabled: {{ wazuh_indexer_anonymous_auth_enabled | default(false) | lower }}
 
 # Audit logging - CRITICAL for compliance (PCI-DSS, HIPAA, SOC2)
+# wazuh_audit_log_type: internal_opensearch | log4j | external_opensearch | webhook | debug
+# Use external_opensearch or log4j to write audit logs off-node so they cannot
+# be tampered by an attacker who compromises the indexed node.
 plugins.security.audit.type: {{ wazuh_audit_log_type | default('internal_opensearch') }}
 {% if wazuh_audit_logging_enabled | default(true) %}
 plugins.security.audit.config.disabled_rest_categories: NONE
 plugins.security.audit.config.disabled_transport_categories: NONE
-plugins.security.audit.config.log_request_body: true
+# log_request_body disabled — request bodies can contain credentials (e.g. password
+# rotation API calls) which would be stored in audit indices in cleartext.
+plugins.security.audit.config.log_request_body: false
 plugins.security.audit.config.resolve_indices: true
 plugins.security.audit.config.resolve_bulk_requests: true
 plugins.security.audit.config.enable_rest: true

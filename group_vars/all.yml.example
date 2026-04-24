@@ -7,7 +7,7 @@
 # ═══════════════════════════════════════════════════════════════
 # General Settings
 # ═══════════════════════════════════════════════════════════════
-wazuh_version: "4.14.1"
+wazuh_version: "4.14.5"
 environment_name: "production"
 organization_name: "MyOrganization"
 
@@ -57,15 +57,30 @@ wazuh_manager_api_port: 55000
 wazuh_manager_agent_port: 1514
 wazuh_api_user: "wazuh"
 
+# Filebeat writer — scoped OpenSearch user for alert ingestion (not admin)
+# Password stored in vault as vault_wazuh_filebeat_password
+wazuh_filebeat_user: "filebeat_writer"
+wazuh_filebeat_password: "{{ vault_wazuh_filebeat_password }}"
+
 # API password is auto-generated during deployment by default
 # Credentials saved to: ./credentials/api_password.txt
 # To use a custom password, uncomment and set:
 # wazuh_api_password: "YourSecurePassword"
 
+# Firewall management
+# true  = Ansible configures UFW/firewalld rules on the manager (recommended)
+# false = External firewall (cloud security groups, perimeter FW) handles port
+#         restriction. Must also set wazuh_firewall_external_managed: true to
+#         pass pre-flight security checks.
+wazuh_configure_firewall: true
+# wazuh_firewall_external_managed: false
+
 # Manager cluster settings (for multi-node deployments)
 wazuh_manager_cluster_enabled: false
 # wazuh_manager_cluster_name: "wazuh-manager-cluster"
-# wazuh_manager_cluster_key: "your-32-char-cluster-key-here!!"
+# wazuh_manager_cluster_key: "{{ vault_wazuh_manager_cluster_key }}"
+# Bind cluster port to private/management interface only (never 0.0.0.0)
+# wazuh_manager_cluster_bind_addr: "10.0.0.20"
 
 # Manager node list
 wazuh_manager_nodes:
@@ -79,8 +94,13 @@ wazuh_manager_nodes:
 # Wazuh Dashboard Settings
 # ═══════════════════════════════════════════════════════════════
 wazuh_dashboard_port: 443
+# FQDN used to build CORS allow-list for the Manager API when CORS is enabled.
+# wazuh_dashboard_fqdn: "wazuh.example.com"
 # Dashboard uses the indexer admin credentials (admin user)
 # No separate password configuration needed
+
+# Set to true once you have confirmed backup destinations use encrypted storage.
+# wazuh_backup_encryption_confirmed: false
 
 # Dashboard node list
 wazuh_dashboard_nodes:
@@ -147,11 +167,11 @@ wazuh_dashboard_cookie_same_site: "Strict"
 wazuh_dashboard_xframe_options: "DENY"
 wazuh_dashboard_csp_strict: true
 
-# API security hardening (brute-force protection)
-wazuh_api_max_login_attempts: 5              # Lock after N failed attempts
-wazuh_api_lockout_time: 900                  # Lockout duration (seconds)
-wazuh_api_rate_limit: 100                    # Max requests per minute
-wazuh_api_https_only: true                   # Force HTTPS
+# API security hardening (names match api.yaml.j2 template variables)
+wazuh_manager_api_max_login_attempts: 5      # Lock after N failed attempts
+wazuh_manager_api_block_time: 900            # Lockout duration (seconds)
+wazuh_manager_api_max_requests_per_minute: 100  # Max requests per minute
+wazuh_manager_api_https: true               # Force HTTPS
 
 # Indexer security
 wazuh_indexer_ssl_http_enabled: true
@@ -309,6 +329,9 @@ wazuh_log_rotation_compress: true
 # ═══════════════════════════════════════════════════════════════
 # Firewall configuration (installs and enables UFW/firewalld if needed)
 wazuh_configure_firewall: true
+# If using external firewall (cloud security groups, perimeter FW), set both:
+# wazuh_configure_firewall: false
+# wazuh_firewall_external_managed: true
 
 # Allow agents from any network (recommended for flexibility)
 # When true, firewall allows agent connections (1514, 1515) from anywhere

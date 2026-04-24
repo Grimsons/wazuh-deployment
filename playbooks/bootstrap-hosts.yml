@@ -27,6 +27,18 @@
     ssh_public_key_file: "{{ playbook_dir }}/../keys/wazuh_ansible_key.pub"
 
   tasks:
+    - name: Assert SSH public key file exists before bootstrap
+      ansible.builtin.assert:
+        that:
+          - ssh_public_key_file is defined
+          - lookup('file', ssh_public_key_file, errors='ignore') | length > 0
+        fail_msg: >-
+          SSH public key not found at {{ ssh_public_key_file }}.
+          Run setup.sh first to generate the key pair, then retry bootstrap.
+          Password-only bootstrap is not supported — key auth is required.
+      delegate_to: localhost
+      run_once: true
+
     - name: Read SSH public key
       ansible.builtin.set_fact:
         ssh_public_key: "{{ lookup('file', ssh_public_key_file) }}"

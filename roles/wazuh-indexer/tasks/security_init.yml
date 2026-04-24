@@ -67,3 +67,8 @@
   ansible.builtin.debug:
     msg: "{{ security_init.stdout_lines | default(['Security initialization completed']) }}"
   when: security_init is defined
+
+# allow_default_init_securityindex is controlled by the wazuh_indexer_allow_default_init
+# variable rendered into opensearch.yml.j2 (default: false). The initial bootstrap
+# playbook sets it to true for the first run; any subsequent template render leaves it
+# false, so this lineinfile task is no longer needed.
