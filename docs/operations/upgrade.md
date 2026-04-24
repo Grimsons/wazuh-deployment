@@ -14,19 +14,27 @@ The upgrade playbook (`playbooks/upgrade.yml`) performs rolling upgrades with:
 
 Before upgrading:
 
-1. **Run pre-flight checks**
+1. **Update VERSION.json and recompute checksums**
+
+   After editing `VERSION.json` with the new version, run:
+   ```bash
+   make update-checksums
+   ```
+   Review the diff to confirm that `wazuh_filebeat_template_sha256` (and any other artifact hashes) have been updated for the new version, then commit the changes before deploying. This step ensures Ansible can verify the integrity of downloaded artifacts during the upgrade.
+
+2. **Run pre-flight checks**
    ```bash
    ansible-playbook playbooks/pre-flight-checks.yml
    ```
 
-2. **Review release notes** for the target version at [Wazuh Release Notes](https://documentation.wazuh.com/current/release-notes/)
+3. **Review release notes** for the target version at [Wazuh Release Notes](https://documentation.wazuh.com/current/release-notes/)
 
-3. **Verify backup integrity**
+4. **Verify backup integrity**
    ```bash
    ansible-playbook playbooks/dr-validate.yml
    ```
 
-4. **Notify stakeholders** of planned maintenance window
+5. **Notify stakeholders** of planned maintenance window
 
 ## Upgrade Procedure
 

@@ -34,6 +34,7 @@ The Makefile provides shortcuts for all common operations. Run `make help` to se
 | `make monitoring` | Enable Prometheus monitoring exporters |
 | `make test` | Run syntax and lint checks |
 | `make clean` | Remove generated files (keeps vault and keys) |
+| `make update-checksums` | Recompute artifact SHA-256 hashes after version bump |
 
 ## Initial Setup
 
