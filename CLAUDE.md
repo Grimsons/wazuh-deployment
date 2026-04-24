@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is an Ansible-based infrastructure-as-code toolkit for deploying the Wazuh SIEM/XDR stack (v4.14.5, stable). It handles the full lifecycle: initial bootstrap, component deployment, certificate management, credential rotation, health checks, backup/restore, and upgrades.
 
+
 ## Common Commands
 
 All standard operations are wrapped in the Makefile:
@@ -39,6 +40,7 @@ make restore BACKUP_ID=<id>
 make upgrade
 make update-checksums   # Recompute artifact SHA-256 hashes after version bump
 
+
 # Vault credential management
 make vault-view
 make vault-edit
@@ -71,6 +73,7 @@ Five main Ansible roles under `roles/`:
 - **wazuh-dashboard** — Kibana-based web UI
 - **wazuh-agent** — Endpoint sensor (Linux, Windows, macOS)
 - **wazuh-monitoring** — Optional Prometheus exporters + Grafana dashboards
+
 
 All roles share variables via `roles/vars/` and consume configuration from `group_vars/all/main.yml`.
 
@@ -119,6 +122,7 @@ All roles share variables via `roles/vars/` and consume configuration from `grou
 
 ### Versioning
 `VERSION.json` is the single source of truth for the Wazuh stack version. Update it when bumping versions; roles reference this via `group_vars/all/main.yml` (`wazuh_version`).
+
 
 ### Testing Playbooks
 `wazuh-aio.yml`, `wazuh-distributed.yml`, and `wazuh-agent.yml` at the root are **testing-only** shortcuts. Production deployments always use `site.yml` or targeted Makefile targets.
