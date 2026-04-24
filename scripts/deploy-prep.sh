@@ -313,9 +313,10 @@ prompt_credentials() {
         fi
     fi
 
-    # Export for use in subshells
+    # Export SSH_PASSWORD for sshpass (used in run_ssh via SSHPASS env var).
+    # BECOME_PASSWORD is NOT exported — it is piped directly to sudo -S stdin,
+    # so it never appears in process environment or remote cmdline.
     export SSH_PASSWORD
-    export BECOME_PASSWORD
 }
 
 # Check prerequisites
@@ -481,22 +482,25 @@ deploy_to_host() {
 
     prep_cmd="$prep_cmd && rm -rf /tmp/wazuh-prep /tmp/wazuh-client-prep.tar.gz"
 
-    # Build the sudo command based on authentication mode
-    local exec_cmd
+    # Build the sudo command based on authentication mode.
+    # When a become password is required, pipe it through SSH stdin to sudo -S.
+    # Never embed the password in the command string (visible via ps/cmdline on remote).
+    local exec_cmd ssh_result
     if [ "$REMOTE_USER" = "root" ]; then
-        # Running as root, no sudo needed
         exec_cmd="bash -c '$prep_cmd'"
+        timeout "$SSH_TIMEOUT" run_ssh "$host" "$exec_cmd" 2>&1
+        ssh_result=$?
     elif [ "$ASK_BECOME_PASS" = "true" ] && [ -n "$BECOME_PASSWORD" ]; then
-        # Use sudo with password from stdin (base64 encode to safely handle special chars)
-        local encoded_password
-        encoded_password=$(printf '%s' "$BECOME_PASSWORD" | base64)
-        exec_cmd="printf '%s' '${encoded_password}' | base64 -d | sudo -S bash -c '$prep_cmd'"
+        exec_cmd="sudo -S bash -c '$prep_cmd'"
+        printf '%s\n' "$BECOME_PASSWORD" | timeout "$SSH_TIMEOUT" run_ssh "$host" "$exec_cmd" 2>&1
+        ssh_result=$?
     else
-        # Use sudo without password (assumes NOPASSWD or already root)
         exec_cmd="sudo bash -c '$prep_cmd'"
+        timeout "$SSH_TIMEOUT" run_ssh "$host" "$exec_cmd" 2>&1
+        ssh_result=$?
     fi
 
-    if timeout "$SSH_TIMEOUT" run_ssh "$host" "$exec_cmd" 2>&1; then
+    if [ "$ssh_result" -eq 0 ]; then
         print_success "[$host] Preparation complete"
         echo "SUCCESS" > "$result_file"
         return 0
@@ -572,7 +576,14 @@ verify_deployment() {
     for host in "${HOSTS[@]}"; do
         print_info "Testing: $host"
 
-        local ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -p $SSH_PORT"
+        local ssh_opts="-o ConnectTimeout=10 -p $SSH_PORT"
+        if [ "$INSECURE_SSH" = "true" ]; then
+            ssh_opts="$ssh_opts -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+        else
+            touch "$KNOWN_HOSTS_FILE" 2>/dev/null || true
+            chmod 600 "$KNOWN_HOSTS_FILE" 2>/dev/null || true
+            ssh_opts="$ssh_opts -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$KNOWN_HOSTS_FILE"
+        fi
 
         # Test with new Ansible user and key
         if ssh $ssh_opts -i "$SSH_KEY" "${ANSIBLE_USER}@${host}" "echo 'Ansible user OK'" &>/dev/null; then

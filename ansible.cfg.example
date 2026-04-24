@@ -5,11 +5,11 @@
 [defaults]
 inventory = inventory/hosts.yml
 roles_path = roles
-host_key_checking = False
+host_key_checking = True
 retry_files_enabled = False
 gathering = smart
 fact_caching = jsonfile
-fact_caching_connection = /tmp/ansible_facts_cache
+fact_caching_connection = ~/.cache/ansible/facts
 fact_caching_timeout = 3600
 
 # Increase timeout for slow connections
@@ -18,9 +18,10 @@ timeout = 30
 # Parallel execution
 forks = 10
 
-# Output formatting
+# Output formatting and auditing
 stdout_callback = yaml
-# callback_whitelist = profile_tasks
+callbacks_enabled = profile_tasks
+log_path = /var/log/ansible/wazuh-deploy.log
 
 [privilege_escalation]
 become = True
@@ -30,7 +31,7 @@ become_user = root
 
 [ssh_connection]
 pipelining = True
-ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no
+ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o ServerAliveInterval=30
 
 # For slow connections, increase these:
 # control_path_dir = /tmp/ansible-ssh-%%h-%%p-%%r

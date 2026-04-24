@@ -27,7 +27,7 @@
 
 - name: Configure firewall
   ansible.builtin.include_tasks: firewall.yml
-  when: wazuh_configure_firewall | default(false)
+  when: wazuh_configure_firewall | default(true)
 
 - name: Flush handlers to apply configuration changes
   ansible.builtin.meta: flush_handlers
@@ -69,7 +69,7 @@
     user: "{{ wazuh_indexer_admin_user | default('admin') }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200, 302]
   register: dashboard_health
   until: dashboard_health.status | default(0) in [200, 302]

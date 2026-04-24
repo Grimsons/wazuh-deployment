@@ -7,7 +7,7 @@
 .PHONY: help setup setup-tui deploy deploy-bootstrap deploy-indexer deploy-manager \
         deploy-dashboard deploy-agent health backup restore upgrade check status \
         unlock vault-view vault-edit vault-rotate certs-check certs-rotate clean \
-        monitoring test lint deploy-rules threat-intel
+        monitoring test lint deploy-rules threat-intel update-checksums
 
 # Default target
 .DEFAULT_GOAL := help
@@ -91,7 +91,9 @@ deploy: ## Deploy all Wazuh components
 
 deploy-bootstrap: ## First-time deployment (bootstrap + all components)
 	@echo "$(CYAN)Running bootstrap + full deployment...$(RESET)"
-	ansible-playbook site.yml --tags bootstrap,all --ask-pass
+	@echo "$(YELLOW)Bootstrap uses StrictHostKeyChecking=accept-new (TOFU) for first contact only.$(RESET)"
+	ansible-playbook site.yml --tags bootstrap,all --ask-pass \
+		--ssh-extra-args='-o StrictHostKeyChecking=accept-new'
 
 deploy-check: ## Dry-run deployment (no changes)
 	@echo "$(CYAN)Running deployment in check mode...$(RESET)"
@@ -167,6 +169,10 @@ threat-intel: ## Update threat intelligence feeds (IPs, domains, hashes)
 	@./scripts/update-threat-intel.sh
 	@echo ""
 	@echo "$(GREEN)Feeds updated.$(RESET) Deploy with: make deploy-rules"
+
+update-checksums: ## Recompute artifact SHA-256 checksums from VERSION.json (run after version bump)
+	@echo "$(CYAN)Recomputing artifact checksums for current Wazuh version...$(RESET)"
+	@./scripts/update-checksums.sh
 
 #═══════════════════════════════════════════════════════════════════════════════
 # Security

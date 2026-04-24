@@ -42,7 +42,7 @@
 
 - name: Configure firewall
   ansible.builtin.include_tasks: firewall.yml
-  when: wazuh_configure_firewall | default(false)
+  when: wazuh_configure_firewall | default(true)
 
 - name: Enable Wazuh Manager service
   ansible.builtin.systemd:
@@ -82,7 +82,7 @@
     user: "{{ wazuh_api_user }}"
     password: "{{ wazuh_api_default_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200, 401]
   register: wazuh_api_check
   until: wazuh_api_check.status in [200, 401]

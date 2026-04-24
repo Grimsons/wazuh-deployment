@@ -24,7 +24,7 @@ wazuh_dashboard_certs_path: /etc/wazuh-dashboard/certs
 # Network Settings
 # ═══════════════════════════════════════════════════════════════════════════════
 wazuh_dashboard_port: 443
-wazuh_dashboard_host: "0.0.0.0"
+wazuh_dashboard_host: "{{ ansible_default_ipv4.address }}"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Startup Settings (configurable for slow systems)
@@ -38,7 +38,7 @@ wazuh_dashboard_health_check_delay: 10
 # ═══════════════════════════════════════════════════════════════════════════════
 wazuh_dashboard_ssl_enabled: true
 # Verification mode: none, certificate, full
-wazuh_dashboard_ssl_verification_mode: "certificate"
+wazuh_dashboard_ssl_verification_mode: "full"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Session Settings
@@ -63,7 +63,7 @@ wazuh_dashboard_admin_user: "admin"
 # HTTP Security Headers
 # ═══════════════════════════════════════════════════════════════════════════════
 wazuh_dashboard_csp_strict: true
-wazuh_dashboard_xframe_options: "SAMEORIGIN"
+wazuh_dashboard_xframe_options: "DENY"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Wazuh App - API Connection Settings

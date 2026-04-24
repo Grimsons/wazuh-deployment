@@ -2,6 +2,12 @@
 # Wazuh Dashboard - Configuration
 # All credentials are sourced from Ansible Vault via group_vars
 
+- name: Validate xframe_options value
+  ansible.builtin.assert:
+    that:
+      - wazuh_dashboard_xframe_options | default('DENY') in ['DENY', 'SAMEORIGIN']
+    fail_msg: "wazuh_dashboard_xframe_options must be 'DENY' or 'SAMEORIGIN', got: {{ wazuh_dashboard_xframe_options | default('DENY') }}"
+
 - name: Ensure log directory exists
   ansible.builtin.file:
     path: "{{ wazuh_dashboard_log_path }}"
