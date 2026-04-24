@@ -41,7 +41,7 @@ Production-ready automated deployment of Wazuh SIEM/XDR stack using Ansible with
 ### Required Ansible Collections
 
 ```bash
-ansible-galaxy install -r requirements.yml
+ansible-galaxy collection install -r requirements.yml
 ```
 
 ## Quick Start
@@ -122,6 +122,7 @@ make certs-rotate       # Rotate certificates
 make monitoring         # Enable Prometheus exporters
 make test               # Run syntax and lint checks
 make check              # Validate prerequisites
+make update-checksums   # Recompute artifact SHA-256 hashes after version bump
 ```
 
 ## Project Structure
@@ -317,13 +318,14 @@ All configuration is in `group_vars/all/main.yml`. Credentials are in the encryp
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `wazuh_version` | Wazuh version | 4.14.2 |
+| `wazuh_version` | Wazuh version | 4.14.5 |
 | `wazuh_indexer_heap_size` | Indexer JVM heap ("auto" = 50% RAM) | auto |
 | `wazuh_rollover_enabled` | Enable automatic index rollover | true |
 | `wazuh_close_cold_indices` | Close cold indices | true |
 | `wazuh_retention_days` | Total data retention period | 365 |
 | `wazuh_lockdown_deploy_user` | Lock down deploy user after deployment | true |
 | `wazuh_configure_firewall` | Auto-configure firewall rules | true |
+| `wazuh_firewall_external_managed` | Acknowledge external firewall manages port restrictions | false |
 
 ### Feature Toggles
 

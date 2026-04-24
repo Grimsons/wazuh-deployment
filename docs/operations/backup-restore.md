@@ -310,7 +310,7 @@ ansible-playbook playbooks/setup-maintenance-cron.yml
 Set the default retention in `group_vars/all/main.yml`:
 
 ```yaml
-wazuh_log_retention_days: 30
+wazuh_log_rotation_keep_days: 30
 ```
 
 ## Best Practices

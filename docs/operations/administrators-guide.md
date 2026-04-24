@@ -254,7 +254,7 @@ The scheduled backup script is `scripts/run-scheduled-backup.sh`, which is confi
 Configure in `group_vars/all/main.yml`:
 
 ```yaml
-wazuh_log_retention_days: 30          # Local logs on manager
+wazuh_log_rotation_keep_days: 30      # Local logs on manager
 wazuh_retention_days: 1095            # Index data (3 years)
 wazuh_retention_warm_after_days: 30   # Move to warm tier
 wazuh_retention_cold_after_days: 90   # Move to cold tier
@@ -466,6 +466,8 @@ ansible-playbook playbooks/restore.yml -e "restore_from=pre-upgrade-TIMESTAMP"
    ```yaml
    wazuh_manager_cluster_enabled: true
    ```
+
+   > **Important — `wazuh_manager_cluster_bind_addr`:** This must be set to a specific interface IP address. The value `0.0.0.0` is explicitly rejected by pre-flight assertions to prevent unintended cluster port exposure on all interfaces.
 
 2. Add worker nodes to inventory with `manager_node_type: worker`
 

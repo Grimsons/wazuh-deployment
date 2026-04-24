@@ -196,6 +196,19 @@ dnf check-update  # RHEL/CentOS
 # - Or skip check: -e "check_package_manager=false"
 ```
 
+## Security Configuration Checks
+
+In addition to infrastructure checks, the pre-flight playbook enforces a set of security configuration assertions that will abort deployment if any condition is not met:
+
+| Assertion | Condition | Reason |
+|-----------|-----------|--------|
+| **API password** | Must be defined and must not equal the Wazuh factory default | Prevents deploying with a known, publicly documented default password |
+| **Firewall consistency** | `wazuh_configure_firewall: false` requires `wazuh_firewall_external_managed: true` | Prevents accidentally disabling Ansible-managed firewall rules with no documented replacement |
+| **Cluster bind address** | When cluster enabled: `wazuh_manager_cluster_bind_addr` must not be `0.0.0.0` | Prevents cluster ports from listening on all interfaces, which could expose internal cluster traffic |
+| **Cluster key length** | When cluster enabled: cluster key must be ≥32 characters | Enforces a minimum entropy level for the cluster authentication secret |
+
+These assertions run before any changes are made to target hosts. If an assertion fails, the playbook stops with an error message describing the required corrective action.
+
 ## Variables
 
 | Variable | Description | Default |

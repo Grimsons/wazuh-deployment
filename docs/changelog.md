@@ -4,6 +4,29 @@ All notable changes to this fork will be documented in this file.
 
 For upstream wazuh-ansible changes, see the [wazuh-ansible releases](https://github.com/wazuh/wazuh-ansible/releases).
 
+## [1.2.0] - Security Hardening (PR #51)
+
+### Added
+
+- **`wazuh_firewall_external_managed` variable** - New boolean variable that must be explicitly set to `true` when `wazuh_configure_firewall: false`, to acknowledge that an external firewall is handling port restrictions. Pre-flight assertion enforces the two-variable pattern.
+- **`wazuh_indexer_allow_default_init` variable** - Controls OpenSearch security bootstrapping. Must be `true` only during initial cluster setup; `make deploy-bootstrap` handles this automatically. Set to `false` for all subsequent runs to prevent security re-initialisation.
+- **`filebeat_writer` scoped OpenSearch user** - Automatically provisioned during indexer deployment. Filebeat now connects to OpenSearch as `filebeat_writer` (not admin), with write-only access to `wazuh-alerts-*`, `wazuh-archives-*`, and `wazuh-statistics-*` indices. Password stored in vault as `vault_wazuh_filebeat_password`.
+- **`scripts/update-checksums.sh` + `make update-checksums`** - Recomputes `wazuh_filebeat_template_sha256` and other artifact SHA-256 hashes after a version bump. Must be run after updating `VERSION.json` and before deploying.
+- **Pre-flight security assertions** - Deployment now aborts if: API password equals the Wazuh factory default; `wazuh_configure_firewall: false` without `wazuh_firewall_external_managed: true`; cluster bind addr is `0.0.0.0`; or cluster key is shorter than 32 characters.
+- **TLS cipher variables documented** - `wazuh_tls_ciphers` (JSSE/Java format, for OpenSearch) and `wazuh_manager_api_ssl_ciphers` (OpenSSL format, for Manager API) are now separately documented. Mixing formats silently breaks TLS negotiation.
+
+### Changed
+
+- **Wazuh version bump** - Default version updated from 4.14.2 to 4.14.5.
+- **`wazuh_configure_firewall` default** - Changed to `true` (firewall management is now on by default). Previously users had to opt in; now they opt out via `wazuh_configure_firewall: false` + `wazuh_firewall_external_managed: true`.
+- **Cluster bind addr enforcement** - `wazuh_manager_cluster_bind_addr` set to `0.0.0.0` is now explicitly rejected by pre-flight assertions to prevent unintended cluster port exposure on all interfaces.
+
+### Fixed
+
+- **`validate_certs: false` bug in security_users.yml** - Fixed incorrect certificate validation bypass that could allow connections to untrusted endpoints.
+
+---
+
 ## [1.1.0] - Security Review, Community Rules, and Hardening
 
 ### Added
