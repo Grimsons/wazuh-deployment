@@ -309,6 +309,9 @@
 - name: Health Summary
   hosts: localhost
   gather_facts: false
+  # Tags note: use --skip-tags fail-on-unhealthy to get the health report
+  # without the non-zero exit code (useful for monitoring dashboards that
+  # collect output regardless of health status).
   tasks:
     - name: Collect all health results
       ansible.builtin.set_fact:
@@ -331,4 +334,20 @@
             -e "check_agents=true"   - Check agent connectivity
             -e "check_indices=true"  - Check index health and size
             -e "verbose=true"        - Show detailed output
+
+          To collect health data without failing the play on unhealthy components:
+            --skip-tags fail-on-unhealthy
           ═══════════════════════════════════════════════════════════════
+
+    - name: Fail if any component is unhealthy
+      ansible.builtin.fail:
+        msg: |
+          Health check FAILED. Unhealthy components detected.
+          Review the output above for details.
+      when: >-
+        hostvars.values() | map(attribute='indexer_cluster_status', default='') | select('equalto', 'RED') | list | length > 0
+        or hostvars.values() | map(attribute='indexer_service_status', default='HEALTHY') | reject('equalto', 'HEALTHY') | list | length > 0
+        or hostvars.values() | map(attribute='manager_service_status', default='HEALTHY') | reject('equalto', 'HEALTHY') | list | length > 0
+        or hostvars.values() | map(attribute='filebeat_service_status', default='HEALTHY') | reject('equalto', 'HEALTHY') | list | length > 0
+        or hostvars.values() | map(attribute='dashboard_service_status', default='HEALTHY') | reject('equalto', 'HEALTHY') | list | length > 0
+      tags: [fail-on-unhealthy]

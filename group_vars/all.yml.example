@@ -50,6 +50,12 @@ wazuh_indexer_nodes:
 # wazuh_indexer_additional_transport_ips:
 #   - "10.0.0.102"    # Special indexer node
 
+# Deployment serial — number of nodes to upgrade/configure simultaneously.
+# Default 1 ensures rolling deploys on live clusters (no full-cluster downtime).
+# Set to 'all' for parallel first-time deploys when all nodes start fresh.
+# wazuh_indexer_deploy_serial: 1
+# wazuh_manager_deploy_serial: 1
+
 # ═══════════════════════════════════════════════════════════════
 # Wazuh Manager Settings
 # ═══════════════════════════════════════════════════════════════

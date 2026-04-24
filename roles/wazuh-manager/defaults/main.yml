@@ -462,6 +462,7 @@ wazuh_filebeat_version: "7.10.2"
 # Recompute with: curl -fsSL <url> | sha256sum
 # Update these whenever wazuh_filebeat_version or wazuh_version changes.
 wazuh_filebeat_deb_sha256: "sha256:f759a13e5407bba184d9f0235ab88409a0d77d821e64adb3dcc0ba8e397f0201"
+wazuh_filebeat_rpm_sha256: "sha256:RECOMPUTE_RUN_MAKE_UPDATE_CHECKSUMS"
 wazuh_filebeat_module_sha256: "sha256:b0683f1d5d7c5d076ea3a565b0aa7ca92e6483f8a14e8b96799e6ee632da2284"
 # Template hash is version-specific. Run `make update-checksums` after any version bump.
 # Current value is for wazuh 4.14.2 — MUST be updated for 4.14.5 before deploying.

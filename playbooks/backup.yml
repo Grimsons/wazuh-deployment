@@ -63,6 +63,15 @@
     backup_timestamp: "{{ hostvars['localhost']['backup_timestamp'] }}"
     backup_base_path: "{{ hostvars['localhost']['backup_base_path'] }}"
   tasks:
+    - name: Warn that alert data is excluded from backup
+      ansible.builtin.debug:
+        msg: |
+          WARNING: backup_indexer_data is false. Alert and archive index data will NOT
+          be backed up. This backup contains config files and certificates only.
+          A disaster recovery restore from this backup will lose all historical alert data.
+          Set backup_indexer_data: true to include OpenSearch snapshot data.
+      when: not (backup_indexer_data | default(true))
+
     - name: Backup indexer configuration
       when: backup_indexer | default(true) | bool
       block:
@@ -124,7 +133,7 @@
             status_code:
               - 200
               - 400  # Repository already exists
-          when: backup_indexer_data | default(false) | bool
+          when: backup_indexer_data | default(true) | bool
           run_once: true
           no_log: true
 

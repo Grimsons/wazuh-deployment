@@ -320,11 +320,12 @@
 # ═══════════════════════════════════════════════════════════════
 # Step 1: Deploy Wazuh Indexer
 # ═══════════════════════════════════════════════════════════════
+# Default serial=1 prevents simultaneous restart of all nodes in a live cluster
 - name: Deploy Wazuh Indexer
   hosts: wazuh_indexers
   become: true
   gather_facts: false  # Already gathered in pre-flight
-  serial: "{{ wazuh_indexer_deploy_serial | default(omit) }}"
+  serial: "{{ wazuh_indexer_deploy_serial | default(1) }}"
   roles:
     - role: wazuh-indexer
   tags:
@@ -380,11 +381,12 @@
 # ═══════════════════════════════════════════════════════════════
 # Step 2: Deploy Wazuh Manager
 # ═══════════════════════════════════════════════════════════════
+# Default serial=1 prevents simultaneous restart of all nodes in a live cluster
 - name: Deploy Wazuh Manager
   hosts: wazuh_managers
   become: true
   gather_facts: false  # Already gathered in pre-flight
-  serial: "{{ wazuh_manager_deploy_serial | default(omit) }}"
+  serial: "{{ wazuh_manager_deploy_serial | default(1) }}"
   roles:
     - role: wazuh-manager
   tags:
@@ -605,6 +607,14 @@
           Alert Documents:     {{ smoke_results.alert_count }}
 
           ══════════════════════════════════════════════════════════════
+
+    - name: Display alert document count with context
+      ansible.builtin.debug:
+        msg: |
+          Alert documents in index: {{ smoke_alert_count.json.count | default(0) }}
+          {{ '(expected 0 on fresh install)' if (smoke_alert_count.json.count | default(0)) == 0 else '' }}
+          Run 'make health' for a full end-to-end pipeline test including synthetic event injection.
+          To verify the alert pipeline end-to-end, run: make health
 
     - name: Fail on critical smoke test failures
       ansible.builtin.fail:

@@ -93,7 +93,7 @@
 - name: Pre-Flight Checks - Security Assertions
   hosts: localhost
   gather_facts: false
-  tags: [always, security]
+  tags: [always, security, config-validation]
   tasks:
     - name: Assert wazuh_api_password is defined and not the known default
       ansible.builtin.assert:
@@ -143,6 +143,60 @@
           vault_wazuh_manager_cluster_key.
         success_msg: "Cluster key check passed"
       when: wazuh_manager_cluster_enabled | default(false)
+
+    - name: Assert syslog output server defined when syslog output enabled
+      ansible.builtin.assert:
+        that:
+          - wazuh_syslog_output_server is defined
+          - wazuh_syslog_output_server | length > 0
+        fail_msg: "wazuh_syslog_output_enabled is true but wazuh_syslog_output_server is not set"
+      when: wazuh_syslog_output_enabled | default(false)
+
+    - name: Assert email variables defined when email notifications enabled
+      ansible.builtin.assert:
+        that:
+          - wazuh_email_smtp_server is defined and wazuh_email_smtp_server | length > 0
+          - wazuh_email_from is defined and wazuh_email_from | length > 0
+          - wazuh_email_to is defined and wazuh_email_to | length > 0
+        fail_msg: "wazuh_email_notification_enabled is true but wazuh_email_smtp_server/from/to are not fully set"
+      when: wazuh_email_notification_enabled | default(false)
+
+    - name: Assert AWS bucket or service defined when AWS integration enabled
+      ansible.builtin.assert:
+        that:
+          - (wazuh_aws_buckets | default([]) | length > 0) or (wazuh_aws_services | default([]) | length > 0)
+        fail_msg: "wazuh_aws_enabled is true but neither wazuh_aws_buckets nor wazuh_aws_services are defined"
+      when: wazuh_aws_enabled | default(false)
+
+    - name: Assert Azure log analytics defined when Azure integration enabled
+      ansible.builtin.assert:
+        that:
+          - (wazuh_azure_log_analytics | default([]) | length > 0) or (wazuh_azure_graph | default([]) | length > 0) or (wazuh_azure_storage | default([]) | length > 0)
+        fail_msg: "wazuh_azure_enabled is true but no Azure sources (log_analytics/graph/storage) are defined"
+      when: wazuh_azure_enabled | default(false)
+
+    - name: Assert GCP credentials defined when GCP integration enabled
+      ansible.builtin.assert:
+        that:
+          - wazuh_gcp_project_id is defined and wazuh_gcp_project_id | length > 0
+          - wazuh_gcp_subscription_name is defined and wazuh_gcp_subscription_name | length > 0
+          - wazuh_gcp_credentials_file is defined and wazuh_gcp_credentials_file | length > 0
+        fail_msg: "wazuh_gcp_enabled is true but wazuh_gcp_project_id/subscription_name/credentials_file are not set"
+      when: wazuh_gcp_enabled | default(false)
+
+    - name: Assert Office365 tenants defined when Office365 integration enabled
+      ansible.builtin.assert:
+        that:
+          - wazuh_office365_tenants | default([]) | length > 0
+        fail_msg: "wazuh_office365_enabled is true but wazuh_office365_tenants list is empty"
+      when: wazuh_office365_enabled | default(false)
+
+    - name: Assert GitHub organizations defined when GitHub integration enabled
+      ansible.builtin.assert:
+        that:
+          - wazuh_github_organizations | default([]) | length > 0
+        fail_msg: "wazuh_github_enabled is true but wazuh_github_organizations list is empty"
+      when: wazuh_github_enabled | default(false)
 
 - name: Pre-Flight Checks - Gather Facts
   hosts: all

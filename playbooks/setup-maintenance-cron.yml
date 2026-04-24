@@ -113,6 +113,36 @@
         mode: '0700'
 
     # ═══════════════════════════════════════════════════════════════
+    # PREREQUISITE VALIDATION
+    # ═══════════════════════════════════════════════════════════════
+
+    - name: Assert vault password file exists for scheduled backups
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../.vault_password"
+      register: vault_pw_stat
+
+    - name: Fail if vault password missing — cron backup would silently fail
+      ansible.builtin.fail:
+        msg: >
+          Cannot schedule backup cron: .vault_password not found at
+          {{ playbook_dir }}/../.vault_password. The scheduled ansible-playbook
+          command requires this file to decrypt credentials at runtime.
+          Create it first with: make vault-init (or scripts/manage-vault.sh init)
+      when: not vault_pw_stat.stat.exists
+
+    - name: Assert inventory file exists for scheduled backups
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../inventory/hosts.yml"
+      register: inventory_stat
+
+    - name: Fail if inventory missing — cron backup would silently fail
+      ansible.builtin.fail:
+        msg: >
+          Cannot schedule backup cron: inventory/hosts.yml not found.
+          Run ./setup.sh to generate the inventory first.
+      when: not inventory_stat.stat.exists
+
+    # ═══════════════════════════════════════════════════════════════
     # BACKUP CRON SETUP
     # ═══════════════════════════════════════════════════════════════
 
@@ -151,6 +181,20 @@
         hour: "{{ wazuh_backup_hour | default(2) }}"
         weekday: "{{ wazuh_backup_day | default(0) }}"
         job: "{{ scripts_dir }}/run-scheduled-backup.sh"
+
+    - name: Validate backup playbook is runnable (dry-run)
+      ansible.builtin.command: >
+        ansible-playbook {{ playbook_dir }}/backup.yml
+        --inventory {{ playbook_dir }}/../inventory/hosts.yml
+        --vault-password-file {{ playbook_dir }}/../.vault_password
+        --check --syntax-check
+      register: backup_syntax_check
+      changed_when: false
+      failed_when: backup_syntax_check.rc != 0
+
+    - name: Report cron setup result
+      ansible.builtin.debug:
+        msg: "Backup cron scheduled and validated successfully. Dry-run syntax check passed."
 
     # ═══════════════════════════════════════════════════════════════
     # LOG CLEANUP CRON SETUP

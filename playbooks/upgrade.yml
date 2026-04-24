@@ -176,11 +176,23 @@
           {% if inventory_hostname in groups.get('wazuh_managers', []) %}  Manager: {{ current_manager_version.stdout }} → {{ target_version }}{% endif %}
           {% if inventory_hostname in groups.get('wazuh_dashboards', []) %}  Dashboard: {{ current_dashboard_version.stdout }} → {{ target_version }}{% endif %}
 
+    - name: Parse current Indexer version components
+      ansible.builtin.set_fact:
+        current_indexer_major: "{{ current_indexer_version.stdout.split('.')[0] | int }}"
+        current_indexer_minor: "{{ current_indexer_version.stdout.split('.')[1] | int }}"
+        current_indexer_patch: "{{ current_indexer_version.stdout.split('.')[2] | default('0') | int }}"
+      when:
+        - inventory_hostname in groups.get('wazuh_indexers', [])
+        - current_indexer_version.stdout != 'not_installed'
+        - current_indexer_version.stdout is regex('^[0-9]+\.[0-9]+')
+
     - name: Validate upgrade path for Indexer
       ansible.builtin.assert:
         that:
-          - current_indexer_version.stdout == 'not_installed' or
-            (current_indexer_version.stdout.split('.')[0] | int <= target_version.split('.')[0] | int)
+          - >-
+            [current_indexer_major | int, current_indexer_minor | int, current_indexer_patch | int] | join('.') is version(
+              [target_version.split('.')[0] | int, target_version.split('.')[1] | int, target_version.split('.')[2] | int] | join('.'), '<='
+            )
         fail_msg: |
           ERROR: Downgrade detected!
           Current: {{ current_indexer_version.stdout }}
@@ -192,11 +204,23 @@
         - current_indexer_version.stdout != 'not_installed'
         - current_indexer_version.stdout is regex('^[0-9]+\.[0-9]+')
 
+    - name: Parse current Manager version components
+      ansible.builtin.set_fact:
+        current_manager_major: "{{ current_manager_version.stdout.split('.')[0] | int }}"
+        current_manager_minor: "{{ current_manager_version.stdout.split('.')[1] | int }}"
+        current_manager_patch: "{{ current_manager_version.stdout.split('.')[2] | default('0') | int }}"
+      when:
+        - inventory_hostname in groups.get('wazuh_managers', [])
+        - current_manager_version.stdout != 'not_installed'
+        - current_manager_version.stdout is regex('^[0-9]+\.[0-9]+')
+
     - name: Validate upgrade path for Manager
       ansible.builtin.assert:
         that:
-          - current_manager_version.stdout == 'not_installed' or
-            (current_manager_version.stdout.split('.')[0] | int <= target_version.split('.')[0] | int)
+          - >-
+            [current_manager_major | int, current_manager_minor | int, current_manager_patch | int] | join('.') is version(
+              [target_version.split('.')[0] | int, target_version.split('.')[1] | int, target_version.split('.')[2] | int] | join('.'), '<='
+            )
         fail_msg: |
           ERROR: Downgrade detected!
           Current: {{ current_manager_version.stdout }}
@@ -208,11 +232,23 @@
         - current_manager_version.stdout != 'not_installed'
         - current_manager_version.stdout is regex('^[0-9]+\.[0-9]+')
 
+    - name: Parse current Dashboard version components
+      ansible.builtin.set_fact:
+        current_dashboard_major: "{{ current_dashboard_version.stdout.split('.')[0] | int }}"
+        current_dashboard_minor: "{{ current_dashboard_version.stdout.split('.')[1] | int }}"
+        current_dashboard_patch: "{{ current_dashboard_version.stdout.split('.')[2] | default('0') | int }}"
+      when:
+        - inventory_hostname in groups.get('wazuh_dashboards', [])
+        - current_dashboard_version.stdout != 'not_installed'
+        - current_dashboard_version.stdout is regex('^[0-9]+\.[0-9]+')
+
     - name: Validate upgrade path for Dashboard
       ansible.builtin.assert:
         that:
-          - current_dashboard_version.stdout == 'not_installed' or
-            (current_dashboard_version.stdout.split('.')[0] | int <= target_version.split('.')[0] | int)
+          - >-
+            [current_dashboard_major | int, current_dashboard_minor | int, current_dashboard_patch | int] | join('.') is version(
+              [target_version.split('.')[0] | int, target_version.split('.')[1] | int, target_version.split('.')[2] | int] | join('.'), '<='
+            )
         fail_msg: |
           ERROR: Downgrade detected!
           Current: {{ current_dashboard_version.stdout }}
@@ -381,50 +417,66 @@
       become: true
       when: indexer_needs_upgrade
 
-    - name: Stop Wazuh Indexer service
-      ansible.builtin.systemd:
-        name: wazuh-indexer
-        state: stopped
-      become: true
+    - name: Stop, upgrade, and restart Wazuh Indexer
       when: indexer_needs_upgrade
+      block:
+        - name: Stop Wazuh Indexer service
+          ansible.builtin.systemd:
+            name: wazuh-indexer
+            state: stopped
+          become: true
 
-    - name: Upgrade Wazuh Indexer package (Debian/Ubuntu)
-      ansible.builtin.apt:
-        name: wazuh-indexer
-        state: latest
-        update_cache: true
-      become: true
-      when:
-        - indexer_needs_upgrade
-        - ansible_os_family == 'Debian'
+        - name: Upgrade Wazuh Indexer package (Debian/Ubuntu)
+          ansible.builtin.apt:
+            name: wazuh-indexer
+            state: latest
+            update_cache: true
+          become: true
+          when: ansible_os_family == 'Debian'
 
-    - name: Upgrade Wazuh Indexer package (RHEL/CentOS/Rocky/Alma/Fedora)
-      ansible.builtin.yum:
-        name: wazuh-indexer
-        state: latest
-        update_cache: true
-      become: true
-      when:
-        - indexer_needs_upgrade
-        - ansible_os_family == 'RedHat'
+        - name: Upgrade Wazuh Indexer package (RHEL/CentOS/Rocky/Alma/Fedora)
+          ansible.builtin.yum:
+            name: wazuh-indexer
+            state: latest
+            update_cache: true
+          become: true
+          when: ansible_os_family == 'RedHat'
 
-    - name: Upgrade Wazuh Indexer package (SUSE/openSUSE)
-      community.general.zypper:
-        name: wazuh-indexer
-        state: latest
-        update_cache: true
-      become: true
-      when:
-        - indexer_needs_upgrade
-        - ansible_os_family == 'Suse'
+        - name: Upgrade Wazuh Indexer package (SUSE/openSUSE)
+          community.general.zypper:
+            name: wazuh-indexer
+            state: latest
+            update_cache: true
+          become: true
+          when: ansible_os_family == 'Suse'
 
-    - name: Start Wazuh Indexer service
-      ansible.builtin.systemd:
-        name: wazuh-indexer
-        state: started
-        enabled: true
-      become: true
-      when: indexer_needs_upgrade
+        - name: Start Wazuh Indexer service
+          ansible.builtin.systemd:
+            name: wazuh-indexer
+            state: started
+            enabled: true
+          become: true
+
+      rescue:
+        - name: Re-enable shard allocation after upgrade failure
+          ansible.builtin.uri:
+            url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/settings"
+            method: PUT
+            user: admin
+            password: "{{ wazuh_indexer_admin_password }}"
+            body_format: json
+            body:
+              persistent:
+                cluster.routing.allocation.enable: null
+            validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+          no_log: true
+
+        - name: Fail after re-enabling shard allocation
+          ansible.builtin.fail:
+            msg: >
+              Indexer upgrade failed on {{ inventory_hostname }}. Shard allocation
+              has been re-enabled to prevent cluster degradation. Review the error
+              above and re-run the upgrade after fixing the issue.
 
     - name: Wait for Indexer port to be available
       ansible.builtin.wait_for:

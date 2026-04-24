@@ -224,12 +224,26 @@
             mode: '0640'
           when: rbac_check.stat.exists
 
-        - name: Fix manager permissions
+        - name: Set permissions on restored manager config
           ansible.builtin.file:
-            path: /var/ossec
+            path: "{{ item }}"
             owner: wazuh
             group: wazuh
             recurse: true
+          loop:
+            - /var/ossec/etc
+            - /var/ossec/api/configuration
+          become: true
+          when: manager_backup_check.stat.exists
+
+        - name: Set permissions on restored manager certs
+          ansible.builtin.file:
+            path: /var/ossec/etc/certs
+            owner: wazuh
+            group: wazuh
+            mode: '0750'
+            recurse: true
+          become: true
           when: manager_backup_check.stat.exists
 
         - name: Cleanup restore files

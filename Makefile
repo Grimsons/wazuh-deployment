@@ -7,7 +7,8 @@
 .PHONY: help setup setup-tui deploy deploy-bootstrap deploy-indexer deploy-manager \
         deploy-dashboard deploy-agent health backup restore upgrade check status \
         unlock vault-view vault-edit vault-rotate certs-check certs-rotate clean \
-        monitoring test lint deploy-rules threat-intel update-checksums
+        monitoring test lint deploy-rules threat-intel update-checksums \
+        dr-validate compliance-report canary-deploy
 
 # Default target
 .DEFAULT_GOAL := help
@@ -160,9 +161,9 @@ monitoring: ## Enable Prometheus monitoring exporters
 	@echo "$(CYAN)Deploying Prometheus exporters...$(RESET)"
 	ansible-playbook site.yml --tags monitoring -e wazuh_monitoring_enabled=true
 
-deploy-rules: ## Deploy only custom rules, decoders, and CDB lists
-	@echo "$(CYAN)Deploying custom rules and decoders...$(RESET)"
-	ansible-playbook site.yml --tags manager -e wazuh_custom_content_enabled=true
+deploy-rules: ## Deploy custom detection rules and decoders only
+	@echo "Note: requires wazuh_custom_content_enabled: true in group_vars/all/main.yml"
+	ansible-playbook site.yml --tags custom-rules
 
 threat-intel: ## Update threat intelligence feeds (IPs, domains, hashes)
 	@echo "$(CYAN)Updating threat intelligence feeds...$(RESET)"
@@ -173,6 +174,15 @@ threat-intel: ## Update threat intelligence feeds (IPs, domains, hashes)
 update-checksums: ## Recompute artifact SHA-256 checksums from VERSION.json (run after version bump)
 	@echo "$(CYAN)Recomputing artifact checksums for current Wazuh version...$(RESET)"
 	@./scripts/update-checksums.sh
+
+dr-validate: ## Validate disaster recovery readiness
+	ansible-playbook playbooks/dr-validate.yml $(ANSIBLE_ARGS)
+
+compliance-report: ## Generate compliance status report
+	ansible-playbook playbooks/compliance-report.yml $(ANSIBLE_ARGS)
+
+canary-deploy: ## Staged canary deployment (serial=1, with validation gates)
+	ansible-playbook playbooks/canary-deploy.yml $(ANSIBLE_ARGS)
 
 #═══════════════════════════════════════════════════════════════════════════════
 # Security

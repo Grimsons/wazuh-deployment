@@ -105,24 +105,10 @@ check_indexer_api() {
     local host="$1"
     print_section "Indexer Cluster Health"
 
-    # Try to get cluster health
-    local health
-    health=$(ansible "$host" -m shell -a "curl -s -k -u admin:\$(cat /etc/wazuh-indexer/opensearch.yml 2>/dev/null | grep -A1 'admin:' | tail -1 | tr -d ' ') https://localhost:9200/_cluster/health 2>/dev/null || echo '{}')" \
-        --one-line -i "$PROJECT_DIR/inventory/hosts.yml" 2>/dev/null | tail -1)
-
-    if echo "$health" | grep -q '"status"'; then
-        local status=$(echo "$health" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
-        local nodes=$(echo "$health" | grep -o '"number_of_nodes":[0-9]*' | cut -d':' -f2)
-
-        case "$status" in
-            green)  echo -e "  ${STATUS_OK} Cluster: ${GREEN}green${NC} ($nodes nodes)" ;;
-            yellow) echo -e "  ${STATUS_WARN} Cluster: ${YELLOW}yellow${NC} ($nodes nodes)" ;;
-            red)    echo -e "  ${STATUS_FAIL} Cluster: ${RED}red${NC} ($nodes nodes)" ;;
-            *)      echo -e "  ${STATUS_UNKNOWN} Cluster: unknown" ;;
-        esac
-    else
-        echo -e "  ${STATUS_UNKNOWN} Could not query cluster health"
-    fi
+    # Cluster health requires vault credentials — use 'make health' for full API checks
+    # This script only reports service active/inactive state
+    INDEXER_HEALTH="N/A (run 'make health' for API-level cluster health)"
+    echo -e "  ${STATUS_UNKNOWN} Cluster: ${INDEXER_HEALTH}"
 }
 
 # Check hosts in a group
