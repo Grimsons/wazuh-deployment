@@ -7,7 +7,7 @@
 .PHONY: help setup setup-tui deploy deploy-bootstrap deploy-indexer deploy-manager \
         deploy-dashboard deploy-agent health backup restore upgrade check status \
         unlock vault-view vault-edit vault-rotate certs-check certs-rotate clean \
-        monitoring test lint deploy-rules threat-intel
+        monitoring test lint deploy-rules threat-intel bats
 
 # Default target
 .DEFAULT_GOAL := help
@@ -39,7 +39,7 @@ help: ## Show this help message
 	@grep -E '^(vault-|certs-)[^:]*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  $(CYAN)%-20s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(GREEN)Development:$(RESET)"
-	@grep -E '^(test|lint|clean):.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  $(CYAN)%-20s$(RESET) %s\n", $$1, $$2}'
+	@grep -E '^(test|bats|lint|clean):.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  $(CYAN)%-20s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(YELLOW)Examples:$(RESET)"
 	@echo "  make setup               # Run interactive CLI setup"
@@ -205,14 +205,26 @@ certs-renew: ## Renew expiring certificates
 # Development
 #═══════════════════════════════════════════════════════════════════════════════
 
-test: ## Run Ansible syntax and lint checks
-	@echo "$(CYAN)Running syntax check...$(RESET)"
+test: bats ## Run all tests (BATS shell tests + Ansible syntax check + lint)
+	@echo "$(CYAN)Running Ansible syntax check...$(RESET)"
 	ansible-playbook site.yml --syntax-check
-	@echo "$(CYAN)Running lint...$(RESET)"
+	@echo "$(CYAN)Running Ansible lint...$(RESET)"
 	@if command -v ansible-lint >/dev/null 2>&1; then \
 		ansible-lint site.yml roles/; \
 	else \
 		echo "$(YELLOW)⚠$(RESET) ansible-lint not installed, skipping"; \
+	fi
+
+bats: ## Run BATS unit tests for shell libraries
+	@echo "$(CYAN)Running BATS tests...$(RESET)"
+	@if command -v bats >/dev/null 2>&1; then \
+		bats tests/lib/; \
+	else \
+		echo "$(RED)Error: bats not installed$(RESET)"; \
+		echo "  Ubuntu/Debian: sudo apt-get install bats"; \
+		echo "  macOS:         brew install bats-core"; \
+		echo "  Manual:        https://github.com/bats-core/bats-core"; \
+		exit 1; \
 	fi
 
 lint: ## Run ansible-lint on all playbooks
