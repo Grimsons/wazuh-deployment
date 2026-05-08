@@ -13,6 +13,7 @@
   ansible.builtin.set_fact:
     wazuh_admin_password: "{{ wazuh_indexer_admin_password if (wazuh_indexer_admin_password is defined and wazuh_indexer_admin_password != 'admin') else wazuh_indexer_admin_password_generated }}"
   run_once: true
+  no_log: true
 
 - name: Hash the admin password using OpenSearch security tools
   ansible.builtin.shell: |
@@ -53,7 +54,7 @@
       -key {{ wazuh_indexer_certs_path }}/admin-key.pem \
       -h 127.0.0.1 \
       -p {{ wazuh_indexer_http_port }} \
-      -icl -nhnv
+      -icl
   become: true
   register: security_update
   changed_when: security_update.rc == 0

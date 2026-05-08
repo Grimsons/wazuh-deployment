@@ -173,6 +173,15 @@ wazuh_alerting_profile: "none"
 # Security Configuration Assessment (SCA)
 wazuh_sca_enabled: true
 wazuh_sca_interval: "12h"
+wazuh_sca_verify_builtin: true
+# Built-in CIS benchmark policies shipped with Wazuh
+wazuh_sca_builtin_policies:
+  - cis_debian10.yml
+  - cis_debian11.yml
+  - cis_rhel8_linux.yml
+  - cis_rhel9_linux.yml
+  - cis_ubuntu20-04.yml
+  - cis_ubuntu22-04.yml
 
 # System inventory (Syscollector)
 wazuh_syscollector_enabled: true
@@ -719,6 +728,15 @@ wazuh_agent_groups:
           value: "endpoint"
         - key: "group.os"
           value: "macos"
+
+# Automatic agent group assignment
+# When enabled, agents are assigned to groups based on their OS platform
+wazuh_auto_group_assignment_enabled: false
+# Map of OS platform strings (from Wazuh API os.platform field) to group names
+wazuh_auto_group_assignment_rules:
+  linux: "linux-servers"
+  windows: "windows-workstations"
+  darwin: "macos-endpoints"
 
 # Log rotation settings
 wazuh_log_rotation_enabled: true

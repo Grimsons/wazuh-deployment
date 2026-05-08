@@ -94,7 +94,7 @@ generate_admin_cert() {
         -in "${CERTS_DIR}/admin.csr" \
         -CA "${CERTS_DIR}/root-ca.pem" \
         -CAkey "${CERTS_DIR}/root-ca-key.pem" \
-        -CAcreateserial \
+        -set_serial "0x$(openssl rand -hex 16)" \
         -out "${CERTS_DIR}/admin.pem" \
         2>/dev/null
 
@@ -141,7 +141,7 @@ EOF
         -in "${CERTS_DIR}/${node_name}.csr" \
         -CA "${CERTS_DIR}/root-ca.pem" \
         -CAkey "${CERTS_DIR}/root-ca-key.pem" \
-        -CAcreateserial \
+        -set_serial "0x$(openssl rand -hex 16)" \
         -out "${CERTS_DIR}/${node_name}.pem" \
         -extfile "${CERTS_DIR}/${node_name}.ext" \
         2>/dev/null

@@ -354,7 +354,7 @@
             cluster.routing.allocation.enable: "primaries"
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200]
       register: shard_allocation
       delegate_to: localhost
@@ -367,7 +367,7 @@
         method: POST
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 409]  # 409 is OK if some shards couldn't sync
       delegate_to: localhost
       when: groups['wazuh_indexers'] | length > 1
@@ -481,7 +481,7 @@
         method: GET
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200]
       register: cluster_health
       until: cluster_health.status == 200
@@ -500,7 +500,7 @@
             cluster.routing.allocation.enable: null
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200]
       delegate_to: localhost
       when:
@@ -513,7 +513,7 @@
         method: GET
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200]
       register: cluster_stable
       delegate_to: localhost
@@ -639,7 +639,7 @@
       ansible.builtin.uri:
         url: "https://{{ inventory_hostname }}:{{ wazuh_manager_api_port | default(55000) }}/"
         method: GET
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 401]  # 401 is OK - means API is responding
       register: api_health
       until: api_health.status in [200, 401]
@@ -755,7 +755,7 @@
         method: GET
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 302]
       register: dashboard_health
       until: dashboard_health.status in [200, 302]
@@ -902,7 +902,7 @@
         method: GET
         user: "{{ wazuh_indexer_admin_user | default('admin') }}"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         return_content: true
       register: indexer_health
       failed_when: false
@@ -912,7 +912,7 @@
       ansible.builtin.uri:
         url: "https://{{ hostvars[groups['wazuh_managers'][0]]['ansible_host'] | default(groups['wazuh_managers'][0]) }}:{{ wazuh_manager_api_port | default(55000) }}/"
         method: GET
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 401]
       register: manager_api
       failed_when: false
@@ -922,7 +922,7 @@
       ansible.builtin.uri:
         url: "https://{{ hostvars[groups['wazuh_dashboards'][0]]['ansible_host'] | default(groups['wazuh_dashboards'][0]) }}:{{ wazuh_dashboard_port | default(443) }}/api/status"
         method: GET
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 401, 302]
       register: dashboard_status
       failed_when: false

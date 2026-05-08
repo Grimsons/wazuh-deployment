@@ -21,7 +21,7 @@
     user: "{{ wazuh_api_user }}"
     password: "{{ wazuh_api_default_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     return_content: true
   register: auth_response
   run_once: true
@@ -31,7 +31,10 @@
 - name: Debug auth response status
   ansible.builtin.debug:
     msg: "Auth response status: {{ auth_response.status | default('undefined') }}"
-  when: auth_response is defined and auth_response is not skipped
+  when:
+    - wazuh_debug | default(false)
+    - auth_response is defined
+    - auth_response is not skipped
   run_once: true
 
 - name: Extract JWT token
@@ -47,7 +50,7 @@
     method: GET
     headers:
       Authorization: "Bearer {{ wazuh_jwt_token }}"
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     return_content: true
   register: users_response
   when: wazuh_jwt_token is defined
@@ -68,7 +71,7 @@
     body_format: json
     body:
       password: "{{ wazuh_api_password }}"
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200]
   register: password_update
   until: password_update.status | default(0) == 200
@@ -107,7 +110,7 @@
     user: "{{ wazuh_api_user }}"
     password: "{{ wazuh_api_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     return_content: true
     status_code: [200, 401]
   register: rerun_auth_response
