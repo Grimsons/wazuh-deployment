@@ -64,7 +64,7 @@
   post_tasks:
     - name: Health Gate - Wait for indexer to rejoin cluster
       ansible.builtin.uri:
-        url: "https://127.0.0.1:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health?wait_for_status=yellow&timeout=120s"
+        url: "https://127.0.0.1:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health?wait_for_status={{ wazuh_health_gate_status | default('green') }}&timeout=120s"
         method: GET
         user: "{{ wazuh_indexer_admin_user | default('admin') }}"
         password: "{{ wazuh_indexer_admin_password }}"

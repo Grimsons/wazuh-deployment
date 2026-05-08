@@ -33,6 +33,10 @@
   ansible.builtin.include_tasks: custom_rules.yml
   when: wazuh_custom_content_enabled | default(false)
 
+- name: Manage SCA policies
+  ansible.builtin.include_tasks: sca.yml
+  when: wazuh_sca_enabled | default(true)
+
 - name: Configure Wazuh API
   ansible.builtin.include_tasks: api.yml
 
@@ -82,7 +86,7 @@
     user: "{{ wazuh_api_user }}"
     password: "{{ wazuh_api_default_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200, 401]
   register: wazuh_api_check
   until: wazuh_api_check.status in [200, 401]

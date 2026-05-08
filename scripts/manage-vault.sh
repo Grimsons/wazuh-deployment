@@ -17,6 +17,7 @@ NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+source "$PROJECT_DIR/lib/generators.sh"
 # Use group_vars/all/ directory structure for proper Ansible auto-loading
 VAULT_DIR="$PROJECT_DIR/group_vars/all"
 VAULT_FILE="$VAULT_DIR/vault.yml"
@@ -45,23 +46,7 @@ print_warning() {
     echo -e "${YELLOW}⚠ $1${NC}"
 }
 
-# Generate a secure random password
-generate_password() {
-    local length="${1:-24}"
-    # Exclude YAML-breaking characters: ! # $ { } [ ] : , & * ? | > ' " ` %
-    # Use only YAML-safe characters for passwords
-    local password=$(LC_ALL=C tr -dc 'A-Za-z0-9@^_+=-' < /dev/urandom | head -c "$length")
-    # Ensure complexity requirements
-    local upper=$(LC_ALL=C tr -dc 'A-Z' < /dev/urandom | head -c 1)
-    local lower=$(LC_ALL=C tr -dc 'a-z' < /dev/urandom | head -c 1)
-    local number=$(LC_ALL=C tr -dc '0-9' < /dev/urandom | head -c 1)
-    local symbols='@^_+-='
-    local symbol_idx
-    symbol_idx=$(head -c 4 /dev/urandom | od -An -tu4 | tr -d ' ')
-    local symbol="${symbols:$((symbol_idx % ${#symbols})):1}"
-    password="${password}${upper}${lower}${number}${symbol}"
-    echo "$password" | fold -w1 | shuf | tr -d '\n'
-}
+# generate_yaml_safe_password is provided by lib/generators.sh (sourced above)
 
 # Initialize vault with a new password
 init_vault() {
@@ -77,7 +62,7 @@ init_vault() {
     fi
 
     # Generate vault password
-    local vault_password=$(generate_password 32)
+    local vault_password=$(generate_yaml_safe_password 32)
     echo "$vault_password" > "$VAULT_PASSWORD_FILE"
     chmod 600 "$VAULT_PASSWORD_FILE"
 
@@ -118,22 +103,22 @@ create_vault() {
 
     # Generate passwords if not provided
     if [ -z "$indexer_password" ]; then
-        indexer_password=$(generate_password 24)
+        indexer_password=$(generate_yaml_safe_password 24)
         print_info "Generated new indexer admin password"
     fi
 
     if [ -z "$api_password" ]; then
-        api_password=$(generate_password 24)
+        api_password=$(generate_yaml_safe_password 24)
         print_info "Generated new API password"
     fi
 
     if [ -z "$enrollment_password" ]; then
-        enrollment_password=$(generate_password 24)
+        enrollment_password=$(generate_yaml_safe_password 24)
         print_info "Generated new agent enrollment password"
     fi
 
     if [ -z "$cluster_key" ]; then
-        cluster_key=$(generate_password 32)
+        cluster_key=$(generate_yaml_safe_password 32)
     fi
 
     # Build per-host SSH credentials content
@@ -276,7 +261,7 @@ rekey_vault() {
     fi
 
     # Generate new vault password
-    local new_password=$(generate_password 32)
+    local new_password=$(generate_yaml_safe_password 32)
     local new_password_file="${VAULT_PASSWORD_FILE}.new"
     echo "$new_password" > "$new_password_file"
 

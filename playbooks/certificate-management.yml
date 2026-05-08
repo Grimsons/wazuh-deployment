@@ -90,7 +90,6 @@
     - name: Validate - Check each certificate
       ansible.builtin.shell: |
         cert="{{ item.path }}"
-        key="${cert%-pem}-key.pem"
         key="${cert%.pem}-key.pem"
 
         echo "=== Certificate: $(basename $cert) ==="

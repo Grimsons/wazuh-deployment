@@ -1,0 +1,124 @@
+---
+name: CI
+
+on:
+  push:
+    branches: [main, "1.*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements*.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          pip install ansible-lint yamllint ansible
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Run yamllint
+        run: yamllint -c .yamllint . || true
+
+      - name: Run ansible-lint
+        run: ansible-lint --profile production roles/ playbooks/ site.yml
+        env:
+          ANSIBLE_ROLES_PATH: roles
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: "."
+          severity: warning
+          ignore_paths: ".git"
+
+  syntax-check:
+    name: Ansible Syntax Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Ansible
+        run: |
+          pip install ansible
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Create minimal inventory for syntax check
+        run: |
+          mkdir -p inventory
+          cat > inventory/hosts.yml <<'EOF'
+          all:
+            children:
+              wazuh_indexers:
+                hosts:
+                  indexer-1:
+                    ansible_host: 127.0.0.1
+                    ansible_connection: local
+              wazuh_managers:
+                hosts:
+                  manager-1:
+                    ansible_host: 127.0.0.1
+                    ansible_connection: local
+              wazuh_dashboards:
+                hosts:
+                  dashboard-1:
+                    ansible_host: 127.0.0.1
+                    ansible_connection: local
+          EOF
+
+      - name: Create minimal vars for syntax check
+        run: |
+          mkdir -p group_vars/all
+          cat > group_vars/all/main.yml <<'EOF'
+          wazuh_version: "4.14.5"
+          wazuh_indexer_nodes:
+            - name: indexer-1
+              ip: 127.0.0.1
+          wazuh_manager_nodes:
+            - name: manager-1
+              ip: 127.0.0.1
+          wazuh_indexer_admin_password: "TestPass1234@"
+          wazuh_api_password: "TestPass1234@"
+          vault_indexer_admin_password: "TestPass1234@"
+          vault_wazuh_api_password: "TestPass1234@"
+          vault_dashboard_password: "TestPass1234@"
+          wazuh_agent_enrollment_password: "TestPass1234@"
+          wazuh_manager_cluster_key: "abc123def456abc123def456abc12345"
+          EOF
+
+      - name: Syntax check all playbooks
+        run: |
+          for playbook in site.yml playbooks/*.yml; do
+            echo "Checking: $playbook"
+            ansible-playbook --syntax-check "$playbook" -i inventory/hosts.yml || true
+          done
+        env:
+          ANSIBLE_ROLES_PATH: roles

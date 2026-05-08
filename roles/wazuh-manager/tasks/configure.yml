@@ -53,22 +53,35 @@
 - name: Configure Wazuh keystore for indexer username
   ansible.builtin.shell: |
     set -o pipefail
-    echo 'admin' | /var/ossec/bin/wazuh-keystore -f indexer -k username
+    echo 'admin' | /var/ossec/bin/wazuh-keystore -f indexer -k username &&
+    touch /var/ossec/etc/.keystore_username_set
   args:
     executable: /bin/bash
+    creates: /var/ossec/etc/.keystore_username_set
   become: true
-  changed_when: true
   no_log: true
   when: wazuh_indexer_connection_enabled | default(true)
 
 - name: Configure Wazuh keystore for indexer password
   ansible.builtin.shell: |
     set -o pipefail
-    echo '{{ wazuh_indexer_admin_password }}' | /var/ossec/bin/wazuh-keystore -f indexer -k password
+    HASH_FILE=/var/ossec/etc/.keystore_password_hash
+    NEW_HASH=$(echo '{{ wazuh_indexer_admin_password }}' | sha256sum | cut -d' ' -f1)
+    OLD_HASH=$(cat "$HASH_FILE" 2>/dev/null || echo "")
+    if [ "$NEW_HASH" != "$OLD_HASH" ]; then
+      echo '{{ wazuh_indexer_admin_password }}' | /var/ossec/bin/wazuh-keystore -f indexer -k password
+      echo "$NEW_HASH" > "$HASH_FILE"
+      chmod 600 "$HASH_FILE"
+      chown wazuh:wazuh "$HASH_FILE"
+      echo "changed"
+    else
+      echo "ok"
+    fi
   args:
     executable: /bin/bash
   become: true
-  changed_when: true
+  register: keystore_password_result
+  changed_when: "'changed' in keystore_password_result.stdout"
   no_log: true
   when:
     - wazuh_indexer_connection_enabled | default(true)

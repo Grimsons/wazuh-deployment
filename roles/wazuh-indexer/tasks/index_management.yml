@@ -205,7 +205,7 @@
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 404]
         return_content: true
       register: alerts_policy_check
@@ -217,7 +217,7 @@
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         body_format: json
         body: "{{ _alerts_ism_body }}"
         status_code: [200, 201]
@@ -231,7 +231,7 @@
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200]
         return_content: true
       register: alerts_policy_retry
@@ -243,7 +243,7 @@
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         body_format: json
         body: "{{ _alerts_ism_body }}"
         status_code: [200, 201]
@@ -263,7 +263,7 @@
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 404]
         return_content: true
       register: archives_policy_check
@@ -275,7 +275,7 @@
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         body_format: json
         body: "{{ _archives_ism_body }}"
         status_code: [200, 201]
@@ -289,7 +289,7 @@
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200]
         return_content: true
       register: archives_policy_retry
@@ -301,7 +301,7 @@
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         body_format: json
         body: "{{ _archives_ism_body }}"
         status_code: [200, 201]
@@ -321,7 +321,7 @@
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 404]
         return_content: true
       register: monitoring_policy_check
@@ -333,7 +333,7 @@
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         body_format: json
         body: "{{ _monitoring_ism_body }}"
         status_code: [200, 201]
@@ -347,7 +347,7 @@
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200]
         return_content: true
       register: monitoring_policy_retry
@@ -359,7 +359,7 @@
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         body_format: json
         body: "{{ _monitoring_ism_body }}"
         status_code: [200, 201]
@@ -376,7 +376,7 @@
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 404]
         return_content: true
       register: statistics_policy_check
@@ -388,7 +388,7 @@
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         body_format: json
         body: "{{ _statistics_ism_body }}"
         status_code: [200, 201]
@@ -402,7 +402,7 @@
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200]
         return_content: true
       register: statistics_policy_retry
@@ -414,7 +414,7 @@
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         body_format: json
         body: "{{ _statistics_ism_body }}"
         status_code: [200, 201]
@@ -432,7 +432,7 @@
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     body_format: json
     body:
       index_patterns:
@@ -644,7 +644,7 @@
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     body_format: json
     body:
       index_patterns:
@@ -856,7 +856,7 @@
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     body_format: json
     body:
       index_patterns:
@@ -882,7 +882,7 @@
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     body_format: json
     body:
       index_patterns:
@@ -914,7 +914,7 @@
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200, 404]
   register: alerts_bootstrap_check
   when: wazuh_rollover_enabled | default(true)
@@ -926,7 +926,7 @@
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     body_format: json
     body: "{{ {'aliases': {(wazuh_alerts_alias | default('wazuh-alerts')): {'is_write_index': true}}} }}"
     status_code: [200]
@@ -943,7 +943,7 @@
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200, 404]
   register: archives_bootstrap_check
   when: wazuh_rollover_enabled | default(true)
@@ -955,7 +955,7 @@
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     body_format: json
     body: "{{ {'aliases': {(wazuh_archives_alias | default('wazuh-archives')): {'is_write_index': true}}} }}"
     status_code: [200]
@@ -972,7 +972,7 @@
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200, 404]
   register: monitoring_bootstrap_check
   when: wazuh_rollover_enabled | default(true)
@@ -984,7 +984,7 @@
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     body_format: json
     body: "{{ {'aliases': {(wazuh_monitoring_alias | default('wazuh-monitoring')): {'is_write_index': true}}} }}"
     status_code: [200]
@@ -1001,7 +1001,7 @@
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200, 404]
   register: statistics_bootstrap_check
   when: wazuh_rollover_enabled | default(true)
@@ -1013,7 +1013,7 @@
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     body_format: json
     body: "{{ {'aliases': {(wazuh_statistics_alias | default('wazuh-statistics')): {'is_write_index': true}}} }}"
     status_code: [200]
@@ -1033,7 +1033,7 @@
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200]
   register: existing_indices
   when: wazuh_retention_enabled | default(true)
@@ -1056,7 +1056,7 @@
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     body_format: json
     body:
       properties:
@@ -1232,7 +1232,7 @@
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     body_format: json
     body:
       policy_id: "wazuh-alerts-policy"
@@ -1254,7 +1254,7 @@
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     body_format: json
     body:
       policy_id: "wazuh-archives-policy"
@@ -1276,7 +1276,7 @@
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     body_format: json
     body:
       policy_id: "wazuh-monitoring-policy"
@@ -1298,7 +1298,7 @@
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     body_format: json
     body:
       policy_id: "wazuh-statistics-policy"
@@ -1323,7 +1323,7 @@
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     body_format: json
     body:
       persistent:

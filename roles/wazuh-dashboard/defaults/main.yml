@@ -38,7 +38,7 @@ wazuh_dashboard_health_check_delay: 10
 # ═══════════════════════════════════════════════════════════════════════════════
 wazuh_dashboard_ssl_enabled: true
 # Verification mode: none, certificate, full
-wazuh_dashboard_ssl_verification_mode: "certificate"
+wazuh_dashboard_ssl_verification_mode: "full"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Session Settings

@@ -181,7 +181,7 @@
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
       register: indexer_precheck
       retries: 3
       delay: 10
