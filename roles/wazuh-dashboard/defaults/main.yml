@@ -172,5 +172,5 @@ wazuh_dashboard_ip_selector: true
 # Agent IDs to exclude from IP selector
 wazuh_dashboard_ip_ignore: []
 
-# Allow configuration changes via the dashboard UI
-wazuh_dashboard_ui_api_editable: true
+# Allow configuration changes via the dashboard UI (false = read-only API config, reduces attack surface)
+wazuh_dashboard_ui_api_editable: false

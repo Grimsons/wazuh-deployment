@@ -68,11 +68,22 @@ plugins.security.ssl.http.enabled_protocols:
 
 plugins.security.nodes_dn:
 {% for node in wazuh_indexer_nodes %}
-  - "CN={{ node.name }},OU={{ wazuh_cert_ou | default('Wazuh') }},O={{ wazuh_cert_org | default('Wazuh') }},L={{ wazuh_cert_location | default('California') }},ST={{ wazuh_cert_state | default('California') }},C={{ wazuh_cert_country | default('US') }}"
+{%- set dn_cn = node.name | replace('\\', '\\\\') | replace(',', '\\,') | replace('"', '\\"') %}
+{%- set dn_ou = wazuh_cert_ou | default('Wazuh') | replace('\\', '\\\\') | replace(',', '\\,') %}
+{%- set dn_o  = wazuh_cert_org | default('Wazuh') | replace('\\', '\\\\') | replace(',', '\\,') %}
+{%- set dn_l  = wazuh_cert_location | default('California') | replace('\\', '\\\\') | replace(',', '\\,') %}
+{%- set dn_st = wazuh_cert_state | default('California') | replace('\\', '\\\\') | replace(',', '\\,') %}
+{%- set dn_c  = wazuh_cert_country | default('US') | replace('\\', '\\\\') | replace(',', '\\,') %}
+  - "CN={{ dn_cn }},OU={{ dn_ou }},O={{ dn_o }},L={{ dn_l }},ST={{ dn_st }},C={{ dn_c }}"
 {% endfor %}
 
 plugins.security.authcz.admin_dn:
-  - "CN=admin,OU={{ wazuh_cert_ou | default('Wazuh') }},O={{ wazuh_cert_org | default('Wazuh') }},L={{ wazuh_cert_location | default('California') }},ST={{ wazuh_cert_state | default('California') }},C={{ wazuh_cert_country | default('US') }}"
+{%- set dn_ou = wazuh_cert_ou | default('Wazuh') | replace('\\', '\\\\') | replace(',', '\\,') %}
+{%- set dn_o  = wazuh_cert_org | default('Wazuh') | replace('\\', '\\\\') | replace(',', '\\,') %}
+{%- set dn_l  = wazuh_cert_location | default('California') | replace('\\', '\\\\') | replace(',', '\\,') %}
+{%- set dn_st = wazuh_cert_state | default('California') | replace('\\', '\\\\') | replace(',', '\\,') %}
+{%- set dn_c  = wazuh_cert_country | default('US') | replace('\\', '\\\\') | replace(',', '\\,') %}
+  - "CN=admin,OU={{ dn_ou }},O={{ dn_o }},L={{ dn_l }},ST={{ dn_st }},C={{ dn_c }}"
 
 plugins.security.allow_unsafe_democertificates: false
 # Must remain true: securityadmin.sh requires an accessible cluster before the security index

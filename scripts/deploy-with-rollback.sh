@@ -9,7 +9,7 @@
 #   ./scripts/deploy-with-rollback.sh --list             # List available rollback points
 #   ./scripts/deploy-with-rollback.sh --playbook FILE    # Deploy specific playbook
 
-set -e
+set -euo pipefail
 
 # Colors
 RED='\033[0;31m'
