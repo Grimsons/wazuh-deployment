@@ -102,26 +102,61 @@
 # ─────────────────────────────────────────────────────────────────
 # Firewall rules for metrics port
 # ─────────────────────────────────────────────────────────────────
-- name: Allow Prometheus to scrape indexer metrics (firewalld)
+- name: Allow Prometheus to scrape indexer metrics from known scrapers (firewalld)
   ansible.posix.firewalld:
-    port: "{{ wazuh_indexer_metrics_port }}/tcp"
+    rich_rule: 'rule family="ipv4" source address="{{ item }}" port port="{{ wazuh_indexer_metrics_port }}" protocol="tcp" accept'
     permanent: true
     state: enabled
     immediate: true
-  when: ansible_facts.services['firewalld.service'] is defined
+  loop: "{{ wazuh_prometheus_scraper_networks }}"
+  when:
+    - ansible_facts.services['firewalld.service'] is defined
+    - wazuh_prometheus_scraper_networks | length > 0
   register: firewalld_indexer_result
   failed_when:
     - firewalld_indexer_result is failed
     - "'Could not connect to firewalld' not in (firewalld_indexer_result.msg | default(''))"
 
-- name: Allow Prometheus to scrape indexer metrics (ufw)
+- name: Allow Prometheus to scrape indexer metrics from anywhere (firewalld, allow-any mode)
+  ansible.posix.firewalld:
+    port: "{{ wazuh_indexer_metrics_port }}/tcp"
+    permanent: true
+    state: enabled
+    immediate: true
+  when:
+    - ansible_facts.services['firewalld.service'] is defined
+    - wazuh_metrics_allow_any | default(false) | bool
+  register: firewalld_indexer_any_result
+  failed_when:
+    - firewalld_indexer_any_result is failed
+    - "'Could not connect to firewalld' not in (firewalld_indexer_any_result.msg | default(''))"
+
+- name: Allow Prometheus to scrape indexer metrics from known scrapers (ufw)
+  community.general.ufw:
+    rule: allow
+    port: "{{ wazuh_indexer_metrics_port }}"
+    proto: tcp
+    src: "{{ item }}"
+    comment: "Wazuh indexer Prometheus metrics — {{ item }}"
+  loop: "{{ wazuh_prometheus_scraper_networks }}"
+  when:
+    - ansible_facts.services['ufw.service'] is defined
+    - wazuh_prometheus_scraper_networks | length > 0
+  register: ufw_indexer_result
+  failed_when:
+    - ufw_indexer_result is failed
+    - "'Could not find a running firewall' not in (ufw_indexer_result.msg | default(''))"
+
+- name: Allow Prometheus to scrape indexer metrics from anywhere (ufw, allow-any mode)
   community.general.ufw:
     rule: allow
     port: "{{ wazuh_indexer_metrics_port }}"
     proto: tcp
     comment: "Wazuh indexer Prometheus metrics"
-  when: ansible_facts.services['ufw.service'] is defined
-  register: ufw_indexer_result
+  when:
+    - ansible_facts.services['ufw.service'] is defined
+    - wazuh_metrics_allow_any | default(false) | bool
+  register: ufw_indexer_any_result
   failed_when:
-    - ufw_indexer_result is failed
-    - "'Could not find a running firewall' not in (ufw_indexer_result.msg | default(''))"
+    - ufw_indexer_any_result is failed
+    - "'Could not find a running firewall' not in (ufw_indexer_any_result.msg | default(''))"

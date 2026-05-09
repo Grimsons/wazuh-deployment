@@ -17,6 +17,12 @@ wazuh_opensearch_prometheus_plugin_version: "2.11.1.0"
 # Port for the indexer metrics endpoint
 wazuh_indexer_metrics_port: 9114
 
+# Source IP restriction for Prometheus scrape ports — populate with known Prometheus server CIDRs
+# e.g. wazuh_prometheus_scraper_networks: ["10.0.1.50/32"]
+# When empty and wazuh_metrics_allow_any: false, firewall rules are skipped (port stays closed)
+wazuh_prometheus_scraper_networks: []
+wazuh_metrics_allow_any: false
+
 # Metrics to collect from indexer
 wazuh_indexer_metrics:
   cluster_health: true

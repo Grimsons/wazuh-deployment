@@ -30,8 +30,11 @@ wazuh_service_start_timeout: 300
 # API settings
 wazuh_manager_api_bind_addr: "0.0.0.0"
 wazuh_manager_api_https: true
-wazuh_manager_api_ssl_protocol: "TLSv1.2"
+# "auto" enables TLS 1.3 negotiation when the client supports it (falls back to TLS 1.2)
+wazuh_manager_api_ssl_protocol: "auto"
 wazuh_manager_api_log_format: "json"
+# Restrict to forward-secret AEAD cipher suites; applies to TLS 1.2 (TLS 1.3 suites are always enabled)
+wazuh_manager_api_ssl_ciphers: "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305"
 
 # API Rate Limiting & Security Hardening
 # Max failed login attempts before blocking (default: 5)
@@ -45,6 +48,12 @@ wazuh_manager_api_max_requests_per_minute: 100
 # Only enable if you need to push commands via API
 wazuh_manager_api_allow_remote_localfile: false
 wazuh_manager_api_allow_remote_wodle: false
+
+# Restrict agent ports (1514/1515) to known networks; set true only when agents span untrusted networks
+wazuh_allow_agents_from_any: false
+# Populate in inventory/group_vars when wazuh_allow_agents_from_any: false
+# e.g. wazuh_agent_networks: ["10.0.0.0/8", "172.16.0.0/12"]
+wazuh_agent_networks: []
 
 # Agent enrollment - SECURE DEFAULTS
 wazuh_authd_enabled: true

@@ -39,6 +39,34 @@
     - wazuh_agent_enrollment_password is defined
     - wazuh_agent_enrollment_password | length > 0
 
+- name: Windows | Restrict authd.pass ACL to SYSTEM and Administrators only
+  community.windows.win_acl:
+    path: 'C:\Program Files (x86)\ossec-agent\authd.pass'
+    user: "{{ item.user }}"
+    rights: "{{ item.rights }}"
+    type: allow
+    state: present
+    inherit: none
+    propagation: none
+  loop:
+    - { user: "SYSTEM",         rights: "FullControl" }
+    - { user: "Administrators", rights: "FullControl" }
+  no_log: true
+  when:
+    - wazuh_authd_use_password | default(true)
+    - wazuh_agent_enrollment_password is defined
+    - wazuh_agent_enrollment_password | length > 0
+
+- name: Windows | Remove inherited ACEs from authd.pass
+  community.windows.win_acl_inheritance:
+    path: 'C:\Program Files (x86)\ossec-agent\authd.pass'
+    reorganize: true
+    state: absent
+  when:
+    - wazuh_authd_use_password | default(true)
+    - wazuh_agent_enrollment_password is defined
+    - wazuh_agent_enrollment_password | length > 0
+
 - name: Windows | Stop Wazuh agent service (if already running)
   ansible.windows.win_service:
     name: "Wazuh"
