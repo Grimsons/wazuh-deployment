@@ -253,7 +253,11 @@
   gather_facts: false
   tags: [e2e, dataflow]
   tasks:
-    - name: "E2E: Inject test alert on manager"
+    # NOTE: wazuh-logtest-legacy runs a dry-run parse of the log through the rule engine.
+    # It does NOT inject into the alert pipeline — no alert reaches the indexer from this.
+    # This only verifies that the rule engine is responding; use alert_count below as the
+    # true pipeline health indicator (requires prior real events to have flowed through).
+    - name: "E2E: Test rule engine responsiveness (logtest dry-run)"
       ansible.builtin.shell: |
         /var/ossec/bin/wazuh-logtest-legacy <<< '{"timestamp":"{{ ansible_date_time.iso8601 | default("now") }}","rule":{"level":3,"description":"E2E health check test alert","id":"100099"},"agent":{"id":"000","name":"e2e-test"},"manager":{"name":"{{ inventory_hostname }}"},"full_log":"E2E-HEALTH-CHECK-{{ ansible_date_time.epoch | default("0") }}"}'
       register: test_alert_inject

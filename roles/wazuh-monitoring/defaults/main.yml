@@ -49,6 +49,13 @@ wazuh_exporter_install_dir: "/opt/wazuh-exporter"
 wazuh_exporter_user: "wazuh-exporter"
 wazuh_exporter_group: "wazuh-exporter"
 
+# CA certificate paths for TLS verification
+# Indexer certs are in /etc/wazuh-indexer/certs/ on indexer nodes
+wazuh_indexer_certs_path: "/etc/wazuh-indexer/certs"
+# Manager API SSL certs are in /var/ossec/api/configuration/ssl/ on manager nodes
+wazuh_manager_certs_path: "/var/ossec/api/configuration/ssl"
+wazuh_manager_ca_cert_filename: "ca.crt"
+
 # ─────────────────────────────────────────────────────────────────
 # Prometheus Scrape Config (for reference)
 # ─────────────────────────────────────────────────────────────────

@@ -4,10 +4,25 @@
 # All passwords are managed through Ansible Vault
 
 - name: Generate random API password
-  ansible.builtin.set_fact:
-    wazuh_api_password_generated: "{{ lookup('password', '/dev/null length=20 chars=ascii_letters,digits') }}@#"
+  ansible.builtin.shell: |
+    source "{{ playbook_dir }}/../lib/generators.sh" && generate_yaml_safe_password 24
+  args:
+    executable: /bin/bash
+  delegate_to: localhost
+  register: _api_pw_shell
+  changed_when: false
   run_once: true
+  no_log: true
   when: wazuh_api_password_generated is not defined
+
+- name: Set generated API password fact
+  ansible.builtin.set_fact:
+    wazuh_api_password_generated: "{{ _api_pw_shell.stdout | trim }}"
+  run_once: true
+  no_log: true
+  when:
+    - wazuh_api_password_generated is not defined
+    - _api_pw_shell is not skipped
 
 - name: Set API password (use provided or generated)
   ansible.builtin.set_fact:
