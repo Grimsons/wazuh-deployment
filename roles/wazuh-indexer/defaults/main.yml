@@ -66,6 +66,16 @@ wazuh_indexer_number_of_replicas: 0
 # Paths
 wazuh_indexer_certs_path: /etc/wazuh-indexer/certs
 
+# OpenSearch TLS cipher suites — explicit list activates the restriction block in opensearch.yml.j2
+# Java JSSE names required (not OpenSSL short names). All suites are ECDHE forward-secret + AEAD.
+wazuh_tls_ciphers: >-
+  TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+  TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+  TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+  TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+  TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+  TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+
 # Index retention settings (ISM policy)
 wazuh_retention_enabled: true
 wazuh_retention_days: 365            # 1 year total retention (adjust based on compliance requirements)

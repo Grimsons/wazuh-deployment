@@ -43,6 +43,7 @@ server.customResponseHeaders:
   X-Frame-Options: "{{ wazuh_dashboard_xframe_options | default('SAMEORIGIN') }}"
   X-Content-Type-Options: "nosniff"
   X-XSS-Protection: "1; mode=block"
+  Strict-Transport-Security: "max-age={{ wazuh_dashboard_hsts_max_age | default(31536000) }}; includeSubDomains"
 {% if wazuh_dashboard_csp_strict | default(true) %}
   Content-Security-Policy: "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https:; frame-ancestors 'self'"
 {% endif %}

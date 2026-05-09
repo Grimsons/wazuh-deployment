@@ -425,8 +425,10 @@
         method: GET
         user: "{{ wazuh_indexer_admin_user | default('admin') }}"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: false
+        force_basic_auth: true
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200]
+      no_log: true
       register: indexer_health
       ignore_errors: true
 
@@ -434,7 +436,7 @@
       ansible.builtin.uri:
         url: "https://{{ hostvars[groups['wazuh_dashboards'][0]]['ansible_host'] | default(groups['wazuh_dashboards'][0]) }}:{{ wazuh_dashboard_port | default(443) }}/api/status"
         method: GET
-        validate_certs: false
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 401]
       register: dashboard_health
       ignore_errors: true

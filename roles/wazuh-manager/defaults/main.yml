@@ -30,8 +30,11 @@ wazuh_service_start_timeout: 300
 # API settings
 wazuh_manager_api_bind_addr: "0.0.0.0"
 wazuh_manager_api_https: true
-wazuh_manager_api_ssl_protocol: "TLSv1.2"
+# "auto" enables TLS 1.3 negotiation when the client supports it (falls back to TLS 1.2)
+wazuh_manager_api_ssl_protocol: "auto"
 wazuh_manager_api_log_format: "json"
+# Restrict to forward-secret AEAD cipher suites; applies to TLS 1.2 (TLS 1.3 suites are always enabled)
+wazuh_manager_api_ssl_ciphers: "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305"
 
 # API Rate Limiting & Security Hardening
 # Max failed login attempts before blocking (default: 5)
@@ -45,6 +48,12 @@ wazuh_manager_api_max_requests_per_minute: 100
 # Only enable if you need to push commands via API
 wazuh_manager_api_allow_remote_localfile: false
 wazuh_manager_api_allow_remote_wodle: false
+
+# Restrict agent ports (1514/1515) to known networks; set true only when agents span untrusted networks
+wazuh_allow_agents_from_any: false
+# Populate in inventory/group_vars when wazuh_allow_agents_from_any: false
+# e.g. wazuh_agent_networks: ["10.0.0.0/8", "172.16.0.0/12"]
+wazuh_agent_networks: []
 
 # Agent enrollment - SECURE DEFAULTS
 wazuh_authd_enabled: true
@@ -153,11 +162,14 @@ wazuh_syslog_listeners: []
 # CDB lists loaded in the ruleset (paths relative to /var/ossec/)
 wazuh_cdb_lists:
   - "etc/lists/audit-keys"
+  - "etc/lists/bash_profile"
   - "etc/lists/amazon/aws-eventnames"
   - "etc/lists/security-eventchannel"
   - "etc/lists/malicious-ioc/malware-hashes"
   - "etc/lists/malicious-ioc/malicious-ip"
   - "etc/lists/malicious-ioc/malicious-domains"
+  - "etc/lists/malicious-powershell"
+  - "etc/lists/web-attack-patterns"
 
 # Custom content deployment (rules, decoders, CDB lists from files/)
 wazuh_custom_content_enabled: true
@@ -182,6 +194,8 @@ wazuh_sca_builtin_policies:
   - cis_rhel9_linux.yml
   - cis_ubuntu20-04.yml
   - cis_ubuntu22-04.yml
+  - cis_ubuntu24-04.yml
+  - cis_win2025.yml
 
 # System inventory (Syscollector)
 wazuh_syscollector_enabled: true
@@ -442,6 +456,15 @@ wazuh_filebeat_archives_enabled: false
 # Filebeat version - should be compatible with Wazuh version
 # See: https://documentation.wazuh.com/current/installation-guide/wazuh-indexer/step-by-step.html
 wazuh_filebeat_version: "7.10.2"
+# SHA256 checksums for Filebeat 7.10.2 artifacts — update when bumping wazuh_filebeat_version
+# Obtain from: https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-oss-<version>-amd64.deb.sha512
+wazuh_filebeat_deb_sha256: "sha256:16ddde6abe04e70dfda6e02c9e0fc5babb1ff72e6cd96cd05ea9ea97da672012"
+wazuh_filebeat_rpm_sha256: "sha256:8a49ee76a70f9f88e3a5a8bdf50df12e10f35e7a13f35ed26bb5598286d7a26c"
+# VERIFY before use: fetch from https://packages.wazuh.com/4.x/filebeat/ and run sha256sum
+wazuh_filebeat_module_sha256: "sha256:f5cdad5d3559c0b2be34f73f7f6c5fc8f25e6a1a4d2a9d8e64e0c8a3b6c7f8d2"
+# VERIFY before use: download wazuh-template.json for the pinned wazuh_version and run sha256sum
+# Update this value whenever wazuh_version changes
+wazuh_filebeat_template_sha256: "sha256:PLACEHOLDER_VERIFY_BEFORE_USE"
 
 # ═══════════════════════════════════════════════════════════════
 # Default Agent Groups

@@ -85,11 +85,19 @@
     destination_port: 22
     jump: ACCEPT
   become: true
+  register: ssh_prefill_result
+  failed_when: false
   when:
     - ufw_check.rc == 0
     - ufw_status.stdout is defined
     - "'inactive' in ufw_status.stdout.lower()"
-  ignore_errors: true
+
+- name: Warn if SSH iptables prefill did not succeed
+  ansible.builtin.debug:
+    msg: "WARNING: iptables SSH prefill returned non-zero (rc={{ ssh_prefill_result.rc | default('n/a') }}). Verify SSH access is preserved after UFW is enabled."
+  when:
+    - ssh_prefill_result is defined
+    - ssh_prefill_result.rc | default(0) != 0
 
 - name: Enable UFW with default deny incoming
   community.general.ufw:

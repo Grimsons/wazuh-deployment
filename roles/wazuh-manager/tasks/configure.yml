@@ -27,7 +27,7 @@
 - name: Validate manager configuration before restart
   block:
     - name: Run Wazuh configuration test
-      ansible.builtin.command: /var/ossec/bin/wazuh-logtest-legacy -t
+      ansible.builtin.command: /var/ossec/bin/wazuh-analysisd -t
       become: true
       register: config_validation
       changed_when: false
@@ -53,12 +53,23 @@
 - name: Configure Wazuh keystore for indexer username
   ansible.builtin.shell: |
     set -o pipefail
-    echo 'admin' | /var/ossec/bin/wazuh-keystore -f indexer -k username &&
-    touch /var/ossec/etc/.keystore_username_set
+    HASH_FILE=/var/ossec/etc/.keystore_username_hash
+    NEW_HASH=$(printf '%s' '{{ wazuh_indexer_admin_user | default("admin") }}' | sha256sum | cut -d' ' -f1)
+    OLD_HASH=$(cat "$HASH_FILE" 2>/dev/null || echo "")
+    if [ "$NEW_HASH" != "$OLD_HASH" ]; then
+      printf '%s' '{{ wazuh_indexer_admin_user | default("admin") }}' | /var/ossec/bin/wazuh-keystore -f indexer -k username
+      echo "$NEW_HASH" > "$HASH_FILE"
+      chmod 600 "$HASH_FILE"
+      chown wazuh:wazuh "$HASH_FILE"
+      echo "changed"
+    else
+      echo "ok"
+    fi
   args:
     executable: /bin/bash
-    creates: /var/ossec/etc/.keystore_username_set
   become: true
+  register: keystore_username_result
+  changed_when: "'changed' in keystore_username_result.stdout"
   no_log: true
   when: wazuh_indexer_connection_enabled | default(true)
 
@@ -66,10 +77,10 @@
   ansible.builtin.shell: |
     set -o pipefail
     HASH_FILE=/var/ossec/etc/.keystore_password_hash
-    NEW_HASH=$(echo '{{ wazuh_indexer_admin_password }}' | sha256sum | cut -d' ' -f1)
+    NEW_HASH=$(printf '%s' '{{ wazuh_indexer_admin_password }}' | sha256sum | cut -d' ' -f1)
     OLD_HASH=$(cat "$HASH_FILE" 2>/dev/null || echo "")
     if [ "$NEW_HASH" != "$OLD_HASH" ]; then
-      echo '{{ wazuh_indexer_admin_password }}' | /var/ossec/bin/wazuh-keystore -f indexer -k password
+      printf '%s' '{{ wazuh_indexer_admin_password }}' | /var/ossec/bin/wazuh-keystore -f indexer -k password
       echo "$NEW_HASH" > "$HASH_FILE"
       chmod 600 "$HASH_FILE"
       chown wazuh:wazuh "$HASH_FILE"

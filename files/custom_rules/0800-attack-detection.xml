@@ -172,15 +172,34 @@
 
   <!-- ═══════════════════════════════════════════════════════════════
        Reconnaissance Commands (T1082, T1016, T1049)
+
+       Rule 800160 is level 3 (informational) because these commands are
+       also executed by Ansible gather_facts on every managed host. Raising
+       a level-6 alert per-deployment would flood the SOC queue with false
+       positives. Rule 800162 escalates to level 10 only when 5+ of these
+       commands appear within 120 seconds on the same host, which indicates
+       actual enumeration rather than routine automation.
        ═══════════════════════════════════════════════════════════════ -->
-  <rule id="800160" level="6">
+  <rule id="800160" level="3">
     <if_sid>530,531</if_sid>
     <regex>whoami|id -a|uname -a|cat /etc/os-release|hostnamectl|systemctl list-units</regex>
-    <description>System reconnaissance command executed</description>
+    <description>System discovery command executed</description>
     <mitre>
       <id>T1082</id>
+      <id>T1033</id>
     </mitre>
     <group>recon,discovery,</group>
+  </rule>
+
+  <rule id="800162" level="10" frequency="5" timeframe="120">
+    <if_matched_sid>800160</if_matched_sid>
+    <same_field>agent.name</same_field>
+    <description>Multiple system discovery commands in short window - possible host enumeration</description>
+    <mitre>
+      <id>T1082</id>
+      <id>T1033</id>
+    </mitre>
+    <group>attack,discovery,</group>
   </rule>
 
   <rule id="800161" level="8">

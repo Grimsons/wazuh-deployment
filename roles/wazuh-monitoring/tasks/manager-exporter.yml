@@ -13,7 +13,21 @@
     name:
       - python3
       - python3-pip
+      - python3-venv
     state: present
+
+- name: Verify manager API CA certificate exists before configuring exporter
+  ansible.builtin.stat:
+    path: "{{ wazuh_manager_certs_path }}/{{ wazuh_manager_ca_cert_filename }}"
+  register: manager_ca_cert_stat
+
+- name: Fail if manager API CA certificate is missing
+  ansible.builtin.fail:
+    msg: |
+      Manager API CA certificate not found at {{ wazuh_manager_certs_path }}/{{ wazuh_manager_ca_cert_filename }}.
+      Ensure the Wazuh manager role has run and API SSL certificates are deployed.
+      Override wazuh_manager_certs_path and wazuh_manager_ca_cert_filename in your inventory if needed.
+  when: not manager_ca_cert_stat.stat.exists
 
 - name: Create exporter directory
   ansible.builtin.file:
@@ -23,13 +37,14 @@
     owner: root
     group: root
 
-- name: Install Python dependencies
+- name: Install Python dependencies in virtualenv
   ansible.builtin.pip:
     name:
       - prometheus_client
       - requests
     state: present
-    executable: pip3
+    virtualenv: "{{ wazuh_exporter_install_dir }}/venv"
+    virtualenv_command: "python3 -m venv"
 
 - name: Create exporter service group
   ansible.builtin.group:
@@ -49,7 +64,7 @@
     content: |
       WAZUH_API_USER={{ wazuh_api_user | default('wazuh') }}
       WAZUH_API_PASS={{ wazuh_api_password }}
-      WAZUH_API_CA_CERT={{ wazuh_manager_certs_path | default('/etc/wazuh-manager/certs') }}/root-ca.pem
+      WAZUH_API_CA_CERT={{ wazuh_manager_certs_path }}/{{ wazuh_manager_ca_cert_filename }}
     dest: "{{ wazuh_exporter_install_dir }}/wazuh-manager-exporter.env"
     mode: "0600"
     owner: "{{ wazuh_exporter_user }}"
@@ -85,20 +100,61 @@
 # ─────────────────────────────────────────────────────────────────
 # Firewall rules for metrics port
 # ─────────────────────────────────────────────────────────────────
-- name: Allow Prometheus to scrape manager metrics (firewalld)
+- name: Allow Prometheus to scrape manager metrics from known scrapers (firewalld)
+  ansible.posix.firewalld:
+    rich_rule: 'rule family="ipv4" source address="{{ item }}" port port="{{ wazuh_manager_exporter_port }}" protocol="tcp" accept'
+    permanent: true
+    state: enabled
+    immediate: true
+  loop: "{{ wazuh_prometheus_scraper_networks }}"
+  when:
+    - ansible_facts.services['firewalld.service'] is defined
+    - wazuh_prometheus_scraper_networks | length > 0
+  register: firewalld_manager_result
+  failed_when:
+    - firewalld_manager_result is failed
+    - "'Could not connect to firewalld' not in (firewalld_manager_result.msg | default(''))"
+
+- name: Allow Prometheus to scrape manager metrics from anywhere (firewalld, allow-any mode)
   ansible.posix.firewalld:
     port: "{{ wazuh_manager_exporter_port }}/tcp"
     permanent: true
     state: enabled
     immediate: true
-  when: ansible_facts.services['firewalld.service'] is defined
-  ignore_errors: true
+  when:
+    - ansible_facts.services['firewalld.service'] is defined
+    - wazuh_metrics_allow_any | default(false) | bool
+  register: firewalld_manager_any_result
+  failed_when:
+    - firewalld_manager_any_result is failed
+    - "'Could not connect to firewalld' not in (firewalld_manager_any_result.msg | default(''))"
 
-- name: Allow Prometheus to scrape manager metrics (ufw)
+- name: Allow Prometheus to scrape manager metrics from known scrapers (ufw)
+  community.general.ufw:
+    rule: allow
+    port: "{{ wazuh_manager_exporter_port }}"
+    proto: tcp
+    src: "{{ item }}"
+    comment: "Wazuh manager Prometheus metrics — {{ item }}"
+  loop: "{{ wazuh_prometheus_scraper_networks }}"
+  when:
+    - ansible_facts.services['ufw.service'] is defined
+    - wazuh_prometheus_scraper_networks | length > 0
+  register: ufw_manager_result
+  failed_when:
+    - ufw_manager_result is failed
+    - "'Could not find a running firewall' not in (ufw_manager_result.msg | default(''))"
+
+- name: Allow Prometheus to scrape manager metrics from anywhere (ufw, allow-any mode)
   community.general.ufw:
     rule: allow
     port: "{{ wazuh_manager_exporter_port }}"
     proto: tcp
     comment: "Wazuh manager Prometheus metrics"
-  when: ansible_facts.services['ufw.service'] is defined
-  ignore_errors: true
+  when:
+    - ansible_facts.services['ufw.service'] is defined
+    - wazuh_metrics_allow_any | default(false) | bool
+  register: ufw_manager_any_result
+  failed_when:
+    - ufw_manager_any_result is failed
+    - "'Could not find a running firewall' not in (ufw_manager_any_result.msg | default(''))"

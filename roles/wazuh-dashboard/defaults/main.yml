@@ -64,6 +64,8 @@ wazuh_dashboard_admin_user: "admin"
 # ═══════════════════════════════════════════════════════════════════════════════
 wazuh_dashboard_csp_strict: true
 wazuh_dashboard_xframe_options: "SAMEORIGIN"
+# HSTS max-age in seconds (31536000 = 1 year); set to 0 to disable during cert rotation
+wazuh_dashboard_hsts_max_age: 31536000
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Wazuh App - API Connection Settings
@@ -172,5 +174,5 @@ wazuh_dashboard_ip_selector: true
 # Agent IDs to exclude from IP selector
 wazuh_dashboard_ip_ignore: []
 
-# Allow configuration changes via the dashboard UI
-wazuh_dashboard_ui_api_editable: true
+# Allow configuration changes via the dashboard UI (false = read-only API config, reduces attack surface)
+wazuh_dashboard_ui_api_editable: false

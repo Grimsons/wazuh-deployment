@@ -487,23 +487,35 @@ deploy_to_host() {
         # Running as root, no sudo needed
         exec_cmd="bash -c '$prep_cmd'"
     elif [ "$ASK_BECOME_PASS" = "true" ] && [ -n "$BECOME_PASSWORD" ]; then
-        # Use sudo with password from stdin (base64 encode to safely handle special chars)
-        local encoded_password
-        encoded_password=$(printf '%s' "$BECOME_PASSWORD" | base64)
-        exec_cmd="printf '%s' '${encoded_password}' | base64 -d | sudo -S bash -c '$prep_cmd'"
+        # Pass the sudo password via stdin to avoid exposure in remote process argv.
+        # The password is never part of the SSH command string or remote argv.
+        exec_cmd="sudo -S bash -c '$prep_cmd'"
     else
         # Use sudo without password (assumes NOPASSWD or already root)
         exec_cmd="sudo bash -c '$prep_cmd'"
     fi
 
-    if timeout "$SSH_TIMEOUT" run_ssh "$host" "$exec_cmd" 2>&1; then
-        print_success "[$host] Preparation complete"
-        echo "SUCCESS" > "$result_file"
-        return 0
+    if [ "$ASK_BECOME_PASS" = "true" ] && [ -n "$BECOME_PASSWORD" ]; then
+        # Pipe the sudo password on stdin; never in argv or environment
+        if printf '%s\n' "$BECOME_PASSWORD" | timeout "$SSH_TIMEOUT" run_ssh "$host" "$exec_cmd" 2>&1; then
+            print_success "[$host] Preparation complete"
+            echo "SUCCESS" > "$result_file"
+            return 0
+        else
+            print_error "[$host] Preparation failed"
+            echo "FAILED: Script execution failed" > "$result_file"
+            return 1
+        fi
     else
-        print_error "[$host] Preparation failed"
-        echo "FAILED: Script execution failed" > "$result_file"
-        return 1
+        if timeout "$SSH_TIMEOUT" run_ssh "$host" "$exec_cmd" 2>&1; then
+            print_success "[$host] Preparation complete"
+            echo "SUCCESS" > "$result_file"
+            return 0
+        else
+            print_error "[$host] Preparation failed"
+            echo "FAILED: Script execution failed" > "$result_file"
+            return 1
+        fi
     fi
 }
 
