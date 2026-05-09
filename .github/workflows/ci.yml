@@ -33,7 +33,7 @@ jobs:
           ansible-galaxy collection install -r requirements.yml
 
       - name: Run yamllint
-        run: yamllint -c .yamllint . || true
+        run: yamllint -c .yamllint .
 
       - name: Run ansible-lint
         run: ansible-lint --profile production roles/ playbooks/ site.yml
@@ -118,7 +118,7 @@ jobs:
         run: |
           for playbook in site.yml playbooks/*.yml; do
             echo "Checking: $playbook"
-            ansible-playbook --syntax-check "$playbook" -i inventory/hosts.yml || true
+            ansible-playbook --syntax-check "$playbook" -i inventory/hosts.yml
           done
         env:
           ANSIBLE_ROLES_PATH: roles

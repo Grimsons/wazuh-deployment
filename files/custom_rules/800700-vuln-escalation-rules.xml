@@ -23,7 +23,7 @@
   <!-- ═══ Critical CVE with Known Exploit Available ═══ -->
   <rule id="800701" level="14">
     <if_sid>800700</if_sid>
-    <field name="vulnerability.exploitability_score">\.+</field>
+    <field name="vulnerability.exploitability_score">.+</field>
     <description>Critical vulnerability with known exploit: $(vulnerability.cve) on $(hostname) - immediate patching required</description>
     <mitre>
       <id>T1190</id>

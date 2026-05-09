@@ -462,7 +462,7 @@
           -key {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') }}/admin-key.pem \
           -h 127.0.0.1 \
           -p {{ wazuh_indexer_http_port | default(9200) }} \
-          -icl -nhnv
+          -icl
       become: true
       register: security_reapply
       when: indexer_needs_upgrade

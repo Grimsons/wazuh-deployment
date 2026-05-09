@@ -91,16 +91,16 @@
   <rule id="200125" level="12">
   <if_sid>200112</if_sid>
   <field name="audit.directory.name">/var/run/haldrund.pid|/var/run/xinetd.lock|/var/run/kdevrund.pid</field>
-  <description>Detects BPFDoor .lock and .pid files access in temporary file storage facility.</description>
+  <description>Detects BPFDoor .lock and .pid files access - indicators of BPF-based backdoor presence.</description>
   <mitre>
-    <id>T1059</id>
-    <id>T1106</id>
+    <id>T1014</id>
+    <id>T1564.001</id>
   </mitre>
-  <group>path,</group>
+  <group>path,rootkit,</group>
   </rule>
   
   <!-- https://github.com/SigmaHQ/sigma/blob/master/rules/linux/auditd/lnx_auditd_bpfdoor_port_redirect.yml -->
-  <rule id="200126" level="1">
+  <rule id="200126" level="3">
   <if_sid>200111</if_sid>
   <field name="audit.execve.a0">iptables$</field>
   <field name="audit.execve.a1">-t</field>
@@ -450,7 +450,7 @@
   <field name="audit.execve.a0">chage|passwd</field>
   <field name="audit.execve.a1">--list|-l|-S|--status</field>
   <field name="audit.execve.a3">-i</field>
-  <description>Network sniffing refers to using the network interface on a system to monitor or capture information sent over a wired or wireless connection.</description>
+  <description>Detects password policy enumeration commands (chage --list, passwd -l) - possible password policy discovery.</description>
   <mitre>
     <id>T1201</id>
   </mitre>

@@ -73,15 +73,16 @@ download_feed() {
   local url="$1"
   local output="$2"
   local name="$3"
+  local max_bytes="${4:-10485760}"  # 10 MB default cap; prevents DoS via oversized feed
 
   log "Downloading $name..."
-  if curl -sS --max-time 60 --retry 3 -o "$output" "$url" 2>>"$LOG_FILE"; then
+  if curl -sS --max-time 60 --max-filesize "$max_bytes" --retry 3 -o "$output" "$url" 2>>"$LOG_FILE"; then
     local lines
     lines=$(wc -l < "$output")
     log "  Downloaded $lines lines from $name"
     return 0
   else
-    log "  ERROR: Failed to download $name"
+    log "  ERROR: Failed to download $name (check network or feed size > ${max_bytes} bytes)"
     return 1
   fi
 }

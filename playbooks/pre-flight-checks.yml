@@ -50,9 +50,11 @@
         path: "{{ playbook_dir }}/../.vault_password"
       register: vault_password_file
 
-    - name: Warn if vault password missing
-      ansible.builtin.debug:
-        msg: "WARNING: Vault password file not found. Credentials may not be encrypted."
+    - name: Fail if vault password file is missing
+      ansible.builtin.fail:
+        msg: >
+          Vault password file .vault_password not found.
+          Run: ./scripts/manage-vault.sh init  (or create it manually before deployment)
       when: not vault_password_file.stat.exists
 
     - name: Check certificates directory

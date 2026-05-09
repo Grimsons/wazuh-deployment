@@ -15,14 +15,16 @@
 -->
 <group name="sshd,custom_ssh_correlation,">
 
-  <!-- Credential stuffing success: successful SSH login from an IP that was brute forcing -->
-  <!-- Triggers when 5716 (success) fires from same source IP that had 5763 (brute force) -->
-  <rule id="800600" level="10" frequency="2" timeframe="300">
-    <if_matched_sid>5716</if_matched_sid>
+  <!-- Credential stuffing success: successful SSH login from an IP that triggered brute force detection -->
+  <!-- 5763 = Wazuh built-in composite brute force rule (multiple failures, same source) -->
+  <!-- Fires when a successful login (5715/5716) follows brute force activity from the same IP -->
+  <rule id="800600" level="10">
+    <if_matched_sid>5763</if_matched_sid>
     <same_source_ip />
-    <description>SSH: Successful login from IP that previously failed multiple times - possible credential compromise</description>
+    <description>SSH: Successful login from IP that previously triggered brute force detection - possible credential stuffing success</description>
     <mitre>
       <id>T1110</id>
+      <id>T1078</id>
     </mitre>
     <group>authentication_success,brute_force,attack,</group>
   </rule>

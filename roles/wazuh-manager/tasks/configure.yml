@@ -27,7 +27,7 @@
 - name: Validate manager configuration before restart
   block:
     - name: Run Wazuh configuration test
-      ansible.builtin.command: /var/ossec/bin/wazuh-logtest-legacy -t
+      ansible.builtin.command: /var/ossec/bin/wazuh-analysisd -t
       become: true
       register: config_validation
       changed_when: false

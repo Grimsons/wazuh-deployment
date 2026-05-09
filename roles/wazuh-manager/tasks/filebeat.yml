@@ -3,31 +3,82 @@
 # Filebeat forwards alerts from the manager to the Wazuh Indexer
 # Indexer credentials are sourced from Ansible Vault via group_vars
 
-- name: Check if Filebeat is already installed
+- name: Check if Filebeat is already installed (Debian)
   ansible.builtin.shell: dpkg -l filebeat 2>/dev/null | grep -q '^ii'
-  register: filebeat_installed
+  register: filebeat_installed_deb
   changed_when: false
   failed_when: false
   become: true
+  when: ansible_os_family == 'Debian'
 
-- name: Download Filebeat OSS package
+- name: Check if Filebeat is already installed (RedHat)
+  ansible.builtin.shell: rpm -q filebeat 2>/dev/null
+  register: filebeat_installed_rpm
+  changed_when: false
+  failed_when: false
+  become: true
+  when: ansible_os_family == 'RedHat'
+
+- name: Set filebeat_installed fact
+  ansible.builtin.set_fact:
+    filebeat_installed_rc: >-
+      {{ (ansible_os_family == 'Debian') | ternary(
+           filebeat_installed_deb.rc | default(1),
+           filebeat_installed_rpm.rc | default(1)
+         ) }}
+
+- name: Download Filebeat OSS package (Debian)
   ansible.builtin.get_url:
     url: "https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-oss-{{ wazuh_filebeat_version | default('7.10.2') }}-amd64.deb"
     dest: "/tmp/filebeat-oss-{{ wazuh_filebeat_version | default('7.10.2') }}-amd64.deb"
+    checksum: "{{ wazuh_filebeat_deb_sha256 }}"
     mode: '0644'
-  when: filebeat_installed.rc != 0
+  when:
+    - ansible_os_family == 'Debian'
+    - filebeat_installed_rc | int != 0
   become: true
 
-- name: Install Filebeat OSS
+- name: Install Filebeat OSS (Debian)
   ansible.builtin.apt:
     deb: "/tmp/filebeat-oss-{{ wazuh_filebeat_version | default('7.10.2') }}-amd64.deb"
     state: present
-  when: filebeat_installed.rc != 0
+  when:
+    - ansible_os_family == 'Debian'
+    - filebeat_installed_rc | int != 0
+  become: true
+
+- name: Download Filebeat OSS package (RedHat)
+  ansible.builtin.get_url:
+    url: "https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-oss-{{ wazuh_filebeat_version | default('7.10.2') }}-x86_64.rpm"
+    dest: "/tmp/filebeat-oss-{{ wazuh_filebeat_version | default('7.10.2') }}-x86_64.rpm"
+    checksum: "{{ wazuh_filebeat_rpm_sha256 }}"
+    mode: '0644'
+  when:
+    - ansible_os_family == 'RedHat'
+    - filebeat_installed_rc | int != 0
+  become: true
+
+- name: Install Filebeat OSS (RedHat)
+  ansible.builtin.yum:
+    name: "/tmp/filebeat-oss-{{ wazuh_filebeat_version | default('7.10.2') }}-x86_64.rpm"
+    state: present
+  when:
+    - ansible_os_family == 'RedHat'
+    - filebeat_installed_rc | int != 0
   become: true
 
 - name: Download Wazuh Filebeat module
+  ansible.builtin.get_url:
+    url: "https://packages.wazuh.com/4.x/filebeat/wazuh-filebeat-0.4.tar.gz"
+    dest: "/tmp/wazuh-filebeat-0.4.tar.gz"
+    checksum: "{{ wazuh_filebeat_module_sha256 }}"
+    mode: '0644'
+  become: true
+  when: not ('/usr/share/filebeat/module/wazuh' is directory)
+
+- name: Extract Wazuh Filebeat module
   ansible.builtin.unarchive:
-    src: "https://packages.wazuh.com/4.x/filebeat/wazuh-filebeat-0.4.tar.gz"
+    src: "/tmp/wazuh-filebeat-0.4.tar.gz"
     dest: /usr/share/filebeat/module
     remote_src: true
     creates: /usr/share/filebeat/module/wazuh
@@ -37,6 +88,7 @@
   ansible.builtin.get_url:
     url: "https://raw.githubusercontent.com/wazuh/wazuh/v{{ wazuh_version }}/extensions/elasticsearch/7.x/wazuh-template.json"
     dest: /etc/filebeat/wazuh-template.json
+    checksum: "{{ wazuh_filebeat_template_sha256 | default(omit) }}"
     mode: '0644'
   become: true
 

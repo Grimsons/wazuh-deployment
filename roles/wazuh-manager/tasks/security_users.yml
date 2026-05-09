@@ -13,6 +13,7 @@
   ansible.builtin.set_fact:
     wazuh_api_password: "{{ wazuh_api_password | default(wazuh_api_password_generated) }}"
   run_once: true
+  no_log: true
 
 - name: Authenticate with default credentials
   ansible.builtin.uri:

@@ -3,22 +3,34 @@
 # This configures the admin user with a secure random password
 # All passwords are managed through Ansible Vault
 
-- name: Generate random admin password
-  ansible.builtin.set_fact:
-    wazuh_indexer_admin_password_generated: "{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits') }}{{ ['!', '@', '#', '%', '^', '*', '-', '_', '+', '='] | random }}{{ ['!', '@', '#', '%', '^', '*', '-', '_', '+', '='] | random }}"
+- name: Assert indexer admin password is set in vault
+  ansible.builtin.assert:
+    that:
+      - wazuh_indexer_admin_password is defined
+      - wazuh_indexer_admin_password | length >= 16
+      - wazuh_indexer_admin_password != 'admin'
+    fail_msg: >
+      Set wazuh_indexer_admin_password in group_vars/all/vault.yml before deployment.
+      Run: make vault-edit  (minimum 16 chars, not 'admin')
   run_once: true
-  when: wazuh_indexer_admin_password_generated is not defined
 
-- name: Set admin password (use provided or generated)
+- name: Set admin password from vault
   ansible.builtin.set_fact:
-    wazuh_admin_password: "{{ wazuh_indexer_admin_password if (wazuh_indexer_admin_password is defined and wazuh_indexer_admin_password != 'admin') else wazuh_indexer_admin_password_generated }}"
+    wazuh_admin_password: "{{ wazuh_indexer_admin_password }}"
   run_once: true
   no_log: true
 
 - name: Hash the admin password using OpenSearch security tools
   ansible.builtin.shell: |
+    set -euo pipefail
     export JAVA_HOME=/usr/share/wazuh-indexer/jdk
-    /usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p {{ wazuh_admin_password | quote }}
+    _tmp=$(mktemp /dev/shm/.hash_XXXXXX 2>/dev/null || mktemp)
+    chmod 600 "$_tmp"
+    printf '%s' '{{ wazuh_admin_password }}' > "$_tmp"
+    # hash.sh only accepts -p; temp file limits window vs inline expansion
+    _hash=$(/usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p "$(cat "$_tmp")")
+    shred -u "$_tmp" 2>/dev/null || rm -f "$_tmp"
+    echo "$_hash"
   become: true
   register: password_hash
   changed_when: false
