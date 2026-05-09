@@ -130,7 +130,7 @@
   <field name="audit.execve.a2">/</field>
   <description>Detects attempts to discover the files with setuid/setgid capability on them. That would allow adversary to escalate their privileges.</description>
   <mitre>
-    <id>T1123</id>
+    <id>T1083</id>
     <id>T1548</id>
   </mitre>
   <group>execve,</group>
@@ -175,74 +175,15 @@
   </rule>
   
   <!-- https://github.com/SigmaHQ/sigma/blob/master/rules/linux/auditd/lnx_auditd_coinminer.yml -->
+  <!-- Collapsed from 7 per-argument rules: <match> covers the full log line regardless of arg position -->
   <rule id="200132" level="12">
   <if_sid>200111</if_sid>
-  <field name="audit.execve.a1">^--cpu-priority</field>
-  <description>Detects command line parameter very often used with coin miners.</description>
+  <match>--cpu-priority</match>
+  <description>Coinminer detected: --cpu-priority flag in process arguments (T1496 Resource Hijacking).</description>
   <mitre>
-    <id>T1068</id>
+    <id>T1496</id>
   </mitre>
-  <group>execve,</group>
-  </rule>
-  
-  <rule id="200133" level="12">
-  <if_sid>200111</if_sid>
-  <field name="audit.execve.a2">^--cpu-priority</field>
-  <description>Detects command line parameter very often used with coin miners.</description>
-  <mitre>
-    <id>T1068</id>
-  </mitre>
-  <group>execve,</group>
-  </rule>
-  
-  <rule id="200134" level="12">
-  <if_sid>200111</if_sid>
-  <field name="audit.execve.a3">^--cpu-priority</field>
-  <description>Detects command line parameter very often used with coin miners.</description>
-  <mitre>
-    <id>T1068</id>
-  </mitre>
-  <group>execve,</group>
-  </rule>
-  
-  <rule id="200135" level="12">
-  <if_sid>200111</if_sid>
-  <field name="audit.execve.a4">^--cpu-priority</field>
-  <description>Detects command line parameter very often used with coin miners.</description>
-  <mitre>
-    <id>T1068</id>
-  </mitre>
-  <group>execve,</group>
-  </rule>
-  
-  <rule id="200136" level="12">
-  <if_sid>200111</if_sid>
-  <field name="audit.execve.a5">^--cpu-priority</field>
-  <description>Detects command line parameter very often used with coin miners.</description>
-  <mitre>
-    <id>T1068</id>
-  </mitre>
-  <group>execve,</group>
-  </rule>
-  
-  <rule id="200137" level="12">
-  <if_sid>200111</if_sid>
-  <field name="audit.execve.a6">^--cpu-priority</field>
-  <description>Detects command line parameter very often used with coin miners.</description>
-  <mitre>
-    <id>T1068</id>
-  </mitre>
-  <group>execve,</group>
-  </rule>
-  
-  <rule id="200138" level="12">
-  <if_sid>200111</if_sid>
-  <field name="audit.execve.a7">^--cpu-priority</field>
-  <description>Detects command line parameter very often used with coin miners.</description>
-  <mitre>
-    <id>T1068</id>
-  </mitre>
-  <group>execve,</group>
+  <group>execve,cryptomining,</group>
   </rule>
   
   <!-- https://github.com/SigmaHQ/sigma/blob/master/rules/linux/auditd/lnx_auditd_cve_2021_3156_sudo_buffer_overflow.yml -->

@@ -1,0 +1,92 @@
+<!--
+  Office 365 / Azure AD / Microsoft Graph Detection Rules
+  Rule ID range: 800550-800599
+  Parent rule IDs: 91550+ (Wazuh built-in Office365 decoder group)
+
+  Prerequisites:
+    - wazuh_office365_enabled: true in group_vars
+    - Office 365 Management API subscription configured
+-->
+<group name="office365,azure,custom_cloud_rules,">
+
+  <!-- ═══ Failed Login (T1078.004) ═══ -->
+  <rule id="800550" level="6">
+    <if_sid>91551</if_sid>
+    <field name="data.office365.ResultStatus">failed</field>
+    <field name="data.office365.Operation">UserLoginFailed</field>
+    <description>O365: User login failed for $(data.office365.UserId)</description>
+    <mitre>
+      <id>T1078.004</id>
+    </mitre>
+    <group>authentication_failed,office365,</group>
+  </rule>
+
+  <!-- ═══ Brute Force (T1110) ═══ -->
+  <rule id="800551" level="12" frequency="5" timeframe="300">
+    <if_matched_sid>800550</if_matched_sid>
+    <same_field>data.office365.UserId</same_field>
+    <description>O365: Brute force - 5+ failed logins for same user in 5 minutes</description>
+    <mitre>
+      <id>T1110</id>
+    </mitre>
+    <group>brute_force,office365,</group>
+  </rule>
+
+  <!-- ═══ OAuth App Consent Grant (T1550.001) ═══ -->
+  <rule id="800552" level="12">
+    <if_sid>91551</if_sid>
+    <field name="data.office365.Operation">Consent to application|Add OAuth2PermissionGrant</field>
+    <description>O365: OAuth app consent granted by $(data.office365.UserId) - possible consent phishing</description>
+    <mitre>
+      <id>T1550.001</id>
+      <id>T1078.004</id>
+    </mitre>
+    <group>office365,initial_access,</group>
+  </rule>
+
+  <!-- ═══ Mailbox Forwarding Rule Created (T1114.003) ═══ -->
+  <rule id="800553" level="12">
+    <if_sid>91551</if_sid>
+    <field name="data.office365.Operation">New-InboxRule|Set-InboxRule</field>
+    <field name="data.office365.Parameters">ForwardTo|RedirectTo|ForwardAsAttachmentTo</field>
+    <description>O365: Inbox forwarding rule created by $(data.office365.UserId) - possible BEC exfiltration setup</description>
+    <mitre>
+      <id>T1114.003</id>
+    </mitre>
+    <group>office365,exfiltration,</group>
+  </rule>
+
+  <!-- ═══ Azure AD Privileged Role Assignment (T1098.003) ═══ -->
+  <rule id="800554" level="10">
+    <if_sid>91551</if_sid>
+    <field name="data.office365.Operation">Add member to role</field>
+    <description>Azure AD: User added to privileged role by $(data.office365.UserId)</description>
+    <mitre>
+      <id>T1098.003</id>
+    </mitre>
+    <group>azure_ad,privilege_escalation,</group>
+  </rule>
+
+  <!-- ═══ Guest User Invited (T1534) ═══ -->
+  <rule id="800555" level="8">
+    <if_sid>91551</if_sid>
+    <field name="data.office365.Operation">Invite user</field>
+    <description>Azure AD: External guest user invited by $(data.office365.UserId)</description>
+    <mitre>
+      <id>T1534</id>
+    </mitre>
+    <group>azure_ad,discovery,</group>
+  </rule>
+
+  <!-- ═══ MFA Disabled for User (T1556) ═══ -->
+  <rule id="800556" level="12">
+    <if_sid>91551</if_sid>
+    <field name="data.office365.Operation">Disable Strong Authentication|Set-MsolUser</field>
+    <description>Azure AD: MFA disabled for $(data.office365.ObjectId) by $(data.office365.UserId)</description>
+    <mitre>
+      <id>T1556</id>
+    </mitre>
+    <group>azure_ad,defense_evasion,</group>
+  </rule>
+
+</group>

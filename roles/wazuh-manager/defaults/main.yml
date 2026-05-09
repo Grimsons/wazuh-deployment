@@ -153,11 +153,14 @@ wazuh_syslog_listeners: []
 # CDB lists loaded in the ruleset (paths relative to /var/ossec/)
 wazuh_cdb_lists:
   - "etc/lists/audit-keys"
+  - "etc/lists/bash_profile"
   - "etc/lists/amazon/aws-eventnames"
   - "etc/lists/security-eventchannel"
   - "etc/lists/malicious-ioc/malware-hashes"
   - "etc/lists/malicious-ioc/malicious-ip"
   - "etc/lists/malicious-ioc/malicious-domains"
+  - "etc/lists/malicious-powershell"
+  - "etc/lists/web-attack-patterns"
 
 # Custom content deployment (rules, decoders, CDB lists from files/)
 wazuh_custom_content_enabled: true
@@ -182,6 +185,8 @@ wazuh_sca_builtin_policies:
   - cis_rhel9_linux.yml
   - cis_ubuntu20-04.yml
   - cis_ubuntu22-04.yml
+  - cis_ubuntu24-04.yml
+  - cis_win2025.yml
 
 # System inventory (Syscollector)
 wazuh_syscollector_enabled: true

@@ -128,4 +128,59 @@
     <group>log_clearing,defense_evasion,attack,</group>
   </rule>
 
+  <!-- ═══════════ Active Directory / Kerberos ═══════════ -->
+
+  <!-- Kerberoasting — TGS request with RC4 encryption (T1558.003) -->
+  <!-- Event 4769: Kerberos service ticket requested; 0x17 = RC4-HMAC (weak, targetable offline) -->
+  <rule id="800410" level="12">
+    <if_sid>60106</if_sid>
+    <field name="win.system.eventID">^4769$</field>
+    <field name="win.eventdata.ticketEncryptionType">^0x17$</field>
+    <description>AD: Kerberos TGS requested with RC4 encryption - possible Kerberoasting attack</description>
+    <mitre>
+      <id>T1558.003</id>
+    </mitre>
+    <group>kerberos,credential_access,attack,</group>
+  </rule>
+
+  <!-- AS-REP Roasting — TGT for account with pre-auth disabled (T1558.004) -->
+  <!-- Event 4768: 0x0 = no pre-authentication required, exposing hash to offline cracking -->
+  <rule id="800411" level="10">
+    <if_sid>60106</if_sid>
+    <field name="win.system.eventID">^4768$</field>
+    <field name="win.eventdata.preAuthType">^0$</field>
+    <description>AD: TGT request with pre-authentication disabled - possible AS-REP Roasting</description>
+    <mitre>
+      <id>T1558.004</id>
+    </mitre>
+    <group>kerberos,credential_access,attack,</group>
+  </rule>
+
+  <!-- GPO Modification (T1484.001) -->
+  <!-- Event 5136: Directory Service object modified; groupPolicyContainer = GPO change -->
+  <rule id="800412" level="10">
+    <if_sid>60106</if_sid>
+    <field name="win.system.eventID">^5136$</field>
+    <field name="win.eventdata.objectClass">groupPolicyContainer</field>
+    <description>AD: Group Policy Object modified - $(win.eventdata.objectDN)</description>
+    <mitre>
+      <id>T1484.001</id>
+    </mitre>
+    <group>ad_change,defense_evasion,persistence,</group>
+  </rule>
+
+  <!-- DCSync — Replication privilege exercised (T1003.006) -->
+  <!-- Event 4662: these GUIDs = DS-Replication-Get-Changes-All + DS-Replication-Get-Changes -->
+  <!-- Non-DC hosts exercising these rights indicates DCSync (e.g., mimikatz lsadump::dcsync) -->
+  <rule id="800413" level="14">
+    <if_sid>60106</if_sid>
+    <field name="win.system.eventID">^4662$</field>
+    <field name="win.eventdata.properties">1131f6aa-9c07-11d1-f79f-00c04fc2dcd2|1131f6ad-9c07-11d1-f79f-00c04fc2dcd2|89e95b76-444d-4c62-991a-0facbeda640c</field>
+    <description>AD: DCSync-capable replication permission exercised - possible DCSync credential dump (T1003.006)</description>
+    <mitre>
+      <id>T1003.006</id>
+    </mitre>
+    <group>ad_change,credential_access,attack,</group>
+  </rule>
+
 </group>
