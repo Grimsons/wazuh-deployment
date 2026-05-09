@@ -176,7 +176,7 @@ vault_wazuh_manager_cluster_key: \"${cluster_key}\"
 "
 
     # Write and encrypt
-    echo "$vault_content" > "${VAULT_FILE}.tmp"
+    (umask 077; echo "$vault_content" > "${VAULT_FILE}.tmp")
     ansible-vault encrypt "${VAULT_FILE}.tmp" --vault-password-file "$VAULT_PASSWORD_FILE" --encrypt-vault-id default --output "$VAULT_FILE"
     rm -f "${VAULT_FILE}.tmp"
     chmod 600 "$VAULT_FILE"

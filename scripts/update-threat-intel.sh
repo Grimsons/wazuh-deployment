@@ -87,6 +87,46 @@ download_feed() {
   fi
 }
 
+# Verify feed entry count is within expected delta of the previous run.
+# Bulk injection (feed poisoning) would add or remove far more entries than
+# normal churn. Threshold is 20% of the previous count or 500 entries minimum.
+verify_feed_delta() {
+  local new_file="$1"
+  local cdb_file="$2"
+  local feed_name="$3"
+
+  local new_count
+  new_count=$(wc -l < "$new_file")
+
+  if [ ! -f "$cdb_file" ]; then
+    log "  Delta check skipped for $feed_name (no prior file)"
+    return 0
+  fi
+
+  local old_count
+  old_count=$(wc -l < "$cdb_file")
+
+  if [ "$old_count" -eq 0 ]; then
+    return 0
+  fi
+
+  local threshold=$(( old_count / 5 ))
+  [ "$threshold" -lt 500 ] && threshold=500
+
+  local delta=$(( new_count - old_count ))
+  local abs_delta="${delta#-}"
+
+  if [ "$abs_delta" -gt "$threshold" ]; then
+    log "  WARNING: $feed_name changed by $delta entries (threshold: ±$threshold). Possible feed anomaly — skipping update."
+    log "  Old count: $old_count  New count: $new_count"
+    log "  Review $TMP_DIR manually before importing."
+    return 1
+  fi
+
+  log "  Delta OK for $feed_name: $delta entries (threshold: ±$threshold)"
+  return 0
+}
+
 # ═══════════════════════════════════════════════════
 # Malicious IPs
 # ═══════════════════════════════════════════════════
@@ -132,10 +172,12 @@ update_malicious_ips() {
   if [ "$DRY_RUN" = true ]; then
     log "DRY RUN: Would write $count malicious IPs"
     rm -f "${output}.tmp"
-  else
+  elif verify_feed_delta "${output}.tmp" "$output" "malicious-ip"; then
     sort -u "${output}.tmp" > "$output"
     rm -f "${output}.tmp"
     log "Updated malicious-ip: $count entries"
+  else
+    rm -f "${output}.tmp"
   fi
 }
 
@@ -172,10 +214,12 @@ update_malicious_domains() {
   if [ "$DRY_RUN" = true ]; then
     log "DRY RUN: Would write $count malicious domains"
     rm -f "${output}.tmp"
-  else
+  elif verify_feed_delta "${output}.tmp" "$output" "malicious-domains"; then
     sort -u "${output}.tmp" > "$output"
     rm -f "${output}.tmp"
     log "Updated malicious-domains: $count entries"
+  else
+    rm -f "${output}.tmp"
   fi
 }
 
@@ -222,10 +266,12 @@ update_malware_hashes() {
   if [ "$DRY_RUN" = true ]; then
     log "DRY RUN: Would write $count malware hashes (+ 2 EICAR test entries)"
     rm -f "${output}.tmp"
-  else
+  elif verify_feed_delta "${output}.tmp" "$output" "malware-hashes"; then
     sort -u "${output}.tmp" > "$output"
     rm -f "${output}.tmp"
     log "Updated malware-hashes: $count entries (+ EICAR test entries)"
+  else
+    rm -f "${output}.tmp"
   fi
 }
 

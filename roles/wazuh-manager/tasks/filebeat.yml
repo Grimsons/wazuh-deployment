@@ -3,6 +3,16 @@
 # Filebeat forwards alerts from the manager to the Wazuh Indexer
 # Indexer credentials are sourced from Ansible Vault via group_vars
 
+- name: Assert filebeat module SHA256 is not the placeholder value
+  ansible.builtin.assert:
+    that:
+      - wazuh_filebeat_module_sha256 != "sha256:f5cdad5d3559c0b2be34f73f7f6c5fc8f25e6a1a4d2a9d8e64e0c8a3b6c7f8d2"
+    fail_msg: >
+      wazuh_filebeat_module_sha256 is set to the placeholder value in
+      roles/wazuh-manager/defaults/main.yml. Download the module once, run
+      sha256sum on it, and set the real hash in group_vars/all/main.yml.
+  when: wazuh_filebeat_module_sha256 is defined
+
 - name: Check if Filebeat is already installed (Debian)
   ansible.builtin.shell: dpkg -l filebeat 2>/dev/null | grep -q '^ii'
   register: filebeat_installed_deb

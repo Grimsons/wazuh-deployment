@@ -98,7 +98,7 @@
             remote_src: true
           when: indexer_backup_check.stat.exists
 
-        - name: Fix indexer permissions
+        - name: Fix indexer directory permissions post-restore
           ansible.builtin.file:
             path: "{{ item }}"
             owner: wazuh-indexer
@@ -106,6 +106,8 @@
             recurse: true
           loop:
             - /etc/wazuh-indexer
+            - /var/lib/wazuh-indexer
+            - /var/log/wazuh-indexer
           when: indexer_backup_check.stat.exists
 
         - name: Cleanup restore files
@@ -224,12 +226,30 @@
             mode: '0640'
           when: rbac_check.stat.exists
 
-        - name: Fix manager permissions
+        - name: Fix manager writable directory permissions post-restore
           ansible.builtin.file:
-            path: /var/ossec
+            path: "{{ item }}"
             owner: wazuh
             group: wazuh
             recurse: true
+          loop:
+            - /var/ossec/etc
+            - /var/ossec/logs
+            - /var/ossec/queue
+            - /var/ossec/var
+            - /var/ossec/tmp
+            - /var/ossec/stats
+          when: manager_backup_check.stat.exists
+
+        - name: Restore root ownership on manager binaries post-restore
+          ansible.builtin.file:
+            path: "{{ item }}"
+            owner: root
+            group: wazuh
+            recurse: true
+          loop:
+            - /var/ossec/bin
+            - /var/ossec/lib
           when: manager_backup_check.stat.exists
 
         - name: Cleanup restore files

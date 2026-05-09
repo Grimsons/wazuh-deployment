@@ -107,7 +107,10 @@
     state: enabled
     immediate: true
   when: ansible_facts.services['firewalld.service'] is defined
-  ignore_errors: true
+  register: firewalld_manager_result
+  failed_when:
+    - firewalld_manager_result is failed
+    - "'Could not connect to firewalld' not in (firewalld_manager_result.msg | default(''))"
 
 - name: Allow Prometheus to scrape manager metrics (ufw)
   community.general.ufw:
@@ -116,4 +119,7 @@
     proto: tcp
     comment: "Wazuh manager Prometheus metrics"
   when: ansible_facts.services['ufw.service'] is defined
-  ignore_errors: true
+  register: ufw_manager_result
+  failed_when:
+    - ufw_manager_result is failed
+    - "'Could not find a running firewall' not in (ufw_manager_result.msg | default(''))"

@@ -20,13 +20,18 @@
     <group>vulnerability,critical_vuln,</group>
   </rule>
 
-  <!-- ═══ Critical CVE with Known Exploit Available ═══ -->
+  <!-- ═══ Critical CVE with High Exploitability Score ═══
+       Threshold of 2.5+ covers network-accessible, low-complexity vectors.
+       CVSS exploitability subscores range 0.0-3.9; scores below 2.5 indicate
+       local-only or high-complexity attacks unlikely to be actively exploited.
+  -->
   <rule id="800701" level="14">
     <if_sid>800700</if_sid>
-    <field name="vulnerability.exploitability_score">.+</field>
-    <description>Critical vulnerability with known exploit: $(vulnerability.cve) on $(hostname) - immediate patching required</description>
+    <field name="vulnerability.exploitability_score">^[23]\.</field>
+    <description>Critical vulnerability with high exploitability: $(vulnerability.cve) on $(hostname) - immediate patching required</description>
     <mitre>
       <id>T1190</id>
+      <id>T1203</id>
     </mitre>
     <group>vulnerability,critical_vuln,exploit_available,attack,</group>
   </rule>

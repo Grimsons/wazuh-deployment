@@ -90,6 +90,17 @@
             - indexer-config.tar.gz
             - indexer-certs.tar.gz
 
+        - name: Encrypt fetched indexer cert archive on controller
+          ansible.builtin.command:
+            cmd: >
+              ansible-vault encrypt
+              --vault-password-file "{{ playbook_dir }}/../.vault_password"
+              "{{ backup_base_path }}/{{ backup_timestamp }}/indexer/{{ inventory_hostname }}/indexer-certs.tar.gz"
+          delegate_to: localhost
+          become: false
+          changed_when: true
+          no_log: false
+
         - name: Cleanup temporary backup directory
           ansible.builtin.file:
             path: /tmp/wazuh-backup-{{ backup_timestamp }}
@@ -191,6 +202,19 @@
             - client.keys
             - rbac.db
           ignore_errors: true
+
+        - name: Encrypt fetched manager cert archive on controller
+          ansible.builtin.command:
+            cmd: >
+              ansible-vault encrypt
+              --vault-password-file "{{ playbook_dir }}/../.vault_password"
+              "{{ backup_base_path }}/{{ backup_timestamp }}/manager/{{ inventory_hostname }}/manager-certs.tar.gz"
+          delegate_to: localhost
+          become: false
+          changed_when: true
+          no_log: false
+          when: >
+            (backup_base_path + '/' + backup_timestamp + '/manager/' + inventory_hostname + '/manager-certs.tar.gz') is file
 
         - name: Cleanup temporary backup directory
           ansible.builtin.file:
