@@ -33,6 +33,7 @@
   ansible.windows.win_copy:
     content: "{{ wazuh_agent_enrollment_password }}"
     dest: 'C:\Program Files (x86)\ossec-agent\authd.pass'
+  no_log: true
   when:
     - wazuh_authd_use_password | default(true)
     - wazuh_agent_enrollment_password is defined

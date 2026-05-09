@@ -147,7 +147,14 @@ do_rollback() {
     print_info "Running restore playbook..."
     cd "$PROJECT_DIR"
 
+    if [ ! -f ".vault_password" ]; then
+        print_error "Vault password file .vault_password not found — cannot decrypt cert archives during restore"
+        print_info "Set ANSIBLE_VAULT_PASSWORD_FILE or create .vault_password before running rollback"
+        exit 1
+    fi
+
     if ansible-playbook playbooks/restore.yml \
+        --vault-password-file .vault_password \
         -e "restore_from=$rollback_point" \
         -e "backup_dest=$ROLLBACK_DIR" \
         -e "restart_services=true"; then

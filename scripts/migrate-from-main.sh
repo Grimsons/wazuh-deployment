@@ -76,7 +76,7 @@ extract_var() {
     local file="$1"
     local var="$2"
     local value
-    value=$(grep -E "^${var}:" "$file" 2>/dev/null | head -1 | sed -E 's/^[^:]+:\s*//' | sed -E 's/^["'\''](.*?)["'\'']$/\1/' | sed 's/\s*#.*//' | xargs)
+    value=$(grep -E "^${var}:" "$file" 2>/dev/null | head -1 | sed -E 's/^[^:]+:\s*//' | sed -E 's/^["'\''](.*?)["'\'']$/\1/' | sed 's/ #[^"]*$//' | xargs)
     echo "$value"
 }
 

@@ -453,6 +453,9 @@ wazuh_filebeat_deb_sha256: "sha256:16ddde6abe04e70dfda6e02c9e0fc5babb1ff72e6cd96
 wazuh_filebeat_rpm_sha256: "sha256:8a49ee76a70f9f88e3a5a8bdf50df12e10f35e7a13f35ed26bb5598286d7a26c"
 # VERIFY before use: fetch from https://packages.wazuh.com/4.x/filebeat/ and run sha256sum
 wazuh_filebeat_module_sha256: "sha256:f5cdad5d3559c0b2be34f73f7f6c5fc8f25e6a1a4d2a9d8e64e0c8a3b6c7f8d2"
+# VERIFY before use: download wazuh-template.json for the pinned wazuh_version and run sha256sum
+# Update this value whenever wazuh_version changes
+wazuh_filebeat_template_sha256: "sha256:PLACEHOLDER_VERIFY_BEFORE_USE"
 
 # ═══════════════════════════════════════════════════════════════
 # Default Agent Groups

@@ -94,11 +94,21 @@
     creates: /usr/share/filebeat/module/wazuh
   become: true
 
+- name: Assert filebeat template SHA256 is not the placeholder value
+  ansible.builtin.assert:
+    that:
+      - wazuh_filebeat_template_sha256 != "sha256:PLACEHOLDER_VERIFY_BEFORE_USE"
+    fail_msg: >
+      wazuh_filebeat_template_sha256 is set to the placeholder value.
+      Download wazuh-template.json for wazuh_version={{ wazuh_version }},
+      run sha256sum on it, and set the real hash in group_vars/all/main.yml.
+  when: wazuh_filebeat_template_sha256 is defined
+
 - name: Download Wazuh alerts template
   ansible.builtin.get_url:
     url: "https://raw.githubusercontent.com/wazuh/wazuh/v{{ wazuh_version }}/extensions/elasticsearch/7.x/wazuh-template.json"
     dest: /etc/filebeat/wazuh-template.json
-    checksum: "{{ wazuh_filebeat_template_sha256 | default(omit) }}"
+    checksum: "{{ wazuh_filebeat_template_sha256 }}"
     mode: '0644'
   become: true
 

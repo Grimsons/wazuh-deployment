@@ -13,6 +13,11 @@ wazuh_repo_url_yum: "https://packages.wazuh.com/4.x/yum/"
 # Agent configuration
 wazuh_agent_config_path: /var/ossec/etc/ossec.conf
 
+# macOS PKG installer SHA256 — VERIFY before use:
+# Download from https://packages.wazuh.com/4.x/macos/ and run sha256sum
+# Update this value when wazuh_version changes
+wazuh_agent_macos_sha256: "sha256:PLACEHOLDER_VERIFY_BEFORE_USE"
+
 # Registration settings
 wazuh_agent_registration_address: ""  # Manager address for registration
 wazuh_agent_enrollment_enabled: true

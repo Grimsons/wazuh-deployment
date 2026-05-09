@@ -54,6 +54,39 @@ jobs:
           severity: warning
           ignore_paths: ".git"
 
+  molecule:
+    name: Molecule
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        role: [wazuh-agent, wazuh-monitoring]
+      fail-fast: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-molecule-${{ hashFiles('requirements*.txt') }}
+          restore-keys: ${{ runner.os }}-molecule-
+
+      - name: Install dependencies
+        run: |
+          pip install molecule molecule-plugins[docker] ansible ansible-lint
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Run Molecule tests
+        run: cd roles/${{ matrix.role }} && molecule test
+        env:
+          ANSIBLE_ROLES_PATH: ${{ github.workspace }}/roles
+
   syntax-check:
     name: Ansible Syntax Check
     runs-on: ubuntu-latest
