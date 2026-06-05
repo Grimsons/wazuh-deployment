@@ -8,13 +8,83 @@
 # - Manager status and cluster info
 # - Events per second
 
-- name: Ensure Python dependencies
-  ansible.builtin.package:
-    name:
-      - python3
-      - python3-pip
-      - python3-venv
-    state: present
+- block:
+    - name: Ensure Python dependencies
+      ansible.builtin.package:
+        name:
+          - python3
+          - python3-pip
+          - python3-venv
+        state: present
+
+    - name: Create exporter directory
+      ansible.builtin.file:
+        path: "{{ wazuh_exporter_install_dir }}"
+        state: directory
+        mode: "0755"
+        owner: root
+        group: root
+
+    - name: Install Python dependencies in virtualenv
+      ansible.builtin.pip:
+        name:
+          - prometheus_client
+          - requests
+        state: present
+        virtualenv: "{{ wazuh_exporter_install_dir }}/venv"
+        virtualenv_command: "python3 -m venv"
+
+    - name: Create exporter service group
+      ansible.builtin.group:
+        name: "{{ wazuh_exporter_group }}"
+        system: true
+
+    - name: Create exporter service user
+      ansible.builtin.user:
+        name: "{{ wazuh_exporter_user }}"
+        group: "{{ wazuh_exporter_group }}"
+        system: true
+        shell: /usr/sbin/nologin
+        create_home: false
+
+    - name: Deploy Manager exporter environment file with credentials
+      ansible.builtin.copy:
+        content: |
+          WAZUH_API_USER={{ wazuh_api_user | default('wazuh') }}
+          WAZUH_API_PASS={{ wazuh_api_password }}
+          WAZUH_API_CA_CERT={{ wazuh_manager_certs_path }}/{{ wazuh_manager_ca_cert_filename }}
+        dest: "{{ wazuh_exporter_install_dir }}/wazuh-manager-exporter.env"
+        mode: "0600"
+        owner: "{{ wazuh_exporter_user }}"
+        group: "{{ wazuh_exporter_group }}"
+      no_log: true
+      notify: Restart wazuh manager exporter
+
+    - name: Deploy Wazuh Manager exporter script
+      ansible.builtin.template:
+        src: wazuh-manager-exporter.py.j2
+        dest: "{{ wazuh_exporter_install_dir }}/wazuh-manager-exporter.py"
+        mode: "0755"
+        owner: root
+        group: root
+      notify: Restart wazuh manager exporter
+
+    - name: Deploy Wazuh Manager exporter systemd service
+      ansible.builtin.template:
+        src: wazuh-manager-exporter.service.j2
+        dest: /etc/systemd/system/wazuh-manager-exporter.service
+        mode: "0644"
+      notify:
+        - Reload systemd
+        - Restart wazuh manager exporter
+
+    - name: Ensure Wazuh Manager exporter is started and enabled
+      ansible.builtin.systemd:
+        name: wazuh-manager-exporter
+        state: started
+        enabled: true
+        daemon_reload: true
+  become: true
 
 - name: Verify manager API CA certificate exists before configuring exporter
   ansible.builtin.stat:
@@ -28,74 +98,6 @@
       Ensure the Wazuh manager role has run and API SSL certificates are deployed.
       Override wazuh_manager_certs_path and wazuh_manager_ca_cert_filename in your inventory if needed.
   when: not manager_ca_cert_stat.stat.exists
-
-- name: Create exporter directory
-  ansible.builtin.file:
-    path: "{{ wazuh_exporter_install_dir }}"
-    state: directory
-    mode: "0755"
-    owner: root
-    group: root
-
-- name: Install Python dependencies in virtualenv
-  ansible.builtin.pip:
-    name:
-      - prometheus_client
-      - requests
-    state: present
-    virtualenv: "{{ wazuh_exporter_install_dir }}/venv"
-    virtualenv_command: "python3 -m venv"
-
-- name: Create exporter service group
-  ansible.builtin.group:
-    name: "{{ wazuh_exporter_group }}"
-    system: true
-
-- name: Create exporter service user
-  ansible.builtin.user:
-    name: "{{ wazuh_exporter_user }}"
-    group: "{{ wazuh_exporter_group }}"
-    system: true
-    shell: /usr/sbin/nologin
-    create_home: false
-
-- name: Deploy Manager exporter environment file with credentials
-  ansible.builtin.copy:
-    content: |
-      WAZUH_API_USER={{ wazuh_api_user | default('wazuh') }}
-      WAZUH_API_PASS={{ wazuh_api_password }}
-      WAZUH_API_CA_CERT={{ wazuh_manager_certs_path }}/{{ wazuh_manager_ca_cert_filename }}
-    dest: "{{ wazuh_exporter_install_dir }}/wazuh-manager-exporter.env"
-    mode: "0600"
-    owner: "{{ wazuh_exporter_user }}"
-    group: "{{ wazuh_exporter_group }}"
-  no_log: true
-  notify: Restart wazuh manager exporter
-
-- name: Deploy Wazuh Manager exporter script
-  ansible.builtin.template:
-    src: wazuh-manager-exporter.py.j2
-    dest: "{{ wazuh_exporter_install_dir }}/wazuh-manager-exporter.py"
-    mode: "0755"
-    owner: root
-    group: root
-  notify: Restart wazuh manager exporter
-
-- name: Deploy Wazuh Manager exporter systemd service
-  ansible.builtin.template:
-    src: wazuh-manager-exporter.service.j2
-    dest: /etc/systemd/system/wazuh-manager-exporter.service
-    mode: "0644"
-  notify:
-    - Reload systemd
-    - Restart wazuh manager exporter
-
-- name: Ensure Wazuh Manager exporter is started and enabled
-  ansible.builtin.systemd:
-    name: wazuh-manager-exporter
-    state: started
-    enabled: true
-    daemon_reload: true
 
 # ─────────────────────────────────────────────────────────────────
 # Firewall rules for metrics port
@@ -114,6 +116,7 @@
   failed_when:
     - firewalld_manager_result is failed
     - "'Could not connect to firewalld' not in (firewalld_manager_result.msg | default(''))"
+  become: true
 
 - name: Allow Prometheus to scrape manager metrics from anywhere (firewalld, allow-any mode)
   ansible.posix.firewalld:
@@ -128,6 +131,7 @@
   failed_when:
     - firewalld_manager_any_result is failed
     - "'Could not connect to firewalld' not in (firewalld_manager_any_result.msg | default(''))"
+  become: true
 
 - name: Allow Prometheus to scrape manager metrics from known scrapers (ufw)
   community.general.ufw:
@@ -144,6 +148,7 @@
   failed_when:
     - ufw_manager_result is failed
     - "'Could not find a running firewall' not in (ufw_manager_result.msg | default(''))"
+  become: true
 
 - name: Allow Prometheus to scrape manager metrics from anywhere (ufw, allow-any mode)
   community.general.ufw:
@@ -158,3 +163,4 @@
   failed_when:
     - ufw_manager_any_result is failed
     - "'Could not find a running firewall' not in (ufw_manager_any_result.msg | default(''))"
+  become: true

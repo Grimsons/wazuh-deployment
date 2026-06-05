@@ -11,7 +11,7 @@
 #   ./scripts/status.sh agent        # Check only agents
 #   ./scripts/status.sh --local      # Check local services only
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"

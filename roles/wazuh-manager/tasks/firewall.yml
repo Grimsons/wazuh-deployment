@@ -149,7 +149,7 @@
       loop: "{{ effective_agent_networks }}"
       when: not allow_agents_from_any
 
-    # Agent communication - allow from auto-detected/configured agent subnets (UDP)
+    # Agent communication - allow from agent networks (UDP - legacy non-TLS only)
     - name: Allow Wazuh agent communication (1514/udp) from agent networks
       community.general.ufw:
         rule: allow
@@ -158,7 +158,9 @@
         from_ip: "{{ item }}"
       become: true
       loop: "{{ effective_agent_networks }}"
-      when: not allow_agents_from_any
+      when:
+        - not allow_agents_from_any
+        - wazuh_manager_firewall_agent_udp_enabled | default(false)
 
     # Agent registration - allow from agent subnets
     - name: Allow Wazuh agent registration (1515/tcp) from agent networks
@@ -256,7 +258,9 @@
         permanent: true
         state: enabled
       become: true
-      when: allow_agents_from_any
+      when:
+        - allow_agents_from_any
+        - wazuh_manager_firewall_agent_udp_enabled | default(false)
 
     - name: Allow Wazuh agent registration (1515/tcp) from anywhere
       ansible.posix.firewalld:
@@ -287,7 +291,9 @@
         state: enabled
       become: true
       loop: "{{ effective_agent_networks }}"
-      when: not allow_agents_from_any
+      when:
+        - not allow_agents_from_any
+        - wazuh_manager_firewall_agent_udp_enabled | default(false)
 
     - name: Allow Wazuh agent registration (1515/tcp) from agent networks
       ansible.posix.firewalld:

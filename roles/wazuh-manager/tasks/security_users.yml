@@ -5,7 +5,7 @@
 
 - name: Generate random API password
   ansible.builtin.shell: |
-    source "{{ playbook_dir }}/../lib/generators.sh" && generate_yaml_safe_password 24
+    source {{ playbook_dir | quote }}/../lib/generators.sh && generate_yaml_safe_password 24
   args:
     executable: /bin/bash
   delegate_to: localhost
@@ -26,7 +26,18 @@
 
 - name: Set API password (use provided or generated)
   ansible.builtin.set_fact:
-    wazuh_api_password: "{{ wazuh_api_password | default(wazuh_api_password_generated) }}"
+    wazuh_api_password: "{{ wazuh_api_password if (wazuh_api_password is defined and wazuh_api_password | length > 0) else wazuh_api_password_generated }}"
+  run_once: true
+  no_log: true
+
+- name: Validate API password meets requirements
+  ansible.builtin.assert:
+    that:
+      - wazuh_api_password is defined
+      - wazuh_api_password | length > 0
+      - wazuh_api_password | length >= 8
+    fail_msg: "API password must be defined and at least 8 characters. Check vault_wazuh_api_password in vault."
+    success_msg: "API password validation passed"
   run_once: true
   no_log: true
 

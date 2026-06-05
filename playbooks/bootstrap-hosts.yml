@@ -89,11 +89,11 @@
     - name: Test SSH key authentication
       ansible.builtin.command:
         cmd: >
-          ssh -i {{ test_ssh_key }}
-          -o StrictHostKeyChecking=no
+          ssh -i {{ test_ssh_key | quote }}
+          -o StrictHostKeyChecking=accept-new
           -o UserKnownHostsFile=/dev/null
           -o BatchMode=yes
-          {{ test_ansible_user }}@{{ inventory_hostname }}
+          {{ test_ansible_user | quote }}@{{ inventory_hostname | quote }}
           'echo SSH_KEY_AUTH_SUCCESS'
       delegate_to: localhost
       register: ssh_test

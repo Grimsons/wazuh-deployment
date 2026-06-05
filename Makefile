@@ -4,10 +4,10 @@
 # Usage: make <target>
 # Run 'make help' to see all available targets
 
-.PHONY: help setup setup-tui deploy deploy-bootstrap deploy-indexer deploy-manager \
-        deploy-dashboard deploy-agent health backup restore upgrade check status \
-        unlock vault-view vault-edit vault-rotate certs-check certs-rotate clean \
-        monitoring test lint deploy-rules threat-intel bats
+.PHONY: help setup setup-tui deploy deploy-check deploy-bootstrap deploy-indexer deploy-manager \
+        deploy-dashboard deploy-agent health backup restore upgrade upgrade-check \
+        check status unlock vault-view vault-edit vault-rotate vault-rekey certs-check \
+        certs-rotate certs-renew clean clean-all monitoring test lint deploy-rules threat-intel bats
 
 # Default target
 .DEFAULT_GOAL := help
@@ -33,19 +33,23 @@ help: ## Show this help message
 	@grep -E '^deploy[^:]*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  $(CYAN)%-20s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(GREEN)Operations:$(RESET)"
-	@grep -E '^(health|status|backup|restore|upgrade|unlock|monitoring|deploy-rules|threat-intel):.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  $(CYAN)%-20s$(RESET) %s\n", $$1, $$2}'
+	@grep -E '^(health|status|backup|restore|upgrade|upgrade-check|unlock|monitoring|threat-intel):.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  $(CYAN)%-20s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(GREEN)Security:$(RESET)"
 	@grep -E '^(vault-|certs-)[^:]*:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  $(CYAN)%-20s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(GREEN)Development:$(RESET)"
-	@grep -E '^(test|bats|lint|clean):.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  $(CYAN)%-20s$(RESET) %s\n", $$1, $$2}'
+	@grep -E '^(test|bats|lint|clean|clean-all):.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  $(CYAN)%-20s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(YELLOW)Examples:$(RESET)"
 	@echo "  make setup               # Run interactive CLI setup"
 	@echo "  make deploy-bootstrap    # First-time deployment with bootstrap"
 	@echo "  make deploy              # Regular deployment"
 	@echo "  make status              # Quick health check"
+	@echo "  make backup              # Create backup of Wazuh data"
+	@echo "  make vault-view          # View vault credentials"
+	@echo "  make certs-check         # Check certificate expiration"
+	@echo "  make upgrade-check       # Check available upgrades"
 
 #═══════════════════════════════════════════════════════════════════════════════
 # Setup
@@ -87,6 +91,7 @@ check: ## Validate prerequisites and configuration
 
 deploy: ## Deploy all Wazuh components
 	@echo "$(CYAN)Deploying Wazuh stack...$(RESET)"
+	@read -p "$(YELLOW)Continue with deployment? [y/N]$(RESET) " confirm && [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ] || { echo "Aborted."; exit 1; }
 	ansible-playbook site.yml
 
 deploy-bootstrap: ## First-time deployment (bootstrap + all components)

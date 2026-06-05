@@ -41,7 +41,6 @@ wazuh_manager_exporter_scrape_interval: 30
 
 # Wazuh API connection settings (usually localhost on manager)
 wazuh_api_host: "localhost"
-wazuh_api_port: 55000
 wazuh_api_protocol: "https"
 
 # API credentials - should come from vault

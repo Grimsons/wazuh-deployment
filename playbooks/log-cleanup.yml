@@ -3,7 +3,7 @@
 # Removes old log files from Wazuh Manager to prevent disk space issues
 #
 # Usage:
-#   ansible-playbook playbooks/log-cleanup.yml
+#   ansible-playbook playbooks/log-cleanup.yml -i inventory/hosts.yml
 #
 # Optional variables:
 #   -e "log_retention_days=30"     - Keep logs for N days (default: 30)
@@ -51,7 +51,7 @@
     # Get disk usage before cleanup
     - name: Get disk usage before cleanup
       ansible.builtin.shell: |
-        du -sh {{ ossec_log_path }} 2>/dev/null | cut -f1
+        du -sh {{ ossec_log_path | quote }} 2>/dev/null | cut -f1
       register: disk_before
       changed_when: false
 
@@ -106,7 +106,7 @@
 
         - name: Remove empty archive subdirectories
           ansible.builtin.shell: |
-            find {{ ossec_log_path }}/archives -type d -empty -delete 2>/dev/null || true
+            find {{ ossec_log_path | quote }}/archives -type d -empty -delete 2>/dev/null || true
           when: not (dry_run | bool)
           changed_when: false
 
@@ -149,7 +149,7 @@
 
         - name: Remove empty alert subdirectories
           ansible.builtin.shell: |
-            find {{ ossec_log_path }}/alerts -type d -empty -delete 2>/dev/null || true
+            find {{ ossec_log_path | quote }}/alerts -type d -empty -delete 2>/dev/null || true
           when: not (dry_run | bool)
           changed_when: false
 
@@ -224,7 +224,7 @@
     # Get disk usage after cleanup
     - name: Get disk usage after cleanup
       ansible.builtin.shell: |
-        du -sh {{ ossec_log_path }} 2>/dev/null | cut -f1
+        du -sh {{ ossec_log_path | quote }} 2>/dev/null | cut -f1
       register: disk_after
       changed_when: false
       when: not (dry_run | bool)

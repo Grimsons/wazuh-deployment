@@ -3,9 +3,9 @@
 # Run this BEFORE deployment to validate environment readiness
 #
 # Usage:
-#   ansible-playbook playbooks/pre-flight-checks.yml
-#   ansible-playbook playbooks/pre-flight-checks.yml --tags network
-#   ansible-playbook playbooks/pre-flight-checks.yml -e "skip_package_check=true"
+#   ansible-playbook playbooks/pre-flight-checks.yml -i inventory/hosts.yml
+#   ansible-playbook playbooks/pre-flight-checks.yml -i inventory/hosts.yml --tags network
+#   ansible-playbook playbooks/pre-flight-checks.yml -i inventory/hosts.yml -e "skip_package_check=true"
 #
 # This playbook validates:
 #   - System resources (CPU, RAM, disk)
@@ -57,6 +57,27 @@
           Run: ./scripts/manage-vault.sh init  (or create it manually before deployment)
       when: not vault_password_file.stat.exists
 
+    - name: Validate vault contains required credential variables
+      ansible.builtin.assert:
+        that:
+          - vault_ansible_user is defined
+          - vault_ansible_connection_password is defined
+          - vault_wazuh_indexer_admin_password is defined
+          - vault_wazuh_api_password is defined
+          - vault_wazuh_agent_enrollment_password is defined
+          - vault_wazuh_manager_cluster_key is defined
+          - vault_wazuh_indexer_admin_password | length >= 16
+          - vault_wazuh_api_password | length > 0
+          - vault_wazuh_agent_enrollment_password | length > 0
+          - vault_wazuh_manager_cluster_key | length >= 16
+        fail_msg: >
+          One or more required vault variables are missing or invalid.
+          Run: ./scripts/manage-vault.sh view  (to verify vault contents)
+          Run: ./scripts/manage-vault.sh create  (to regenerate vault)
+      run_once: true
+      no_log: true
+      when: vault_password_file.stat.exists
+
     - name: Check certificates directory
       ansible.builtin.stat:
         path: "{{ playbook_dir }}/../files/certs/root-ca.pem"
@@ -69,7 +90,7 @@
 
     - name: Check certificate expiration
       ansible.builtin.shell: |
-        openssl x509 -in "{{ playbook_dir }}/../files/certs/root-ca.pem" -noout -checkend 2592000
+        openssl x509 -in {{ playbook_dir | quote }}/../files/certs/root-ca.pem -noout -checkend 2592000
       register: cert_expiry_check
       failed_when: false
       changed_when: false
@@ -90,6 +111,7 @@
           Variables: {{ '✓' if required_files.results[1].stat.exists else '✗' }}
           Certificates: {{ '✓' if root_ca_file.stat.exists else '✗' }}
           Vault Password: {{ '✓' if vault_password_file.stat.exists else '⚠ (unencrypted)' }}
+          Vault Variables: ✓ (validated)
           ══════════════════════════════════════════════════════════
 
 - name: Pre-Flight Checks - Gather Facts
@@ -247,7 +269,7 @@
             - { port: "{{ wazuh_dashboard_port | default(443) }}", desc: "Dashboard HTTPS" }
 
     - name: Check if Indexer ports are available
-      ansible.builtin.shell: ss -tlnp | grep -q ':{{ item.port }} ' && echo "IN_USE" || echo "AVAILABLE"
+      ansible.builtin.shell: ss -tlnp | grep -q ':{{ item.port | quote }} ' && echo "IN_USE" || echo "AVAILABLE"
       loop: "{{ required_ports.wazuh_indexers }}"
       loop_control:
         label: "{{ item.port }} ({{ item.desc }})"
@@ -256,7 +278,7 @@
       when: inventory_hostname in groups.get('wazuh_indexers', [])
 
     - name: Check if Manager ports are available
-      ansible.builtin.shell: ss -tlnp | grep -q ':{{ item.port }} ' && echo "IN_USE" || echo "AVAILABLE"
+      ansible.builtin.shell: ss -tlnp | grep -q ':{{ item.port | quote }} ' && echo "IN_USE" || echo "AVAILABLE"
       loop: "{{ required_ports.wazuh_managers }}"
       loop_control:
         label: "{{ item.port }} ({{ item.desc }})"
@@ -265,7 +287,7 @@
       when: inventory_hostname in groups.get('wazuh_managers', [])
 
     - name: Check if Dashboard ports are available
-      ansible.builtin.shell: ss -tlnp | grep -q ':{{ item.port }} ' && echo "IN_USE" || echo "AVAILABLE"
+      ansible.builtin.shell: ss -tlnp | grep -q ':{{ item.port | quote }} ' && echo "IN_USE" || echo "AVAILABLE"
       loop: "{{ required_ports.wazuh_dashboards }}"
       loop_control:
         label: "{{ item.port }} ({{ item.desc }})"
@@ -474,7 +496,7 @@
       ansible.builtin.command: >
         ssh -o BatchMode=yes -o ConnectTimeout=5
         -o StrictHostKeyChecking=accept-new
-        {{ hostvars[item].ansible_user | default('root') }}@{{ item }} echo "SSH OK"
+        {{ hostvars[item].ansible_user | default('root') | quote }}@{{ item | quote }} echo "SSH OK"
       loop: "{{ groups['all'] | difference(['localhost']) }}"
       register: ssh_results
       changed_when: false
@@ -502,7 +524,7 @@
 
     - name: Check certificate expiry on Indexers
       ansible.builtin.shell: |
-        openssl x509 -enddate -noout -in {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') }}/indexer.pem 2>/dev/null | cut -d= -f2
+        openssl x509 -enddate -noout -in {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') | quote }}/indexer.pem 2>/dev/null | cut -d= -f2
       register: indexer_cert_expiry
       changed_when: false
       failed_when: false
@@ -512,7 +534,7 @@
 
     - name: Check days until certificate expiry
       ansible.builtin.shell: |
-        expiry_date=$(openssl x509 -enddate -noout -in {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') }}/indexer.pem 2>/dev/null | cut -d= -f2)
+        expiry_date=$(openssl x509 -enddate -noout -in {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') | quote }}/indexer.pem 2>/dev/null | cut -d= -f2)
         expiry_epoch=$(date -d "$expiry_date" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$expiry_date" +%s 2>/dev/null)
         current_epoch=$(date +%s)
         days_left=$(( (expiry_epoch - current_epoch) / 86400 ))

@@ -5,8 +5,9 @@
 
 set -euo pipefail
 
-# Ensure plaintext temp files are cleaned up on exit/interrupt
-trap 'rm -f "${VAULT_FILE:-}.tmp" "${VAULT_PASSWORD_FILE:-}.new"' EXIT INT TERM
+# Ensure plaintext temp files are securely shredded on exit/interrupt
+# shred -u overwrites before unlinking to prevent disk-recovery of secrets
+trap 'shred -u "${VAULT_FILE:-}.tmp" "${VAULT_PASSWORD_FILE:-}.new" 2>/dev/null; rm -f "${VAULT_FILE:-}.tmp" "${VAULT_PASSWORD_FILE:-}.new"' EXIT INT TERM
 
 # Colors
 RED='\033[0;31m'
@@ -22,7 +23,7 @@ source "$PROJECT_DIR/lib/generators.sh"
 VAULT_DIR="$PROJECT_DIR/group_vars/all"
 VAULT_FILE="$VAULT_DIR/vault.yml"
 VAULT_PASSWORD_FILE="$PROJECT_DIR/.vault_password"
-CREDENTIALS_DIR="$PROJECT_DIR/credentials"
+# Credentials stored exclusively in Ansible Vault — no plaintext files on disk
 
 print_header() {
     echo -e "\n${CYAN}═══════════════════════════════════════════════════════════════${NC}"
@@ -79,6 +80,7 @@ init_vault() {
 # Create or update vault file with credentials
 # Accepts environment variables for credentials:
 #   VAULT_INDEXER_PASSWORD, VAULT_API_PASSWORD, VAULT_ENROLLMENT_PASSWORD
+#   VAULT_DASHBOARD_ADMIN_PASSWORD, VAULT_GRAFANA_API_KEY
 #   VAULT_ANSIBLE_USER, VAULT_CONNECTION_PASSWORD, VAULT_BECOME_PASSWORD
 #   VAULT_HOST_CREDENTIALS (format: "host1:user1:pass1,host2:user2:pass2")
 #   VAULT_CLUSTER_KEY
@@ -105,6 +107,8 @@ create_vault() {
     local become_password="${VAULT_BECOME_PASSWORD:-}"
     local ansible_user="${VAULT_ANSIBLE_USER:-wazuh-deploy}"
     local cluster_key="${VAULT_CLUSTER_KEY:-}"
+    local dashboard_admin_password="${VAULT_DASHBOARD_ADMIN_PASSWORD:-}"
+    local grafana_api_key="${VAULT_GRAFANA_API_KEY:-}"
 
     # Generate passwords if not provided
     if [ -z "$indexer_password" ]; then
@@ -126,12 +130,22 @@ create_vault() {
         cluster_key=$(generate_yaml_safe_password 32)
     fi
 
+    if [ -z "$dashboard_admin_password" ]; then
+        dashboard_admin_password=$(generate_yaml_safe_password 24)
+    fi
+
+    if [ -z "$grafana_api_key" ]; then
+        grafana_api_key=$(generate_yaml_safe_password 32)
+    fi
+
     # Sanitize externally-supplied values before YAML interpolation
     [ -n "$indexer_password" ]    && indexer_password=$(sanitize_for_yaml "$indexer_password")
     [ -n "$api_password" ]        && api_password=$(sanitize_for_yaml "$api_password")
     [ -n "$enrollment_password" ] && enrollment_password=$(sanitize_for_yaml "$enrollment_password")
-    [ -n "$connection_password" ] && connection_password=$(sanitize_for_yaml "$connection_password")
-    [ -n "$become_password" ]     && become_password=$(sanitize_for_yaml "$become_password")
+    [ -n "$connection_password" ]     && connection_password=$(sanitize_for_yaml "$connection_password")
+    [ -n "$become_password" ]         && become_password=$(sanitize_for_yaml "$become_password")
+    [ -n "$dashboard_admin_password" ] && dashboard_admin_password=$(sanitize_for_yaml "$dashboard_admin_password")
+    [ -n "$grafana_api_key" ]         && grafana_api_key=$(sanitize_for_yaml "$grafana_api_key")
 
     # Build per-host SSH credentials content
     local host_creds_content=""
@@ -185,12 +199,19 @@ vault_wazuh_agent_enrollment_password: \"${enrollment_password}\"
 
 # Manager cluster key (for multi-node deployments)
 vault_wazuh_manager_cluster_key: \"${cluster_key}\"
+
+# Dashboard admin password (if different from indexer admin; leave empty to reuse indexer admin)
+vault_wazuh_dashboard_admin_password: \"${dashboard_admin_password}\"
+
+# Grafana API key (for monitoring dashboard)
+vault_grafana_api_key: \"${grafana_api_key}\"
 "
 
     # Write and encrypt
     (umask 077; echo "$vault_content" > "${VAULT_FILE}.tmp")
-    ansible-vault encrypt "${VAULT_FILE}.tmp" --vault-password-file "$VAULT_PASSWORD_FILE" --encrypt-vault-id default --output "$VAULT_FILE"
-    rm -f "${VAULT_FILE}.tmp"
+    ANSIBLE_VAULT_PASSWORD_FILE="$VAULT_PASSWORD_FILE" \
+      ansible-vault encrypt "${VAULT_FILE}.tmp" --encrypt-vault-id default --output "$VAULT_FILE"
+    shred -u "${VAULT_FILE}.tmp" 2>/dev/null || rm -f "${VAULT_FILE}.tmp"
     chmod 600 "$VAULT_FILE"
 
     print_success "Encrypted vault created: $VAULT_FILE"
@@ -210,7 +231,7 @@ view_vault() {
         exit 1
     fi
 
-    ansible-vault view "$VAULT_FILE" --vault-password-file "$VAULT_PASSWORD_FILE"
+    ANSIBLE_VAULT_PASSWORD_FILE="$VAULT_PASSWORD_FILE" ansible-vault view "$VAULT_FILE"
 }
 
 # Edit vault contents
@@ -227,7 +248,7 @@ edit_vault() {
         exit 1
     fi
 
-    ansible-vault edit "$VAULT_FILE" --vault-password-file "$VAULT_PASSWORD_FILE"
+    ANSIBLE_VAULT_PASSWORD_FILE="$VAULT_PASSWORD_FILE" ansible-vault edit "$VAULT_FILE"
     print_success "Vault updated"
 }
 
@@ -245,11 +266,6 @@ rotate_credentials() {
         cp "$VAULT_FILE" "${VAULT_FILE}.backup.$(date +%Y%m%d%H%M%S)"
         print_info "Backed up existing vault"
     fi
-
-    # Remove existing credentials to force regeneration
-    rm -f "$CREDENTIALS_DIR/indexer_admin_password.txt"
-    rm -f "$CREDENTIALS_DIR/api_password.txt"
-    rm -f "$CREDENTIALS_DIR/agent_enrollment_password.txt"
 
     # Create new vault with new credentials
     create_vault
@@ -278,11 +294,12 @@ rekey_vault() {
     echo "$new_password" > "$new_password_file"
 
     # Rekey the vault
-    ansible-vault rekey "$VAULT_FILE" \
-        --vault-password-file "$VAULT_PASSWORD_FILE" \
+    ANSIBLE_VAULT_PASSWORD_FILE="$VAULT_PASSWORD_FILE" \
+      ansible-vault rekey "$VAULT_FILE" \
         --new-vault-password-file "$new_password_file"
 
-    # Replace old password file
+    # Replace old password file with shred cleanup
+    shred -u "$VAULT_PASSWORD_FILE" 2>/dev/null || rm -f "$VAULT_PASSWORD_FILE"
     mv "$new_password_file" "$VAULT_PASSWORD_FILE"
     chmod 600 "$VAULT_PASSWORD_FILE"
 
@@ -313,7 +330,7 @@ usage() {
     echo "Files:"
     echo "  Vault file:     $VAULT_FILE"
     echo "  Password file:  $VAULT_PASSWORD_FILE"
-    echo "  Credentials:    $CREDENTIALS_DIR/"
+    echo "  Credentials:    (stored encrypted in Ansible Vault only)"
 }
 
 # Main

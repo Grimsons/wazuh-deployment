@@ -3,7 +3,7 @@
 # Wazuh Certificate Generation Script
 # This script generates self-signed certificates for Wazuh components
 
-set -e
+set -euo pipefail
 
 # Colors
 RED='\033[0;31m'
@@ -16,6 +16,12 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CERTS_DIR="${SCRIPT_DIR}/files/certs"
 CONFIG_FILE="${SCRIPT_DIR}/group_vars/all/main.yml"
+
+# Cleanup temp files on exit/interrupt
+cleanup() {
+    rm -f "${CERTS_DIR}"/*.csr "${CERTS_DIR}"/*.ext
+}
+trap cleanup EXIT INT TERM
 
 print_header() {
     echo -e "\n${CYAN}═══════════════════════════════════════════════════════════════${NC}"
@@ -98,7 +104,6 @@ generate_admin_cert() {
         -out "${CERTS_DIR}/admin.pem" \
         2>/dev/null
 
-    rm -f "${CERTS_DIR}/admin.csr"
     print_success "Generated Admin certificate"
 }
 
@@ -146,7 +151,6 @@ EOF
         -extfile "${CERTS_DIR}/${node_name}.ext" \
         2>/dev/null
 
-    rm -f "${CERTS_DIR}/${node_name}.csr" "${CERTS_DIR}/${node_name}.ext"
     print_success "Generated certificate for: $node_name"
 }
 
@@ -216,6 +220,11 @@ main() {
     echo
     print_info "Remember to copy these certificates to the appropriate locations"
     print_info "or update the certificate paths in your configuration."
+    echo
+    print_warning "SECURITY: Private key files (*-key.pem) are unencrypted!"
+    print_warning "Protect them with appropriate filesystem permissions (chmod 600)."
+    print_warning "These files are gitignored but ensure they are never committed or"
+    print_warning "transmitted over insecure channels."
 }
 
 main "$@"

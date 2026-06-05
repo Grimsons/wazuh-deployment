@@ -11,13 +11,13 @@
 #
 # Usage:
 #   # Check for available updates (no changes)
-#   ansible-playbook playbooks/system-update.yml --tags check
+#   ansible-playbook playbooks/system-update.yml -i inventory/hosts.yml --tags check
 #
 #   # Apply security updates only
-#   ansible-playbook playbooks/system-update.yml -e "security_only=true"
+#   ansible-playbook playbooks/system-update.yml -i inventory/hosts.yml -e "security_only=true"
 #
 #   # Full system update (all packages)
-#   ansible-playbook playbooks/system-update.yml
+#   ansible-playbook playbooks/system-update.yml -i inventory/hosts.yml
 #
 #   # Update specific host group
 #   ansible-playbook playbooks/system-update.yml --limit wazuh_managers
@@ -171,7 +171,7 @@
         - name: Run backup playbook
           ansible.builtin.command:
             cmd: >
-              ansible-playbook {{ playbook_dir }}/backup.yml
+              ansible-playbook {{ playbook_dir | quote }}/backup.yml
               -e "backup_timestamp=pre-sysupdate-{{ update_timestamp }}"
             chdir: "{{ playbook_dir }}/.."
           register: backup_result
@@ -684,7 +684,7 @@
   tasks:
     - name: Run health check
       ansible.builtin.command:
-        cmd: ansible-playbook {{ playbook_dir }}/health-check.yml
+        cmd: ansible-playbook {{ playbook_dir | quote }}/health-check.yml
         chdir: "{{ playbook_dir }}/.."
       register: health_check
       failed_when: false

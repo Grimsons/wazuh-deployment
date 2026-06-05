@@ -41,7 +41,7 @@ apply_profile_minimal() {
     DEPLOY_AGENTS="false"
 
     # Basic settings
-    WAZUH_VERSION="${WAZUH_VERSION:-4.14.1}"
+    WAZUH_VERSION="${WAZUH_VERSION:-4.14.5}"
     ENVIRONMENT="development"
     ORG_NAME="TestOrg"
 
@@ -109,7 +109,7 @@ apply_profile_production() {
     AGENT_NODES=""
 
     # Production settings
-    WAZUH_VERSION="${WAZUH_VERSION:-4.14.1}"
+    WAZUH_VERSION="${WAZUH_VERSION:-4.14.5}"
     ENVIRONMENT="production"
     ORG_NAME="${ORG_NAME:-MyOrganization}"
 

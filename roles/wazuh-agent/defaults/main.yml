@@ -24,10 +24,25 @@ wazuh_agent_enrollment_enabled: true
 wazuh_agent_enrollment_delay: 30
 
 # Communication settings
+wazuh_manager_agent_port: 1514
 wazuh_agent_protocol: tcp
 wazuh_agent_notify_time: 10
 wazuh_agent_time_reconnect: 60
 wazuh_agent_auto_restart: true
+
+# TLS encryption for agent→manager communication (ON by default)
+# Disable with wazuh_agent_tls_enabled: false for environments without PKI
+wazuh_agent_tls_enabled: true
+# CA path — not set in defaults because the correct path is platform-specific:
+#   Linux:   /var/ossec/etc/certs/root-ca.pem
+#   macOS:   /Library/Ossec/etc/certs/root-ca.pem
+#   Windows: C:\Program Files (x86)\ossec-agent\certs\root-ca.pem
+# Each platform template provides its own | default() fallback.
+# Override explicitly here if using a custom CA path:
+# wazuh_agent_ca_path: /custom/path/root-ca.pem
+# Future: mutual TLS support — uncomment and set paths to enable:
+# wazuh_agent_tls_certificate: /var/ossec/etc/certs/agent.pem
+# wazuh_agent_tls_key: /var/ossec/etc/certs/agent-key.pem
 
 # Auditd integration (Linux only)
 wazuh_agent_auditd_enabled: true

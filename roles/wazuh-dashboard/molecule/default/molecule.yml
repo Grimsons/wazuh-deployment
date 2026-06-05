@@ -9,7 +9,7 @@ driver:
 
 platforms:
   - name: wazuh-dashboard-ubuntu
-    image: geerlingguy/docker-ubuntu2204-ansible:latest
+    image: geerlingguy/docker-ubuntu2404-ansible:latest
     pre_build_image: true
     privileged: true
     volumes:
@@ -35,6 +35,7 @@ provisioner:
         wazuh_indexer_nodes:
           - name: indexer-1
             ip: 127.0.0.1
+        # CI-TEST-ONLY: replace with vault variable for production
         wazuh_indexer_admin_password: "TestPass1234@"
         wazuh_dashboard_port: 443
         wazuh_ssl_verify_certificates: false

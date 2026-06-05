@@ -151,7 +151,7 @@ if [[ -n "$SELECTED_PROFILE" ]]; then
 fi
 
 # Default values
-DEFAULT_WAZUH_VERSION="4.14.1"
+DEFAULT_WAZUH_VERSION="4.14.5"
 DEFAULT_INDEXER_HTTP_PORT="9200"
 DEFAULT_INDEXER_TRANSPORT_PORT="9300"
 DEFAULT_DASHBOARD_PORT="443"
@@ -358,7 +358,7 @@ generate_password() {
     password="${password}${upper}${lower}${number}${symbol}"
 
     # Shuffle the password to distribute special chars
-    password=$(echo "$password" | fold -w1 | shuf | tr -d '\n')
+    password=$(echo "$password" | fold -w1 | shuf --random-source=/dev/urandom | tr -d '\n')
 
     echo "$password"
 }
@@ -1267,9 +1267,12 @@ wazuh_indexer_certs_path: /etc/wazuh-indexer/certs
 wazuh_manager_certs_path: /var/ossec/etc/certs
 wazuh_dashboard_certs_path: /etc/wazuh-dashboard/certs
 
-# SSL certificate verification (set to false for self-signed certs)
-# For external CA with proper chain, set to true
-wazuh_ssl_verify_certificates: ${EXTERNAL_CA:-false}
+# SSL certificate verification
+# When true (default), all HTTPS connections verify certificates.
+# External CA deployments work automatically.
+# Self-signed cert deployments: root-ca.pem is already distributed to all nodes.
+# Set to 'false' ONLY if you cannot trust the CA bundle (not recommended).
+wazuh_ssl_verify_certificates: ${EXTERNAL_CA:-true}
 
 # ═══════════════════════════════════════════════════════════════
 # Security Feature Toggles
@@ -1486,7 +1489,7 @@ EOF
 [defaults]
 inventory = inventory/hosts.yml
 roles_path = roles
-host_key_checking = False
+host_key_checking = True
 retry_files_enabled = False
 gathering = smart
 fact_caching = jsonfile
@@ -1501,7 +1504,7 @@ become_user = root
 
 [ssh_connection]
 pipelining = True
-ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o UserKnownHostsFile=/dev/null
+ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o StrictHostKeyChecking=accept-new
 EOF
 
     print_success "Ansible configuration created: ansible.cfg"
@@ -1524,6 +1527,10 @@ EOF
 
         if [ ! -f "$ANSIBLE_SSH_KEY" ]; then
             ssh-keygen -t ed25519 -f "$ANSIBLE_SSH_KEY" -N "" -C "wazuh-ansible-deploy"
+            if [ ! -f "$ANSIBLE_SSH_KEY" ]; then
+                print_error "SSH key generation failed"
+                exit 1
+            fi
             chmod 600 "$ANSIBLE_SSH_KEY"
             chmod 644 "${ANSIBLE_SSH_KEY}.pub"
             print_success "SSH key pair generated"
@@ -1560,6 +1567,11 @@ EOF
         else
             print_info "Generating vault password..."
             bash "${SCRIPT_DIR}/scripts/manage-vault.sh" init
+            if [ ! -f "${SCRIPT_DIR}/.vault_password" ]; then
+                print_error "Failed to create vault password file"
+                print_info "Try: bash scripts/manage-vault.sh init"
+                exit 1
+            fi
             print_success "Vault password created: .vault_password"
         fi
 
@@ -1568,12 +1580,18 @@ EOF
         VAULT_INDEXER_PASSWORD="$GENERATED_INDEXER_PASSWORD" \
         VAULT_API_PASSWORD="$GENERATED_API_PASSWORD" \
         VAULT_ENROLLMENT_PASSWORD="$GENERATED_ENROLLMENT_PASSWORD" \
+        VAULT_DASHBOARD_ADMIN_PASSWORD="" \
+        VAULT_GRAFANA_API_KEY="" \
         VAULT_ANSIBLE_USER="$ANSIBLE_USER" \
         VAULT_CONNECTION_PASSWORD="${DEFAULT_SSH_PASS:-}" \
         VAULT_BECOME_PASSWORD="${BECOME_PASS:-}" \
         VAULT_HOST_CREDENTIALS="$HOST_CREDENTIALS_STRING" \
         VAULT_CLUSTER_KEY="${MANAGER_CLUSTER_KEY:-}" \
         bash "${SCRIPT_DIR}/scripts/manage-vault.sh" create
+        if [ ! -f "${SCRIPT_DIR}/group_vars/all/vault.yml" ]; then
+            print_error "Vault creation failed"
+            exit 1
+        fi
         print_success "Encrypted credentials stored in: group_vars/all/vault.yml"
 
         print_warning "IMPORTANT: Back up .vault_password securely!"
@@ -1618,6 +1636,10 @@ EOF
                 if [ "$REGEN_CERTS" = "true" ]; then
                     print_info "Regenerating certificates..."
                     bash "${SCRIPT_DIR}/generate-certs.sh"
+                    if [ ! -f "${SCRIPT_DIR}/files/certs/root-ca.pem" ]; then
+                        print_error "Certificate generation failed"
+                        exit 1
+                    fi
                     print_success "Certificates regenerated"
                 else
                     print_info "Using existing certificates"
@@ -1625,6 +1647,10 @@ EOF
             else
                 print_info "Generating self-signed SSL/TLS certificates..."
                 bash "${SCRIPT_DIR}/generate-certs.sh"
+                if [ ! -f "${SCRIPT_DIR}/files/certs/root-ca.pem" ]; then
+                    print_error "Certificate generation failed"
+                    exit 1
+                fi
                 print_success "Certificates generated in files/certs/"
             fi
         else
@@ -1834,47 +1860,43 @@ EOF
     echo -e "  - Keep ${CYAN}keys/wazuh_ansible_key${NC} private (provides host access)"
     echo
 
-    # Display vault password prominently
+    # Prompt user to back up vault password securely
     if [ -f "$SCRIPT_DIR/.vault_password" ]; then
-        print_header "CRITICAL: SAVE YOUR VAULT PASSWORD"
+        print_header "CRITICAL: BACK UP YOUR VAULT PASSWORD"
         echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
-        echo -e "${RED}  ANSIBLE VAULT PASSWORD - SAVE THIS NOW!${NC}"
+        echo -e "${RED}  ANSIBLE VAULT PASSWORD - BACK THIS UP NOW!${NC}"
         echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
         echo
-        echo -e "  ${YELLOW}Vault Password:${NC} ${CYAN}$(cat "$SCRIPT_DIR/.vault_password")${NC}"
+        echo -e "  ${YELLOW}Vault password file:${NC} ${CYAN}$SCRIPT_DIR/.vault_password${NC}"
         echo
         echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
-        echo -e "${YELLOW}⚠ WARNING: You will need this password to:${NC}"
+        echo -e "${YELLOW}⚠ You will need this password to:${NC}"
         echo -e "  - Deploy or redeploy the Wazuh cluster"
         echo -e "  - View or edit encrypted credentials"
-        echo -e "  - Make any changes that require credential access"
+        echo -e "  - Run './scripts/manage-vault.sh view' to see all credentials"
         echo
-        echo -e "${YELLOW}⚠ Store this password securely (password manager, secure vault)${NC}"
-        echo -e "${YELLOW}⚠ The .vault_password file will be needed on this machine${NC}"
+        echo -e "${YELLOW}⚠ BACK UP THIS FILE NOW to a password manager or secure vault.${NC}"
+        echo -e "${YELLOW}⚠ The password is NOT displayed here for security reasons.${NC}"
+        echo -e "${YELLOW}⚠ If lost, your encrypted credentials cannot be recovered.${NC}"
         echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
         echo
     fi
 
-    # Display admin credentials
+    # Remind user about admin credentials (NOT displayed in plaintext)
     print_header "WAZUH ADMIN CREDENTIALS"
     echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}  SAVE THESE CREDENTIALS - THEY ARE STORED IN THE VAULT${NC}"
+    echo -e "${GREEN}  CREDENTIALS ARE ENCRYPTED IN THE ANSIBLE VAULT${NC}"
     echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
     echo
-    echo -e "  ${CYAN}Wazuh Dashboard / Indexer Admin:${NC}"
-    echo -e "    Username: ${YELLOW}${INDEXER_ADMIN_USER}${NC}"
-    echo -e "    Password: ${YELLOW}${GENERATED_INDEXER_PASSWORD}${NC}"
-    echo
-    echo -e "  ${CYAN}Wazuh API:${NC}"
-    echo -e "    Username: ${YELLOW}${API_USER}${NC}"
-    echo -e "    Password: ${YELLOW}${GENERATED_API_PASSWORD}${NC}"
+    echo -e "  ${CYAN}Username:${NC} ${YELLOW}${INDEXER_ADMIN_USER}${NC}"
     echo
     echo -e "  ${CYAN}Dashboard URL:${NC} https://${DASHBOARD_NODES_ARRAY[0]}:${DASHBOARD_PORT}"
     echo -e "  ${CYAN}API URL:${NC} https://${MANAGER_NODES_ARRAY[0]}:${MANAGER_API_PORT}"
     echo
     echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${YELLOW}⚠ These credentials are encrypted in the vault.${NC}"
-    echo -e "${YELLOW}⚠ Use './scripts/manage-vault.sh view' to see them later.${NC}"
+    echo -e "${YELLOW}⚠ Passwords are NOT displayed here for security reasons.${NC}"
+    echo -e "${YELLOW}⚠ To view credentials, run: ./scripts/manage-vault.sh view${NC}"
+    echo -e "${YELLOW}⚠ (You will need the vault password that you just backed up)${NC}"
     echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
     echo
 

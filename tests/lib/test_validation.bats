@@ -220,7 +220,7 @@ setup() {
 # ─── validate_version ──────────────────────────────────────────────────────────
 
 @test "validate_version: accepts standard semver" {
-    validate_version "4.14.1"
+    validate_version "4.14.5"
     validate_version "1.0.0"
     validate_version "10.2.3"
 }
@@ -231,7 +231,7 @@ setup() {
 }
 
 @test "validate_version: rejects version with 'v' prefix" {
-    run validate_version "v4.14.1"
+    run validate_version "v4.14.5"
     [ "$status" -ne 0 ]
 }
 

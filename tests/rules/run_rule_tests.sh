@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # MITRE ATT&CK Rule Test Runner
 # Sends test log samples through wazuh-logtest and reports which rules fired
 #

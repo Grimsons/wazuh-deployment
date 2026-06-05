@@ -36,7 +36,7 @@ ansible-playbook playbooks/backup.yml -e "backup_manager=true backup_indexer=fal
 
 ```bash
 # Create backup with index snapshots (for alert data)
-ansible-playbook playbooks/backup.yml -e "include_indices=true"
+ansible-playbook playbooks/backup.yml -e "backup_indexer_data=true"
 ```
 
 ## What Gets Backed Up

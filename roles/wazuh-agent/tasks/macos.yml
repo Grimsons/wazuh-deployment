@@ -10,6 +10,7 @@
     path: /tmp/wazuh
     state: directory
     mode: '0755'
+  become: true
 
 - name: Assert macOS agent SHA256 is not the placeholder value
   ansible.builtin.assert:
@@ -39,7 +40,7 @@
   become: true
   environment:
     WAZUH_MANAGER: "{{ wazuh_manager_address }}"
-  changed_when: true
+  creates: /Library/Ossec
   when: >
     wazuh_pkg_info.rc != 0 or
     wazuh_version not in (wazuh_pkg_info.stdout | default(''))
@@ -85,9 +86,10 @@
 - name: Load Wazuh Agent service
   ansible.builtin.command: /Library/Ossec/bin/wazuh-control start
   become: true
-  changed_when: true
+  changed_when: false
 
 - name: Clean up temp files
   ansible.builtin.file:
     path: /tmp/wazuh
     state: absent
+  become: true

@@ -72,6 +72,7 @@
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200, 302]
   register: dashboard_health
+  no_log: true
   until: dashboard_health.status | default(0) in [200, 302]
   retries: "{{ wazuh_dashboard_health_check_retries }}"
   delay: "{{ wazuh_dashboard_health_check_delay }}"

@@ -391,7 +391,7 @@ build_ssh_opts() {
 
     if [ "$INSECURE_SSH" = "true" ]; then
         # Insecure mode - disable host key checking (NOT recommended)
-        opts="$opts -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+        opts="$opts -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null"
     else
         # Secure mode - use project-local known_hosts
         touch "$KNOWN_HOSTS_FILE" 2>/dev/null || true
@@ -483,16 +483,18 @@ deploy_to_host() {
 
     # Build the sudo command based on authentication mode
     local exec_cmd
+    local escaped_prep
+    printf -v escaped_prep '%q' "$prep_cmd"
     if [ "$REMOTE_USER" = "root" ]; then
         # Running as root, no sudo needed
-        exec_cmd="bash -c '$prep_cmd'"
+        exec_cmd="bash -c $escaped_prep"
     elif [ "$ASK_BECOME_PASS" = "true" ] && [ -n "$BECOME_PASSWORD" ]; then
         # Pass the sudo password via stdin to avoid exposure in remote process argv.
         # The password is never part of the SSH command string or remote argv.
-        exec_cmd="sudo -S bash -c '$prep_cmd'"
+        exec_cmd="sudo -S bash -c $escaped_prep"
     else
         # Use sudo without password (assumes NOPASSWD or already root)
-        exec_cmd="sudo bash -c '$prep_cmd'"
+        exec_cmd="sudo bash -c $escaped_prep"
     fi
 
     if [ "$ASK_BECOME_PASS" = "true" ] && [ -n "$BECOME_PASSWORD" ]; then
@@ -584,7 +586,8 @@ verify_deployment() {
     for host in "${HOSTS[@]}"; do
         print_info "Testing: $host"
 
-        local ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -p $SSH_PORT"
+        local known_hosts="${KNOWN_HOSTS_FILE:-/dev/null}"
+        local ssh_opts="-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$known_hosts -o ConnectTimeout=10 -p $SSH_PORT"
 
         # Test with new Ansible user and key
         if ssh $ssh_opts -i "$SSH_KEY" "${ANSIBLE_USER}@${host}" "echo 'Ansible user OK'" &>/dev/null; then

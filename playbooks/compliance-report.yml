@@ -4,10 +4,10 @@
 #
 # Usage:
 #   Full compliance report:
-#     ansible-playbook playbooks/compliance-report.yml
+#     ansible-playbook playbooks/compliance-report.yml -i inventory/hosts.yml
 #
 #   SCA-only report:
-#     ansible-playbook playbooks/compliance-report.yml --tags sca
+#     ansible-playbook playbooks/compliance-report.yml -i inventory/hosts.yml --tags sca
 #
 #   Vulnerability-only report:
 #     ansible-playbook playbooks/compliance-report.yml --tags vulnerability

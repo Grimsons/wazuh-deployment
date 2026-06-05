@@ -26,7 +26,7 @@
     export JAVA_HOME=/usr/share/wazuh-indexer/jdk
     _tmp=$(mktemp /dev/shm/.hash_XXXXXX 2>/dev/null || mktemp)
     chmod 600 "$_tmp"
-    printf '%s' '{{ wazuh_admin_password }}' > "$_tmp"
+    printf '%s' {{ wazuh_admin_password | quote }} > "$_tmp"
     # hash.sh only accepts -p; temp file limits window vs inline expansion
     _hash=$(/usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p "$(cat "$_tmp")")
     shred -u "$_tmp" 2>/dev/null || rm -f "$_tmp"
@@ -63,11 +63,11 @@
     export JAVA_HOME=/usr/share/wazuh-indexer/jdk
     /usr/share/wazuh-indexer/plugins/opensearch-security/tools/securityadmin.sh \
       -cd /etc/wazuh-indexer/opensearch-security \
-      -cacert {{ wazuh_indexer_certs_path }}/root-ca.pem \
-      -cert {{ wazuh_indexer_certs_path }}/admin.pem \
-      -key {{ wazuh_indexer_certs_path }}/admin-key.pem \
+      -cacert {{ wazuh_indexer_certs_path | quote }}/root-ca.pem \
+      -cert {{ wazuh_indexer_certs_path | quote }}/admin.pem \
+      -key {{ wazuh_indexer_certs_path | quote }}/admin-key.pem \
       -h 127.0.0.1 \
-      -p {{ wazuh_indexer_http_port }} \
+      -p {{ wazuh_indexer_http_port | quote }} \
       -icl
   become: true
   register: security_update

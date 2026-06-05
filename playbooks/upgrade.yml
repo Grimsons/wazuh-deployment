@@ -9,36 +9,36 @@
 #
 # How it works:
 #   - Uses native package managers with state=latest
-#   - Compares installed version against wazuh_version in group_vars/all.yml
+#   - Compares installed version against wazuh_version in group_vars/all/main.yml
 #   - Only stops/starts services if an upgrade is actually needed
 #   - Creates automatic backup before any changes
 #
 # Usage:
 #   # Check current versions only (no changes)
-#   ansible-playbook playbooks/upgrade.yml --tags check
+#   ansible-playbook playbooks/upgrade.yml -i inventory/hosts.yml --tags check
 #
 #   # Full upgrade (uses Wazuh repository's latest packages)
-#   ansible-playbook playbooks/upgrade.yml
+#   ansible-playbook playbooks/upgrade.yml -i inventory/hosts.yml
 #
 #   # Upgrade specific components
-#   ansible-playbook playbooks/upgrade.yml --tags indexer
-#   ansible-playbook playbooks/upgrade.yml --tags manager
-#   ansible-playbook playbooks/upgrade.yml --tags dashboard
+#   ansible-playbook playbooks/upgrade.yml -i inventory/hosts.yml --tags indexer
+#   ansible-playbook playbooks/upgrade.yml -i inventory/hosts.yml --tags manager
+#   ansible-playbook playbooks/upgrade.yml -i inventory/hosts.yml --tags dashboard
 #
 #   # Include agent upgrades (disabled by default)
-#   ansible-playbook playbooks/upgrade.yml -e "upgrade_agents=true"
+#   ansible-playbook playbooks/upgrade.yml -i inventory/hosts.yml -e "upgrade_agents=true"
 #
 #   # Skip backup (not recommended)
-#   ansible-playbook playbooks/upgrade.yml -e "backup_before_upgrade=false"
+#   ansible-playbook playbooks/upgrade.yml -i inventory/hosts.yml -e "backup_before_upgrade=false"
 #
 #   # Skip confirmation prompt
-#   ansible-playbook playbooks/upgrade.yml -e "skip_confirmation=true"
+#   ansible-playbook playbooks/upgrade.yml -i inventory/hosts.yml -e "skip_confirmation=true"
 #
 # IMPORTANT:
 #   - Backup is created automatically before any upgrade
 #   - Upgrade order: Indexer → Manager → Dashboard → Agents
 #   - For clusters: Rolling upgrade one node at a time
-#   - Update wazuh_version in group_vars/all.yml to match target version
+#   - Update wazuh_version in group_vars/all/main.yml to match target version
 #
 # Rollback:
 #   ansible-playbook playbooks/restore.yml -e "restore_from=pre-upgrade-TIMESTAMP"
@@ -70,7 +70,7 @@
           ERROR: Invalid or missing target version!
 
           Specify version with: -e "target_version=4.15.0"
-          Or set wazuh_version in group_vars/all.yml
+           Or set wazuh_version in group_vars/all/main.yml
 
           Current value: {{ target_version | default('not set') }}
         success_msg: "Target version: {{ target_version }}"
@@ -285,7 +285,7 @@
         - name: Run backup playbook
           ansible.builtin.command:
             cmd: >
-              ansible-playbook {{ playbook_dir }}/backup.yml
+              ansible-playbook {{ playbook_dir | quote }}/backup.yml
               -e "backup_dest={{ playbook_dir }}/../backups"
               -e "backup_timestamp=pre-upgrade-{{ upgrade_timestamp }}"
               -e "backup_indexer=true"
@@ -457,11 +457,11 @@
         export JAVA_HOME=/usr/share/wazuh-indexer/jdk
         /usr/share/wazuh-indexer/plugins/opensearch-security/tools/securityadmin.sh \
           -cd /etc/wazuh-indexer/opensearch-security \
-          -cacert {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') }}/root-ca.pem \
-          -cert {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') }}/admin.pem \
-          -key {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') }}/admin-key.pem \
+          -cacert {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') | quote }}/root-ca.pem \
+          -cert {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') | quote }}/admin.pem \
+          -key {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') | quote }}/admin-key.pem \
           -h 127.0.0.1 \
-          -p {{ wazuh_indexer_http_port | default(9200) }} \
+          -p {{ wazuh_indexer_http_port | default(9200) | quote }} \
           -icl
       become: true
       register: security_reapply

@@ -9,7 +9,7 @@ output.elasticsearch:
 {% endfor %}
   protocol: https
   username: "{{ wazuh_indexer_admin_user }}"
-  password: "{{ wazuh_indexer_admin_password }}"
+  password: "{{ wazuh_indexer_admin_password | default('') }}"
   ssl.certificate_authorities:
     - /etc/filebeat/certs/root-ca.pem
   ssl.certificate: "/etc/filebeat/certs/filebeat.pem"

@@ -41,7 +41,7 @@ generate_password() {
     password="${password}${upper}${lower}${number}${symbol}"
 
     # Shuffle the password to distribute special chars
-    password=$(echo "$password" | fold -w1 | shuf | tr -d '\n')
+    password=$(echo "$password" | fold -w1 | shuf --random-source=/dev/urandom | tr -d '\n')
 
     echo "$password"
 }
@@ -60,7 +60,7 @@ generate_yaml_safe_password() {
     symbol_idx=$(head -c 4 /dev/urandom | od -An -tu4 | tr -d ' ')
     symbol="${symbols:$((symbol_idx % ${#symbols})):1}"
     password="${password}${upper}${lower}${number}${symbol}"
-    echo "$password" | fold -w1 | shuf | tr -d '\n'
+    echo "$password" | fold -w1 | shuf --random-source=/dev/urandom | tr -d '\n'
 }
 
 # Generate hex key (for cluster keys)

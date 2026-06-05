@@ -54,10 +54,10 @@
   ansible.builtin.shell: |
     set -o pipefail
     HASH_FILE=/var/ossec/etc/.keystore_username_hash
-    NEW_HASH=$(printf '%s' '{{ wazuh_indexer_admin_user | default("admin") }}' | sha256sum | cut -d' ' -f1)
+    NEW_HASH=$(printf '%s' {{ wazuh_indexer_admin_user | default("admin") | quote }} | sha256sum | cut -d' ' -f1)
     OLD_HASH=$(cat "$HASH_FILE" 2>/dev/null || echo "")
     if [ "$NEW_HASH" != "$OLD_HASH" ]; then
-      printf '%s' '{{ wazuh_indexer_admin_user | default("admin") }}' | /var/ossec/bin/wazuh-keystore -f indexer -k username
+      printf '%s' {{ wazuh_indexer_admin_user | default("admin") | quote }} | /var/ossec/bin/wazuh-keystore -f indexer -k username
       echo "$NEW_HASH" > "$HASH_FILE"
       chmod 600 "$HASH_FILE"
       chown wazuh:wazuh "$HASH_FILE"
@@ -77,10 +77,10 @@
   ansible.builtin.shell: |
     set -o pipefail
     HASH_FILE=/var/ossec/etc/.keystore_password_hash
-    NEW_HASH=$(printf '%s' '{{ wazuh_indexer_admin_password }}' | sha256sum | cut -d' ' -f1)
+    NEW_HASH=$(printf '%s' {{ wazuh_indexer_admin_password | quote }} | sha256sum | cut -d' ' -f1)
     OLD_HASH=$(cat "$HASH_FILE" 2>/dev/null || echo "")
     if [ "$NEW_HASH" != "$OLD_HASH" ]; then
-      printf '%s' '{{ wazuh_indexer_admin_password }}' | /var/ossec/bin/wazuh-keystore -f indexer -k password
+      printf '%s' {{ wazuh_indexer_admin_password | quote }} | /var/ossec/bin/wazuh-keystore -f indexer -k password
       echo "$NEW_HASH" > "$HASH_FILE"
       chmod 600 "$HASH_FILE"
       chown wazuh:wazuh "$HASH_FILE"

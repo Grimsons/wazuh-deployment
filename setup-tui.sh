@@ -299,7 +299,7 @@ select_profile() {
 configure_general() {
     section "General Settings"
 
-    WAZUH_VERSION=$(gum input --prompt "Wazuh Version: " --value "4.14.1" --placeholder "4.14.1")
+    WAZUH_VERSION=$(gum input --prompt "Wazuh Version: " --value "4.14.5" --placeholder "4.14.5")
     success "Version: $WAZUH_VERSION"
 
     ENVIRONMENT=$(gum choose --header "Environment" "production" "staging" "development")
@@ -602,7 +602,7 @@ generate_config() {
 [defaults]
 inventory = inventory/hosts.yml
 roles_path = roles
-host_key_checking = False
+host_key_checking = True
 retry_files_enabled = False
 gathering = smart
 fact_caching = jsonfile
@@ -617,7 +617,7 @@ become_user = root
 
 [ssh_connection]
 pipelining = True
-ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o UserKnownHostsFile=/dev/null
+ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o StrictHostKeyChecking=accept-new
 EOF
 
     success "Created: ansible.cfg"
@@ -903,7 +903,9 @@ EOF
 # ═══════════════════════════════════════════════════════════════
 wazuh_use_external_ca: ${EXTERNAL_CA:-false}
 wazuh_certs_path: "files/certs"
-wazuh_ssl_verify_certificates: ${EXTERNAL_CA:-false}
+# TLS verification is ON by default. root-ca.pem is distributed to all nodes.
+# Set to false only if you cannot use trusted certificates.
+wazuh_ssl_verify_certificates: ${EXTERNAL_CA:-true}
 
 # ═══════════════════════════════════════════════════════════════
 # Security Features
@@ -1013,6 +1015,9 @@ EOF
 
         VAULT_INDEXER_PASSWORD="$GENERATED_INDEXER_PASSWORD" \
         VAULT_API_PASSWORD="$GENERATED_API_PASSWORD" \
+        VAULT_ENROLLMENT_PASSWORD="${GENERATED_ENROLLMENT_PASSWORD:-}" \
+        VAULT_DASHBOARD_ADMIN_PASSWORD="" \
+        VAULT_GRAFANA_API_KEY="" \
         VAULT_CLUSTER_KEY="${MANAGER_CLUSTER_KEY:-}" \
         VAULT_CONNECTION_PASSWORD="${DEFAULT_SSH_PASS:-}" \
         VAULT_ANSIBLE_USER="${ANSIBLE_USER:-wazuh-deploy}" \
@@ -1109,11 +1114,13 @@ EOF
             --border rounded \
             --border-foreground "#FF6B6B" \
             --padding "1 2" \
-            "⚠️  SAVE YOUR VAULT PASSWORD!
+            "SAVE YOUR VAULT PASSWORD FILE!
 
-$(cat "$SCRIPT_DIR/.vault_password")
+Vault password file location: $SCRIPT_DIR/.vault_password
 
-Store this securely - you'll need it for deployment!"
+The password is NOT displayed here for security reasons.
+Store this file in a password manager or secure vault.
+You will need it to view credentials and redeploy."
     fi
 }
 

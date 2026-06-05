@@ -14,6 +14,9 @@ wazuh_repo_url_yum: "https://packages.wazuh.com/4.x/yum/"
 wazuh_manager_config_path: /var/ossec/etc/ossec.conf
 wazuh_manager_log_path: /var/ossec/logs
 
+# Agent communication port (shared across roles, default: 1514)
+wazuh_manager_agent_port: 1514
+
 # ═══════════════════════════════════════════════════════════════
 # API Authentication Settings
 # ═══════════════════════════════════════════════════════════════
@@ -28,6 +31,7 @@ wazuh_api_check_delay: 10
 wazuh_service_start_timeout: 300
 
 # API settings
+wazuh_manager_api_port: 55000
 wazuh_manager_api_bind_addr: "0.0.0.0"
 wazuh_manager_api_https: true
 # "auto" enables TLS 1.3 negotiation when the client supports it (falls back to TLS 1.2)
@@ -55,7 +59,20 @@ wazuh_allow_agents_from_any: false
 # e.g. wazuh_agent_networks: ["10.0.0.0/8", "172.16.0.0/12"]
 wazuh_agent_networks: []
 
+# Firewall management (wazuh_configure_firewall must be true for OS firewall rules to apply)
+wazuh_configure_firewall: false
+wazuh_allowed_agent_networks: []
+wazuh_allowed_cluster_networks: []
+
+# Firewall: Open agent port on UDP (default: false)
+# When wazuh_agent_tls_enabled is true (default), agents use TLS over TCP only.
+# UDP on port 1514 is only needed for legacy non-TLS agent connections.
+wazuh_manager_firewall_agent_udp_enabled: false
+
 # Agent enrollment - SECURE DEFAULTS
+# Max agents allowed to enroll. 'yes' = Wazuh default (~3000).
+# Set to an integer (e.g. wazuh_authd_max_agents: 500) for explicit control.
+wazuh_authd_max_agents: 'yes'
 wazuh_authd_enabled: true
 wazuh_authd_use_source_ip: false
 wazuh_authd_purge: false
@@ -75,6 +92,10 @@ wazuh_manager_cluster_node_type: "master"
 wazuh_manager_cluster_key: ""
 wazuh_manager_cluster_port: 1516
 wazuh_manager_cluster_bind_addr: "0.0.0.0"
+
+# Backward-compatible aliases (legacy bare-name vars)
+manager_node_name: "{{ wazuh_manager_cluster_node_name }}"
+manager_node_type: "{{ wazuh_manager_cluster_node_type }}"
 
 # Alert output formats
 wazuh_jsonout_output: true           # JSON output for alerts (alerts.json)
@@ -448,6 +469,10 @@ wazuh_logcollector_max_files: 256
 #     value: "0"
 
 # Indexer connection
+# Index alias names (shared with indexer role; duplicated here for self-contained manager role)
+wazuh_alerts_alias: "wazuh-alerts"
+wazuh_archives_alias: "wazuh-archives"
+
 wazuh_indexer_connection_enabled: true
 
 # Filebeat settings (for alert forwarding to indexer)
@@ -477,7 +502,7 @@ wazuh_filebeat_template_sha256: "sha256:PLACEHOLDER_VERIFY_BEFORE_USE"
 # Only role-specific extras are defined here - the base agent templates
 # already handle platform-specific log sources, FIM, and modules.
 #
-# Override or extend in group_vars/all.yml to customize for your environment.
+# Override or extend in group_vars/all/main.yml to customize for your environment.
 wazuh_agent_groups:
 
   # ── Linux Groups ──────────────────────────────────────────────

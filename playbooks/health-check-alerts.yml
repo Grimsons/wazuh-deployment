@@ -12,7 +12,7 @@
 #   -e "alert_file=true"              - Write alerts to file (for monitoring)
 #   -e "alert_on_warning=true"        - Also alert on warnings (not just critical)
 #
-# Configuration (in group_vars/all.yml):
+# Configuration (in group_vars/all/main.yml):
 #   health_alert_email_to: "admin@example.com"
 #   health_alert_slack_webhook: "https://hooks.slack.com/..."
 #   health_alert_webhook_url: "https://your-monitoring-system/webhook"

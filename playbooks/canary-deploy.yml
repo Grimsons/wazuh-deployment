@@ -4,10 +4,10 @@
 #
 # Usage:
 #   Full staged deployment:
-#     ansible-playbook playbooks/canary-deploy.yml
+#     ansible-playbook playbooks/canary-deploy.yml -i inventory/hosts.yml
 #
 #   Deploy only agents in batches:
-#     ansible-playbook playbooks/canary-deploy.yml --tags agents
+#     ansible-playbook playbooks/canary-deploy.yml -i inventory/hosts.yml --tags agents
 #
 #   Skip health check gates (not recommended):
 #     ansible-playbook playbooks/canary-deploy.yml -e "skip_health_gates=true"
@@ -224,10 +224,18 @@
   tags: [always]
 
   tasks:
-    - name: Run health check
-      ansible.builtin.include_tasks:
-        file: "{{ playbook_dir }}/health-check.yml"
+    - name: Run health check playbook
+      ansible.builtin.command:
+        cmd: >
+          ansible-playbook {{ playbook_dir | quote }}/health-check.yml
+          -i {{ playbook_dir | quote }}/../inventory/hosts.yml
+      environment:
+        ANSIBLE_VAULT_PASSWORD_FILE: "{{ playbook_dir }}/../.vault_password"
+      args:
+        chdir: "{{ playbook_dir }}/.."
       when: not (skip_health_gates | default(false) | bool)
+      register: health_check_result
+      changed_when: false
       ignore_errors: true
 
     - name: Deployment complete

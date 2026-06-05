@@ -9,7 +9,7 @@ driver:
 
 platforms:
   - name: wazuh-agent-ubuntu
-    image: geerlingguy/docker-ubuntu2204-ansible:latest
+    image: geerlingguy/docker-ubuntu2404-ansible:latest
     pre_build_image: true
     privileged: true
     volumes:
@@ -33,6 +33,7 @@ provisioner:
       all:
         wazuh_version: "4.14.5"
         wazuh_manager_address: "127.0.0.1"
+        # CI-TEST-ONLY: replace with vault variable for production
         wazuh_agent_enrollment_password: "TestPass1234@"
         wazuh_ssl_verify_certificates: false
 

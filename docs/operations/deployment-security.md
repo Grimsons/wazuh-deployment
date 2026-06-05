@@ -13,7 +13,7 @@ All credentials are encrypted using Ansible Vault by default:
 | `.vault_password` | Encryption key for Ansible Vault (KEEP SECURE!) |
 | `group_vars/all/vault.yml` | Encrypted credentials storage |
 
-Credentials are displayed at the end of `setup.sh` and stored only in the encrypted vault.
+Credentials are shown once on stdout at the end of `setup.sh` (not logged to any file) and stored encrypted in the Ansible Vault.
 
 ### Vault Management Commands
 

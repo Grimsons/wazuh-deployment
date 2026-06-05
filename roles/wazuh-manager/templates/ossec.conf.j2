@@ -10,11 +10,11 @@
     <logall>{{ 'yes' if wazuh_logall | default(false) else 'no' }}</logall>
     <logall_json>{{ 'yes' if wazuh_logall_json | default(false) else 'no' }}</logall_json>
     <!-- Email notifications -->
-    <email_notification>{{ 'yes' if wazuh_email_notification_enabled else 'no' }}</email_notification>
-{% if wazuh_email_notification_enabled %}
-    <smtp_server>{{ wazuh_email_smtp_server }}</smtp_server>
-    <email_from>{{ wazuh_email_from }}</email_from>
-    <email_to>{{ wazuh_email_to }}</email_to>
+    <email_notification>{{ 'yes' if wazuh_email_notification_enabled | default(false) else 'no' }}</email_notification>
+{% if wazuh_email_notification_enabled | default(false) %}
+    <smtp_server>{{ wazuh_email_smtp_server | default('') }}</smtp_server>
+    <email_from>{{ wazuh_email_from | default('') }}</email_from>
+    <email_to>{{ wazuh_email_to | default('') }}</email_to>
 {% endif %}
     <email_maxperhour>{{ wazuh_email_maxperhour | default(12) }}</email_maxperhour>
     <email_log_source>alerts.log</email_log_source>
@@ -74,10 +74,10 @@
   <!-- Cluster Configuration -->
 {% if wazuh_manager_cluster_enabled | default(false) %}
   <cluster>
-    <name>{{ wazuh_manager_cluster_name }}</name>
-    <node_name>{{ manager_node_name | default('manager-1') }}</node_name>
-    <node_type>{{ manager_node_type | default('master') }}</node_type>
-    <key>{{ wazuh_manager_cluster_key }}</key>
+    <name>{{ wazuh_manager_cluster_name | default('wazuh-cluster') }}</name>
+    <node_name>{{ wazuh_manager_cluster_node_name | default('manager-1') }}</node_name>
+    <node_type>{{ wazuh_manager_cluster_node_type | default('master') }}</node_type>
+    <key>{{ wazuh_manager_cluster_key | default('') }}</key>
     <port>{{ wazuh_manager_cluster_port | default(1516) }}</port>
     <bind_addr>{{ wazuh_manager_cluster_bind_addr | default('0.0.0.0') }}</bind_addr>
     <nodes>
@@ -91,7 +91,7 @@
 {% else %}
   <cluster>
     <name>wazuh</name>
-    <node_name>{{ manager_node_name | default('manager-1') }}</node_name>
+      <node_name>{{ wazuh_manager_cluster_node_name | default("manager-1") }}</node_name>
     <node_type>master</node_type>
     <key></key>
     <port>1516</port>
@@ -275,6 +275,24 @@
     <!-- How long to wait before closing idle agent sessions (frees resources) -->
     <rids_closing_time>{{ wazuh_remote_rids_closing_time | default('5m') }}</rids_closing_time>
   </remote>
+
+{% if wazuh_agent_tls_enabled | default(true) %}
+  <!-- TLS encrypted agent connections -->
+  <remote>
+    <connection>secure</connection>
+    <port>{{ wazuh_manager_agent_port | default(1514) }}</port>
+    <protocol>tls</protocol>
+    <ssl>
+      <certificate>/var/ossec/etc/certs/server.pem</certificate>
+      <key>/var/ossec/etc/certs/server-key.pem</key>
+      <certificate_authorities>
+        <ca>/var/ossec/etc/certs/root-ca.pem</ca>
+      </certificate_authorities>
+    </ssl>
+    <queue_size>{{ wazuh_remote_queue_size | default(131072) }}</queue_size>
+    <rids_closing_time>{{ wazuh_remote_rids_closing_time | default('5m') }}</rids_closing_time>
+  </remote>
+{% endif %}
 
   <!-- Remote syslog listeners (for network devices: Cisco DNA Center, firewalls, etc.) -->
 {% if wazuh_syslog_listeners is defined and wazuh_syslog_listeners | length > 0 %}
@@ -514,8 +532,8 @@
     <disabled>no</disabled>
     <interval>{{ wazuh_gcp_interval | default('1m') }}</interval>
     <run_on_start>{{ 'yes' if wazuh_gcp_run_on_start | default(true) else 'no' }}</run_on_start>
-    <project_id>{{ wazuh_gcp_project_id }}</project_id>
-    <subscription_name>{{ wazuh_gcp_subscription_name }}</subscription_name>
+    <project_id>{{ wazuh_gcp_project_id | default('') }}</project_id>
+    <subscription_name>{{ wazuh_gcp_subscription_name | default('') }}</subscription_name>
 {% if wazuh_gcp_credentials_file is defined %}
     <credentials_file>{{ wazuh_gcp_credentials_file }}</credentials_file>
 {% endif %}
@@ -567,7 +585,7 @@
 {% if wazuh_syslog_output_enabled | default(false) %}
   <!-- Syslog Output -->
   <syslog_output>
-    <server>{{ wazuh_syslog_output_server }}</server>
+    <server>{{ wazuh_syslog_output_server | default('') }}</server>
     <port>{{ wazuh_syslog_output_port | default(514) }}</port>
     <format>{{ wazuh_syslog_output_format | default('default') }}</format>
 {% if wazuh_syslog_output_level is defined %}

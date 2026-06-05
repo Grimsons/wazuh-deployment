@@ -66,7 +66,7 @@ generate_password() {
     symbol_idx=$(head -c 4 /dev/urandom | od -An -tu4 | tr -d ' ')
     symbol="${symbols:$((symbol_idx % ${#symbols})):1}"
     password="${password}${upper}${lower}${number}${symbol}"
-    echo "$password" | fold -w1 | shuf | tr -d '\n'
+    echo "$password" | fold -w1 | shuf --random-source=/dev/urandom | tr -d '\n'
 }
 
 # Extract a YAML scalar value from a file
@@ -414,7 +414,7 @@ cat > "$NEW_MAIN_YML" << EOF
 # ═══════════════════════════════════════════════════════════════
 # General Settings
 # ═══════════════════════════════════════════════════════════════
-wazuh_version: "${WAZUH_VERSION:-4.14.2}"
+wazuh_version: "${WAZUH_VERSION:-4.14.5}"
 environment_name: "${ENVIRONMENT_NAME:-production}"
 organization_name: "${ORGANIZATION_NAME:-MyOrganization}"
 

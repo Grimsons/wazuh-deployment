@@ -18,7 +18,15 @@ wazuh_indexer_log_path: /var/log/wazuh-indexer
 # Network settings
 wazuh_indexer_http_port: 9200
 wazuh_indexer_transport_port: 9300
-wazuh_indexer_network_host: "0.0.0.0"
+# Bind to localhost for single-node. Override to "0.0.0.0" for multi-node clusters.
+wazuh_indexer_network_host: "127.0.0.1"
+
+# Dashboard nodes (for firewall rules — override in group_vars for multi-node deployments)
+wazuh_dashboard_nodes: []
+
+# Firewall management
+wazuh_configure_firewall: false
+wazuh_allowed_cluster_networks: []
 
 # Cluster settings
 wazuh_indexer_cluster_name: "wazuh-cluster"
@@ -127,3 +135,7 @@ wazuh_alerts_alias: "wazuh-alerts"
 wazuh_archives_alias: "wazuh-archives"
 wazuh_monitoring_alias: "wazuh-monitoring"
 wazuh_statistics_alias: "wazuh-statistics"
+
+# Index retention overrides (specific to monitoring/statistics — overrides wazuh_retention_days)
+wazuh_monitoring_retention_days: 7
+wazuh_statistics_retention_days: 7

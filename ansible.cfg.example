@@ -5,6 +5,9 @@
 [defaults]
 inventory = inventory/hosts.yml
 roles_path = roles
+# SECURITY: Verify SSH host keys on first connection (prevents MITM attacks)
+# Set up known_hosts via: ssh-keyscan <hosts> >> .known_hosts
+# Or use 'accept-new' for automated deploys: ssh_args = -o StrictHostKeyChecking=accept-new -o ControlMaster=auto -o ControlPersist=60s
 host_key_checking = True
 retry_files_enabled = False
 gathering = smart
@@ -21,6 +24,9 @@ forks = 10
 # Output formatting
 stdout_callback = yaml
 # callback_whitelist = profile_tasks
+
+# Vault password file — set this or export ANSIBLE_VAULT_PASSWORD_FILE=.vault_password
+# vault_password_file = .vault_password
 
 [privilege_escalation]
 become = True

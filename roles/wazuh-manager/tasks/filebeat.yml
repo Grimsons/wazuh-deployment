@@ -152,7 +152,7 @@
   become: true
 
 - name: Verify Filebeat certificate files
-  ansible.builtin.command: openssl x509 -noout -subject -issuer -dates -in /etc/filebeat/certs/{{ item }}
+  ansible.builtin.command: openssl x509 -noout -subject -issuer -dates -in /etc/filebeat/certs/{{ item | quote }}
   become: true
   register: filebeat_cert_verify
   changed_when: false
@@ -177,6 +177,7 @@
     group: root
     mode: '0600'
   become: true
+  no_log: true
   notify: restart filebeat
 
 # Filebeat 7.10.2 has two Go runtime issues on modern Linux:
@@ -255,6 +256,7 @@
         force_basic_auth: true
         validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
       register: indexer_precheck
+      no_log: true
       retries: 3
       delay: 10
       until: indexer_precheck.status | default(0) == 200

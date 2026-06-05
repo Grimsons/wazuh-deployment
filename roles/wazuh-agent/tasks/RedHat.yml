@@ -5,6 +5,7 @@
     url: "{{ wazuh_agent_amd64_rpm }}"
     dest: "{{ wazuh_agent_package_download_path }}/{{ wazuh_agent_package_name }}_{{ ansible_facts.architecture }}.rpm"
     mode: '0644'
+  become: true
   when:
     - ansible_facts.architecture == "x86_64"
 
@@ -13,5 +14,6 @@
     url: "{{ wazuh_agent_arm64_rpm }}"
     dest: "{{ wazuh_agent_package_download_path }}/{{ wazuh_agent_package_name }}_{{ ansible_facts.architecture }}.rpm"
     mode: '0644'
+  become: true
   when:
     - ansible_facts.architecture == "aarch64"

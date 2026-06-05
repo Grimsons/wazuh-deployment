@@ -44,7 +44,10 @@ ansible-playbook site.yml --tags bootstrap,all --ask-pass
 # Or use the make shortcut:
 make deploy-bootstrap
 
-# 2. Subsequent deployments (uses SSH key auth from bootstrap)
+# 2. Bootstrap only (if using separate bootstrap playbook)
+ansible-playbook playbooks/bootstrap-hosts.yml -i inventory/bootstrap.yml --ask-pass
+
+# 3. Subsequent deployments (uses SSH key auth from bootstrap)
 ansible-playbook site.yml
 
 # Or use the make shortcut:
@@ -222,6 +225,32 @@ Default hardening settings (already configured):
 - [ ] Vault password stored securely offline
 - [ ] Regular credential rotation scheduled
 
+### Secrets Integration
+
+The secrets integration playbook syncs credentials from Ansible Vault to external secret managers:
+
+```bash
+# Sync vault credentials to external secret manager
+ansible-playbook playbooks/secrets-integration.yml
+```
+
+Supports HashiCorp Vault, AWS Secrets Manager, and Azure Key Vault backends.
+Configure the target backend in `group_vars/all/main.yml` under the `wazuh_secrets_integration` key.
+
+### Compliance Report
+
+Generate a compliance report summarizing the security posture of your deployment:
+
+```bash
+# Generate and save compliance report
+ansible-playbook playbooks/compliance-report.yml
+
+# Save report to specific path
+ansible-playbook playbooks/compliance-report.yml -e "report_path=/tmp/compliance-$(date +%Y%m%d).json"
+```
+
+Reports cover TLS settings, credential rotation status, certificate expiry, firewall rules, and security hardening configuration.
+
 ---
 
 ## Maintenance Schedule
@@ -272,7 +301,7 @@ ansible-playbook playbooks/backup.yml
 make backup
 
 # Backup with index snapshots (larger, includes alert data)
-ansible-playbook playbooks/backup.yml -e "include_indices=true"
+ansible-playbook playbooks/backup.yml -e "backup_indexer_data=true"
 ```
 
 ### What Gets Backed Up
@@ -411,7 +440,7 @@ ansible-playbook playbooks/upgrade.yml
 make upgrade
 
 # Upgrade to specific version
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0"
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.14.5"
 ```
 
 ### Post-Upgrade Verification

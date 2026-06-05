@@ -3,10 +3,10 @@
 # This playbook configures scheduled maintenance tasks based on group_vars settings
 #
 # Usage:
-#   ansible-playbook playbooks/setup-maintenance-cron.yml
+#   ansible-playbook playbooks/setup-maintenance-cron.yml -i inventory/hosts.yml
 #
 # This playbook is automatically included in site.yml post-deployment
-# Configuration is read from group_vars/all.yml:
+# Configuration is read from group_vars/all/main.yml:
 #   - wazuh_backup_schedule: daily, weekly, or disabled
 #   - wazuh_backup_hour: Hour to run backup (0-23)
 #   - wazuh_backup_day: Day for weekly backup (0=Sun, 6=Sat)
@@ -208,7 +208,7 @@
             - Backup logs: {{ logs_dir }}/backup-cron.log
             - Cleanup logs: {{ logs_dir }}/log-cleanup-cron.log
 
-          To modify settings, edit group_vars/all.yml and re-run:
+          To modify settings, edit group_vars/all/main.yml and re-run:
             ansible-playbook playbooks/setup-maintenance-cron.yml
 
           To disable all maintenance cron jobs:

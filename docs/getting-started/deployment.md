@@ -66,7 +66,7 @@ brew install gum
 #### CLI Setup (setup.sh)
 
 The traditional wizard guides you through:
-- Wazuh version selection (default: 4.14.2)
+- Wazuh version selection (default: 4.14.5)
 - Node IP addresses (indexer, manager, dashboard)
 - Agent hosts (optional)
 - Security features (vulnerability detection, FIM, SCA, etc.)
@@ -254,7 +254,7 @@ all:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `wazuh_version` | Wazuh version to install | 4.14.2 |
+| `wazuh_version` | Wazuh version to install | 4.14.5 |
 | `wazuh_indexer_http_port` | Indexer HTTP port | 9200 |
 | `wazuh_manager_api_port` | Manager API port | 55000 |
 | `wazuh_dashboard_port` | Dashboard HTTPS port | 443 |
