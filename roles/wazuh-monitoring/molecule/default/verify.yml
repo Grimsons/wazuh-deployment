@@ -1,0 +1,49 @@
+---
+- name: Verify monitoring deployment
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Check Python exporter scripts exist
+      ansible.builtin.stat:
+        path: "/usr/local/bin/{{ item }}"
+      register: exporter_scripts
+      loop:
+        - wazuh-indexer-exporter.py
+        - wazuh-manager-exporter.py
+
+    - name: Assert exporter scripts are deployed
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+        fail_msg: "Exporter script not found: {{ item.item }}"
+      loop: "{{ exporter_scripts.results }}"
+      when: wazuh_monitoring_enabled | default(true)
+
+    - name: Check systemd service units exist
+      ansible.builtin.stat:
+        path: "/etc/systemd/system/{{ item }}"
+      register: service_units
+      loop:
+        - opensearch-exporter.service
+        - wazuh-manager-exporter.service
+
+    - name: Assert systemd service units exist
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+        fail_msg: "Service unit not found: {{ item.item }}"
+      loop: "{{ service_units.results }}"
+      when: wazuh_monitoring_enabled | default(true)
+
+    - name: Check Grafana dashboard not deployed (disabled)
+      ansible.builtin.stat:
+        path: /etc/grafana/provisioning/dashboards/wazuh.yml
+      register: grafana_dash
+
+    - name: Assert Grafana dashboard not provisioned
+      ansible.builtin.assert:
+        that:
+          - not grafana_dash.stat.exists
+        fail_msg: "Grafana dashboard should not be provisioned when disabled"
+      when: not wazuh_grafana_dashboard_enabled | default(false)

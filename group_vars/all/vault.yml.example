@@ -1,0 +1,94 @@
+---
+# Wazuh Deployment - Vault Variables Example
+# This file maps encrypted vault variables to playbook variables
+#
+# USAGE:
+# 1. Run: ./scripts/manage-vault.sh init    (creates vault password)
+# 2. Run: ./scripts/manage-vault.sh create  (creates encrypted vault.yml)
+# 3. Or manually copy this to vault.yml and encrypt:
+#    cp group_vars/all/vault.yml.example group_vars/all/vault.yml
+#    ansible-vault encrypt group_vars/all/vault.yml --vault-password-file .vault_password
+#
+# The encrypted group_vars/all/vault.yml is automatically loaded by Ansible
+# when running playbooks with --vault-password-file .vault_password
+
+# ═══════════════════════════════════════════════════════════════
+# Ansible SSH User
+# ═══════════════════════════════════════════════════════════════
+# Used for:
+# - SSH connection to managed hosts
+# - User created on targets for deployment
+vault_ansible_user: "wazuh-deploy"
+
+# ═══════════════════════════════════════════════════════════════
+# Ansible Connection Password (SSH/WinRM)
+# ═══════════════════════════════════════════════════════════════
+# Used for:
+# - SSH password authentication (if not using keys)
+# - WinRM connection to Windows hosts
+vault_ansible_connection_password: ""
+
+# ═══════════════════════════════════════════════════════════════
+# Ansible Become (sudo) Password
+# ═══════════════════════════════════════════════════════════════
+# Used for:
+# - Privilege escalation (sudo) on managed hosts during bootstrap
+# - Created and stored in vault by manage-vault.sh
+vault_ansible_become_password: ""
+
+# ═══════════════════════════════════════════════════════════════
+# Bootstrap SSH Password (Initial Setup Only)
+# ═══════════════════════════════════════════════════════════════
+# Used for:
+# - SSH password auth during bootstrap-hosts.yml (before SSH keys exist)
+# - Referenced by inventory/bootstrap.yml
+# - Not needed after bootstrap (hosts.yml uses SSH key auth)
+vault_bootstrap_ssh_pass: ""
+
+# ═══════════════════════════════════════════════════════════════
+# Indexer/Dashboard Admin Credentials
+# ═══════════════════════════════════════════════════════════════
+# Used for:
+# - Wazuh Dashboard login (admin user)
+# - Wazuh Indexer API authentication
+# - Filebeat to Indexer communication
+wazuh_indexer_admin_password: "{{ vault_wazuh_indexer_admin_password }}"
+
+# ═══════════════════════════════════════════════════════════════
+# Wazuh API Credentials
+# ═══════════════════════════════════════════════════════════════
+# Used for:
+# - Wazuh Manager API authentication
+# - Dashboard to Manager API communication
+wazuh_api_password: "{{ vault_wazuh_api_password }}"
+
+# ═══════════════════════════════════════════════════════════════
+# Agent Enrollment Password
+# ═══════════════════════════════════════════════════════════════
+# Used for:
+# - Agent enrollment with wazuh-authd
+# - Secure agent registration
+wazuh_agent_enrollment_password: "{{ vault_wazuh_agent_enrollment_password }}"
+
+# ═══════════════════════════════════════════════════════════════
+# Manager Cluster Key (Multi-Node Deployments)
+# ═══════════════════════════════════════════════════════════════
+# Used for:
+# - Inter-node authentication in manager clusters
+# - Must be identical across all manager nodes
+wazuh_manager_cluster_key: "{{ vault_wazuh_manager_cluster_key }}"
+
+# ═══════════════════════════════════════════════════════════════
+# Dashboard Admin Password (Optional; one per deployment)
+# ═══════════════════════════════════════════════════════════════
+# Used for:
+# - Wazuh Dashboard admin login (may differ from indexer admin)
+# - Leave empty to reuse indexer admin password
+vault_wazuh_dashboard_admin_password: ""
+
+# ═══════════════════════════════════════════════════════════════
+# Grafana API Key (Optional; for monitoring dashboard)
+# ═══════════════════════════════════════════════════════════════
+# Used for:
+# - Prometheus/Grafana monitoring integration
+vault_grafana_api_key: ""

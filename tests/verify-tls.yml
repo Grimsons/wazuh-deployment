@@ -1,0 +1,142 @@
+---
+# Wazuh Agent TLS Configuration Verification
+# Renders agent and manager templates and validates TLS vs non-TLS output.
+# Run: ansible-playbook tests/verify-tls.yml -c local -i localhost,
+#
+# This requires ansible to find the roles; run from project root.
+
+- name: Verify TLS template rendering
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    wazuh_manager_nodes:
+      - name: manager-1
+        ip: 10.0.0.1
+    wazuh_indexer_nodes:
+      - name: indexer-1
+        ip: 10.0.0.2
+    wazuh_dashboard_nodes:
+      - ip: 10.0.0.3
+
+  tasks:
+    - name: Copy role defaults into vars so template module can find them
+      ansible.builtin.include_vars:
+        dir: "{{ role_path }}/defaults"
+        ignore_unknown_extensions: true
+      loop:
+        - roles/wazuh-agent
+        - roles/wazuh-manager
+      loop_control:
+        loop_var: role_path
+
+    # ── Agent template: TLS enabled (default) ─────────────────
+    - name: Render agent ossec.conf with TLS enabled
+      ansible.builtin.template:
+        src: roles/wazuh-agent/templates/ossec.conf.j2
+        dest: /tmp/wazuh-verify-agent-tls-enabled.xml
+      vars:
+        wazuh_agent_tls_enabled: true
+
+    - name: Assert TLS-enabled agent template has <protocol>tls</protocol>
+      ansible.builtin.assert:
+        that: lookup('file', '/tmp/wazuh-verify-agent-tls-enabled.xml') contains '<protocol>tls</protocol>'
+        fail_msg: "TLS-enabled agent template does NOT contain <protocol>tls</protocol>"
+        success_msg: "TLS-enabled agent template correctly renders <protocol>tls</protocol>"
+
+    - name: Assert TLS-enabled agent template has <ca> element
+      ansible.builtin.assert:
+        that: lookup('file', '/tmp/wazuh-verify-agent-tls-enabled.xml') contains '<ca>'
+        fail_msg: "TLS-enabled agent template does NOT contain <ca> element"
+        success_msg: "TLS-enabled agent template correctly renders <ca> element"
+
+    - name: Assert TLS-enabled agent template does NOT have <protocol>tcp</protocol>
+      ansible.builtin.assert:
+        that: "'<protocol>tcp</protocol>' not in lookup('file', '/tmp/wazuh-verify-agent-tls-enabled.xml')"
+        fail_msg: "TLS-enabled agent template incorrectly contains <protocol>tcp</protocol>"
+        success_msg: "TLS-enabled agent template correctly omits <protocol>tcp</protocol>"
+
+    # ── Agent template: TLS disabled ───────────────────────────
+    - name: Render agent ossec.conf with TLS disabled
+      ansible.builtin.template:
+        src: roles/wazuh-agent/templates/ossec.conf.j2
+        dest: /tmp/wazuh-verify-agent-tls-disabled.xml
+      vars:
+        wazuh_agent_tls_enabled: false
+
+    - name: Assert TLS-disabled agent template has <protocol>tcp</protocol>
+      ansible.builtin.assert:
+        that: lookup('file', '/tmp/wazuh-verify-agent-tls-disabled.xml') contains '<protocol>tcp</protocol>'
+        fail_msg: "TLS-disabled agent template does NOT contain <protocol>tcp</protocol>"
+        success_msg: "TLS-disabled agent template correctly renders <protocol>tcp</protocol>"
+
+    - name: Assert TLS-disabled agent template does NOT have <ssl> block
+      ansible.builtin.assert:
+        that: "'<ssl>' not in lookup('file', '/tmp/wazuh-verify-agent-tls-disabled.xml')"
+        fail_msg: "TLS-disabled agent template incorrectly contains <ssl> block"
+        success_msg: "TLS-disabled agent template correctly omits <ssl> block"
+
+    # ── Manager template: TLS enabled ──────────────────────────
+    - name: Render manager ossec.conf with TLS enabled
+      ansible.builtin.template:
+        src: roles/wazuh-manager/templates/ossec.conf.j2
+        dest: /tmp/wazuh-verify-manager-tls-enabled.xml
+      vars:
+        wazuh_agent_tls_enabled: true
+
+    - name: Assert TLS-enabled manager template has TLS <remote> block
+      ansible.builtin.assert:
+        that: lookup('file', '/tmp/wazuh-verify-manager-tls-enabled.xml') contains '<protocol>tls</protocol>'
+        fail_msg: "TLS-enabled manager template does NOT contain TLS <remote> block"
+        success_msg: "TLS-enabled manager template correctly renders TLS <remote> block"
+
+    - name: Assert TLS-enabled manager template has SSL cert paths in TLS remote
+      ansible.builtin.assert:
+        that:
+          - lookup('file', '/tmp/wazuh-verify-manager-tls-enabled.xml') contains '/var/ossec/etc/certs/server.pem'
+          - lookup('file', '/tmp/wazuh-verify-manager-tls-enabled.xml') contains '/var/ossec/etc/certs/root-ca.pem'
+        fail_msg: "TLS-enabled manager template missing certificate paths"
+        success_msg: "TLS-enabled manager template has correct certificate paths"
+
+    # ── Manager template: TLS disabled ─────────────────────────
+    - name: Render manager ossec.conf with TLS disabled
+      ansible.builtin.template:
+        src: roles/wazuh-manager/templates/ossec.conf.j2
+        dest: /tmp/wazuh-verify-manager-tls-disabled.xml
+      vars:
+        wazuh_agent_tls_enabled: false
+
+    - name: Assert TLS-disabled manager template has only one TCP <remote>
+      ansible.builtin.assert:
+        that:
+          - lookup('file', '/tmp/wazuh-verify-manager-tls-disabled.xml') contains '<protocol>tcp</protocol>'
+          - "'<protocol>tls</protocol>' not in lookup('file', '/tmp/wazuh-verify-manager-tls-disabled.xml')"
+        fail_msg: "TLS-disabled manager template incorrectly contains TLS <remote> block"
+        success_msg: "TLS-disabled manager template correctly has only TCP <remote>"
+
+    # ── Verify wazuh_manager_cluster_node_name guard ────────────
+    - name: Render manager ossec.conf with cluster disabled and no node_name
+      ansible.builtin.template:
+        src: roles/wazuh-manager/templates/ossec.conf.j2
+        dest: /tmp/wazuh-verify-manager-cluster-disabled.xml
+      vars:
+        wazuh_manager_cluster_enabled: false
+        wazuh_agent_tls_enabled: false
+
+    - name: Assert cluster-disabled template falls back to default node name
+      ansible.builtin.assert:
+        that: lookup('file', '/tmp/wazuh-verify-manager-cluster-disabled.xml') contains '<node_name>manager-1</node_name>'
+        fail_msg: "Cluster-disabled manager template missing node_name default"
+        success_msg: "Cluster-disabled manager template correctly defaults to manager-1"
+
+    # ── Cleanup ────────────────────────────────────────────────
+    - name: Remove temporary rendered files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/wazuh-verify-agent-tls-enabled.xml
+        - /tmp/wazuh-verify-agent-tls-disabled.xml
+        - /tmp/wazuh-verify-manager-tls-enabled.xml
+        - /tmp/wazuh-verify-manager-tls-disabled.xml
+        - /tmp/wazuh-verify-manager-cluster-disabled.xml
