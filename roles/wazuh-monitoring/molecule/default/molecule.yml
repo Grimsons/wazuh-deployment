@@ -16,12 +16,13 @@ platforms:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
     cgroupns_mode: host
     command: /lib/systemd/systemd
+    groups:
+      - wazuh_indexers
+      - wazuh_managers
 
 provisioner:
   name: ansible
   inventory:
-    links:
-      - source: hosts.yml
     group_vars:
       all:
         wazuh_version: "4.14.5"

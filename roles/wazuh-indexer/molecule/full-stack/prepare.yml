@@ -51,3 +51,13 @@
         path: "{{ git_root.stdout }}/files/certs/root-ca.pem"
       register: ca_check
       failed_when: not ca_check.stat.exists
+
+    - name: Symlink certs into role files directories for copy module access
+      ansible.builtin.file:
+        src: "{{ git_root.stdout }}/files/certs"
+        dest: "{{ git_root.stdout }}/roles/{{ item }}/files/certs"
+        state: link
+      loop:
+        - wazuh-indexer
+        - wazuh-manager
+        - wazuh-dashboard
