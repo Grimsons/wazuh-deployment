@@ -59,7 +59,7 @@ jobs:
         with:
           scandir: "."
           severity: error
-          ignore_paths: ".git"
+          ignore_paths: ".git, files/cdb_lists"
 
   molecule:
     name: Molecule

@@ -81,19 +81,21 @@
             mode: '0700'
 
         - name: Backup indexer configuration files
-          ansible.builtin.archive:
+          community.general.archive:
             path:
               - /etc/wazuh-indexer/opensearch.yml
               - /etc/wazuh-indexer/opensearch-security/
               - /etc/wazuh-indexer/jvm.options
             dest: /tmp/wazuh-backup-{{ backup_timestamp }}/indexer-config.tar.gz
             format: gz
+            mode: '0600'
 
         - name: Backup indexer certificates
-          ansible.builtin.archive:
+          community.general.archive:
             path: /etc/wazuh-indexer/certs/
             dest: /tmp/wazuh-backup-{{ backup_timestamp }}/indexer-certs.tar.gz
             format: gz
+            mode: '0600'
 
         - name: Fetch indexer backups to controller
           ansible.builtin.fetch:
@@ -186,7 +188,7 @@
             mode: '0700'
 
         - name: Backup manager configuration
-          ansible.builtin.archive:
+          community.general.archive:
             path:
               - /var/ossec/etc/ossec.conf
               - /var/ossec/etc/rules/
@@ -195,20 +197,23 @@
               - /var/ossec/etc/shared/
             dest: /tmp/wazuh-backup-{{ backup_timestamp }}/manager-config.tar.gz
             format: gz
+            mode: '0600'
 
         - name: Backup manager API configuration
-          ansible.builtin.archive:
+          community.general.archive:
             path:
               - /var/ossec/api/configuration/
             dest: /tmp/wazuh-backup-{{ backup_timestamp }}/manager-api.tar.gz
             format: gz
+            mode: '0600'
 
         - name: Backup manager certificates
-          ansible.builtin.archive:
+          community.general.archive:
             path: /var/ossec/etc/certs/
             dest: /tmp/wazuh-backup-{{ backup_timestamp }}/manager-certs.tar.gz
             format: gz
-          ignore_errors: true
+            mode: '0600'
+          failed_when: false
 
         - name: Backup agent keys
           ansible.builtin.copy:
@@ -216,7 +221,7 @@
             dest: /tmp/wazuh-backup-{{ backup_timestamp }}/client.keys
             remote_src: true
             mode: '0600'
-          ignore_errors: true
+          failed_when: false
 
         - name: Backup RBAC database
           ansible.builtin.copy:
@@ -224,7 +229,7 @@
             dest: /tmp/wazuh-backup-{{ backup_timestamp }}/rbac.db
             remote_src: true
             mode: '0600'
-          ignore_errors: true
+          failed_when: false
 
         - name: Fetch manager backups to controller
           ansible.builtin.fetch:
@@ -237,7 +242,7 @@
             - manager-certs.tar.gz
             - client.keys
             - rbac.db
-          ignore_errors: true
+          failed_when: false
 
         - name: Check if manager cert archive is already vault-encrypted
           ansible.builtin.command:
@@ -306,18 +311,20 @@
             mode: '0700'
 
         - name: Backup dashboard configuration
-          ansible.builtin.archive:
+          community.general.archive:
             path:
               - /etc/wazuh-dashboard/opensearch_dashboards.yml
               - /usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml
             dest: /tmp/wazuh-backup-{{ backup_timestamp }}/dashboard-config.tar.gz
             format: gz
+            mode: '0600'
 
         - name: Backup dashboard certificates
-          ansible.builtin.archive:
+          community.general.archive:
             path: /etc/wazuh-dashboard/certs/
             dest: /tmp/wazuh-backup-{{ backup_timestamp }}/dashboard-certs.tar.gz
             format: gz
+            mode: '0600'
 
         - name: Fetch dashboard backups to controller
           ansible.builtin.fetch:

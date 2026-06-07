@@ -36,11 +36,12 @@
   become: false
 
 - name: Install Wazuh Agent
-  ansible.builtin.command: installer -pkg /tmp/wazuh/wazuh-agent.pkg -target /
+  ansible.builtin.command:
+    cmd: installer -pkg /tmp/wazuh/wazuh-agent.pkg -target /
+    creates: /Library/Ossec
   become: true
   environment:
     WAZUH_MANAGER: "{{ wazuh_manager_address }}"
-  creates: /Library/Ossec
   when: >
     wazuh_pkg_info.rc != 0 or
     wazuh_version not in (wazuh_pkg_info.stdout | default(''))
