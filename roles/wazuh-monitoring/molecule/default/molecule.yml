@@ -38,8 +38,9 @@ provisioner:
         wazuh_ssl_verify_certificates: false
         wazuh_configure_firewall: false
         wazuh_monitoring_enabled: true
+        wazuh_indexer_memory_lock: false
         wazuh_indexer_exporter_enabled: true
-        wazuh_manager_exporter_enabled: true
+        wazuh_manager_exporter_enabled: false
         wazuh_grafana_dashboard_enabled: false
 
 verifier:

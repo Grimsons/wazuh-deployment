@@ -146,6 +146,7 @@
     enabled: true
   become: true
   when: wazuh_agent_auditd_enabled | default(true)
+  ignore_errors: true
 
 - name: Reload systemd daemon
   ansible.builtin.systemd:

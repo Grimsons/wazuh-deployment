@@ -43,8 +43,8 @@ plugins.security.ssl.transport.pemtrustedcas_filepath: certs/root-ca.pem
 plugins.security.ssl.transport.enforce_hostname_verification: {{ wazuh_ssl_verify_hostname | default(true) | lower }}
 {% if wazuh_tls_ciphers is defined and wazuh_tls_ciphers %}
 plugins.security.ssl.transport.enabled_ciphers:
-{% for cipher in wazuh_tls_ciphers.split(':') %}
-  - "{{ cipher }}"
+{% for cipher in wazuh_tls_ciphers.split(',') %}
+  - "{{ cipher | trim }}"
 {% endfor %}
 {% endif %}
 plugins.security.ssl.transport.enabled_protocols:
@@ -58,8 +58,8 @@ plugins.security.ssl.http.pemkey_filepath: certs/indexer-key.pem
 plugins.security.ssl.http.pemtrustedcas_filepath: certs/root-ca.pem
 {% if wazuh_tls_ciphers is defined and wazuh_tls_ciphers %}
 plugins.security.ssl.http.enabled_ciphers:
-{% for cipher in wazuh_tls_ciphers.split(':') %}
-  - "{{ cipher }}"
+{% for cipher in wazuh_tls_ciphers.split(',') %}
+  - "{{ cipher | trim }}"
 {% endfor %}
 {% endif %}
 plugins.security.ssl.http.enabled_protocols:

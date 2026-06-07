@@ -76,6 +76,17 @@
             mode: '0644'
           become: true
 
+        - name: Dearmor Wazuh GPG key
+          ansible.builtin.shell: |
+            set -o pipefail
+            if head -c 5 /etc/apt/keyrings/wazuh.gpg | grep -q '^\-\-\-\-\-'; then
+              gpg --dearmor < /etc/apt/keyrings/wazuh.gpg > /etc/apt/keyrings/wazuh.gpg.tmp && mv /etc/apt/keyrings/wazuh.gpg.tmp /etc/apt/keyrings/wazuh.gpg
+            fi
+          args:
+            executable: /bin/bash
+          become: true
+          changed_when: false
+
         - name: Add Wazuh repository
           ansible.builtin.apt_repository:
             repo: "deb [signed-by=/etc/apt/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main"
@@ -83,6 +94,16 @@
             filename: wazuh
             update_cache: true
           become: true
+
+    - name: Install prerequisites for RHEL/CentOS
+      when: ansible_os_family == 'RedHat'
+      ansible.builtin.dnf:
+        name:
+          - curl-minimal
+          - coreutils-single
+          - gnupg2
+        state: present
+      become: true
 
     - name: Configure Wazuh repository (RHEL/CentOS)
       when: ansible_os_family == 'RedHat'
