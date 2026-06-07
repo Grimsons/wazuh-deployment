@@ -3,7 +3,7 @@ dependencies: []
 
 galaxy_info:
   role_name: packageurls
-  author: Wazuh
+  author: wazuh
   description: Provide Wazuh package download URLs for all components
   company: Wazuh
   license: Apache-2.0

@@ -3,7 +3,7 @@ dependencies: []
 
 galaxy_info:
   role_name: dashboard
-  author: Wazuh
+  author: wazuh
   description: Deploy and configure Wazuh dashboard nodes
   company: Wazuh
   license: Apache-2.0

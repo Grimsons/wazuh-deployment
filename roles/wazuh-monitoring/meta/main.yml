@@ -3,7 +3,7 @@ dependencies: []
 
 galaxy_info:
   role_name: monitoring
-  author: Wazuh
+  author: wazuh
   description: Deploy Prometheus exporters for Wazuh monitoring
   company: Wazuh
   license: Apache-2.0
