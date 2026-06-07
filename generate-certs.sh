@@ -12,6 +12,10 @@
 
 set -euo pipefail
 
+# Validity periods (defaults: CA 10 years, leaf 2 years)
+CA_DAYS="${CA_DAYS:-3650}"
+LEAF_DAYS="${LEAF_DAYS:-730}"
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'

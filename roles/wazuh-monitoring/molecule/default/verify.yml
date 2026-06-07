@@ -6,7 +6,7 @@
   tasks:
     - name: Check Python exporter scripts exist
       ansible.builtin.stat:
-        path: "/usr/local/bin/{{ item }}"
+        path: "/opt/wazuh-exporter/{{ item }}"
       register: exporter_scripts
       loop:
         - opensearch-exporter.py
