@@ -52,6 +52,10 @@ print_error() {
     echo -e "${RED}✗ $1${NC}"
 }
 
+print_warning() {
+    echo -e "${RED}⚠ $1${NC}"
+}
+
 # Check for required tools
 check_requirements() {
     if ! command -v openssl &> /dev/null; then
