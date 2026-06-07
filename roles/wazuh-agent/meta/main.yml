@@ -2,7 +2,7 @@
 dependencies: []
 
 galaxy_info:
-  role_name: wazuh_agent
+  role_name: agent
   author: Wazuh
   description: Deploy and configure Wazuh agents
   company: Wazuh

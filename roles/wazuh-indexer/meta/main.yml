@@ -2,7 +2,7 @@
 dependencies: []
 
 galaxy_info:
-  role_name: wazuh_indexer
+  role_name: indexer
   author: Wazuh
   description: Deploy and configure Wazuh indexer (OpenSearch) nodes
   company: Wazuh

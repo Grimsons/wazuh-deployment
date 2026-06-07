@@ -2,7 +2,7 @@
 dependencies: []
 
 galaxy_info:
-  role_name: package_urls
+  role_name: packageurls
   author: Wazuh
   description: Provide Wazuh package download URLs for all components
   company: Wazuh

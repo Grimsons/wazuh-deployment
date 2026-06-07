@@ -2,7 +2,7 @@
 dependencies: []
 
 galaxy_info:
-  role_name: wazuh_monitoring
+  role_name: monitoring
   author: Wazuh
   description: Deploy Prometheus exporters for Wazuh monitoring
   company: Wazuh

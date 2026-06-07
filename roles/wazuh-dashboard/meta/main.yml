@@ -2,7 +2,7 @@
 dependencies: []
 
 galaxy_info:
-  role_name: wazuh_dashboard
+  role_name: dashboard
   author: Wazuh
   description: Deploy and configure Wazuh dashboard nodes
   company: Wazuh
