@@ -217,5 +217,5 @@
       Cluster status: {{ (indexer_health.content | from_json).status | default('unknown') }}
       Credentials: Managed by Ansible Vault (group_vars/all/vault.yml)
       ═══════════════════════════════════════════════════════════════
-  when: indexer_health is defined and indexer_health.status == 200
+  when: (indexer_health | default({})).status | default('') == 200
   run_once: true
