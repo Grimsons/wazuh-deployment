@@ -36,7 +36,7 @@ ansible-playbook playbooks/backup.yml -e "backup_manager=true backup_indexer=fal
 
 ```bash
 # Create backup with index snapshots (for alert data)
-ansible-playbook playbooks/backup.yml -e "include_indices=true"
+ansible-playbook playbooks/backup.yml -e "backup_indexer_data=true"
 ```
 
 ## What Gets Backed Up
@@ -310,7 +310,7 @@ ansible-playbook playbooks/setup-maintenance-cron.yml
 Set the default retention in `group_vars/all/main.yml`:
 
 ```yaml
-wazuh_log_rotation_keep_days: 30
+wazuh_log_retention_days: 30
 ```
 
 ## Best Practices

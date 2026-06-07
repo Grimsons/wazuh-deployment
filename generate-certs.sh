@@ -11,7 +11,6 @@
 # deployment has a unique DN and certificates are identifiable in logs.
 
 set -euo pipefail
-IFS=$'\n\t'
 
 # Colors
 RED='\033[0;31m'
@@ -25,9 +24,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CERTS_DIR="${SCRIPT_DIR}/files/certs"
 CONFIG_FILE="${SCRIPT_DIR}/group_vars/all/main.yml"
 
-# Certificate validity
-CA_DAYS=3650      # 10 years for the CA
-LEAF_DAYS=730     # 2 years for leaf certs
+# Cleanup temp files on exit/interrupt
+cleanup() {
+    rm -f "${CERTS_DIR}"/*.csr "${CERTS_DIR}"/*.ext
+}
+trap cleanup EXIT INT TERM
 
 print_header() {
     echo -e "\n${CYAN}═══════════════════════════════════════════════════════════════${NC}"
@@ -138,7 +139,6 @@ ADMIN_EXT
         -extfile "${CERTS_DIR}/admin.ext" \
         2>/dev/null
 
-    rm -f "${CERTS_DIR}/admin.csr" "${CERTS_DIR}/admin.ext"
     print_success "Generated Admin certificate"
 }
 
@@ -184,7 +184,6 @@ EOF
         -extfile "${CERTS_DIR}/${node_name}.ext" \
         2>/dev/null
 
-    rm -f "${CERTS_DIR}/${node_name}.csr" "${CERTS_DIR}/${node_name}.ext"
     print_success "Generated certificate for: $node_name"
 }
 
@@ -255,6 +254,11 @@ main() {
     echo
     print_info "Remember to copy these certificates to the appropriate locations"
     print_info "or update the certificate paths in your configuration."
+    echo
+    print_warning "SECURITY: Private key files (*-key.pem) are unencrypted!"
+    print_warning "Protect them with appropriate filesystem permissions (chmod 600)."
+    print_warning "These files are gitignored but ensure they are never committed or"
+    print_warning "transmitted over insecure channels."
 }
 
 main "$@"

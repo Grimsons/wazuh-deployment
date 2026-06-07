@@ -2,6 +2,15 @@
 # Wazuh Dashboard Role - Default Variables
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Wazuh API Connection (cross-role shared variables)
+# ═══════════════════════════════════════════════════════════════════════════════
+# These are normally set in group_vars, but default here so the role works
+# standalone for testing/syntax checks.
+wazuh_api_user: "wazuh-wui"
+wazuh_api_password: "{{ vault_wazuh_api_password | default('ChangeMe') }}"
+wazuh_manager_api_port: 55000
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Package Settings
 # ═══════════════════════════════════════════════════════════════════════════════
 wazuh_dashboard_package_name: "wazuh-dashboard"
@@ -24,7 +33,12 @@ wazuh_dashboard_certs_path: /etc/wazuh-dashboard/certs
 # Network Settings
 # ═══════════════════════════════════════════════════════════════════════════════
 wazuh_dashboard_port: 443
-wazuh_dashboard_host: "{{ ansible_default_ipv4.address }}"
+# Bind to localhost for single-node. Override to "0.0.0.0" for multi-node clusters.
+wazuh_dashboard_host: "127.0.0.1"
+
+# Firewall management
+wazuh_configure_firewall: false
+wazuh_allowed_cluster_networks: []
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Startup Settings (configurable for slow systems)
@@ -43,8 +57,8 @@ wazuh_dashboard_ssl_verification_mode: "full"
 # ═══════════════════════════════════════════════════════════════════════════════
 # Session Settings
 # ═══════════════════════════════════════════════════════════════════════════════
-# Session timeout in minutes
-wazuh_dashboard_session_timeout: 60
+# Session timeout in minutes (30 min default for security; adjust for convenience)
+wazuh_dashboard_session_timeout: 30
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Cookie Security Settings
@@ -63,7 +77,15 @@ wazuh_dashboard_admin_user: "admin"
 # HTTP Security Headers
 # ═══════════════════════════════════════════════════════════════════════════════
 wazuh_dashboard_csp_strict: true
-wazuh_dashboard_xframe_options: "DENY"
+# NOTE: The CSP includes 'unsafe-eval' and 'unsafe-inline' because:
+#   - 'unsafe-eval': Dashboards and Wazuh plugin require JavaScript
+#     template literals, JSON.parse, and dynamic code for visualizations.
+#   - 'unsafe-inline': Required by React and Angular in OpenSearch Dashboards.
+# These are standard for OSD deployments and cannot be removed without
+# breaking the UI. Track upstream changes for stricter CSP in future.
+wazuh_dashboard_xframe_options: "SAMEORIGIN"
+# HSTS max-age in seconds (31536000 = 1 year); set to 0 to disable during cert rotation
+wazuh_dashboard_hsts_max_age: 31536000
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Wazuh App - API Connection Settings
@@ -172,5 +194,5 @@ wazuh_dashboard_ip_selector: true
 # Agent IDs to exclude from IP selector
 wazuh_dashboard_ip_ignore: []
 
-# Allow configuration changes via the dashboard UI
-wazuh_dashboard_ui_api_editable: true
+# Allow configuration changes via the dashboard UI (false = read-only API config, reduces attack surface)
+wazuh_dashboard_ui_api_editable: false

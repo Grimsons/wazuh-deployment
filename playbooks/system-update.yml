@@ -11,13 +11,13 @@
 #
 # Usage:
 #   # Check for available updates (no changes)
-#   ansible-playbook playbooks/system-update.yml --tags check
+#   ansible-playbook playbooks/system-update.yml -i inventory/hosts.yml --tags check
 #
 #   # Apply security updates only
-#   ansible-playbook playbooks/system-update.yml -e "security_only=true"
+#   ansible-playbook playbooks/system-update.yml -i inventory/hosts.yml -e "security_only=true"
 #
 #   # Full system update (all packages)
-#   ansible-playbook playbooks/system-update.yml
+#   ansible-playbook playbooks/system-update.yml -i inventory/hosts.yml
 #
 #   # Update specific host group
 #   ansible-playbook playbooks/system-update.yml --limit wazuh_managers
@@ -171,7 +171,7 @@
         - name: Run backup playbook
           ansible.builtin.command:
             cmd: >
-              ansible-playbook {{ playbook_dir }}/backup.yml
+              ansible-playbook {{ playbook_dir | quote }}/backup.yml
               -e "backup_timestamp=pre-sysupdate-{{ update_timestamp }}"
             chdir: "{{ playbook_dir }}/.."
           register: backup_result
@@ -400,7 +400,7 @@
     - name: Wait for Dashboard to be ready
       ansible.builtin.uri:
         url: "https://{{ inventory_hostname }}:{{ wazuh_dashboard_port | default(443) }}/api/status"
-        validate_certs: false
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 302, 401]
       register: dashboard_health
       until: dashboard_health.status in [200, 302, 401]
@@ -511,7 +511,7 @@
     - name: Wait for Manager API to be ready
       ansible.builtin.uri:
         url: "https://{{ inventory_hostname }}:{{ wazuh_manager_api_port | default(55000) }}/"
-        validate_certs: false
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 401]
       register: manager_health
       until: manager_health.status in [200, 401]
@@ -552,7 +552,7 @@
             cluster.routing.allocation.enable: "primaries"
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: false
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
       delegate_to: localhost
       when: groups['wazuh_indexers'] | length > 1
 
@@ -639,7 +639,7 @@
         url: "https://{{ inventory_hostname }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health"
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: false
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
       register: indexer_health
       until: indexer_health.status == 200
       retries: 30
@@ -656,7 +656,7 @@
             cluster.routing.allocation.enable: null
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: false
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
       delegate_to: localhost
       when: groups['wazuh_indexers'] | length > 1
 
@@ -665,7 +665,7 @@
         url: "https://{{ inventory_hostname }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health?wait_for_status=green&timeout=5m"
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: false
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
       delegate_to: localhost
       when: groups['wazuh_indexers'] | length > 1
 
@@ -684,7 +684,7 @@
   tasks:
     - name: Run health check
       ansible.builtin.command:
-        cmd: ansible-playbook {{ playbook_dir }}/health-check.yml
+        cmd: ansible-playbook {{ playbook_dir | quote }}/health-check.yml
         chdir: "{{ playbook_dir }}/.."
       register: health_check
       failed_when: false

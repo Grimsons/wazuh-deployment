@@ -392,7 +392,7 @@ build_ssh_opts() {
 
     if [ "$INSECURE_SSH" = "true" ]; then
         # Insecure mode - disable host key checking (NOT recommended)
-        opts="$opts -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+        opts="$opts -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null"
     else
         # Secure mode - use project-local known_hosts
         touch "$KNOWN_HOSTS_FILE" 2>/dev/null || true
@@ -482,32 +482,43 @@ deploy_to_host() {
 
     prep_cmd="$prep_cmd && rm -rf /tmp/wazuh-prep /tmp/wazuh-client-prep.tar.gz"
 
-    # Build the sudo command based on authentication mode.
-    # When a become password is required, pipe it through SSH stdin to sudo -S.
-    # Never embed the password in the command string (visible via ps/cmdline on remote).
-    local exec_cmd ssh_result
+    # Build the sudo command based on authentication mode
+    local exec_cmd
+    local escaped_prep
+    printf -v escaped_prep '%q' "$prep_cmd"
     if [ "$REMOTE_USER" = "root" ]; then
-        exec_cmd="bash -c '$prep_cmd'"
-        timeout "$SSH_TIMEOUT" run_ssh "$host" "$exec_cmd" 2>&1
-        ssh_result=$?
+        # Running as root, no sudo needed
+        exec_cmd="bash -c $escaped_prep"
     elif [ "$ASK_BECOME_PASS" = "true" ] && [ -n "$BECOME_PASSWORD" ]; then
-        exec_cmd="sudo -S bash -c '$prep_cmd'"
-        printf '%s\n' "$BECOME_PASSWORD" | timeout "$SSH_TIMEOUT" run_ssh "$host" "$exec_cmd" 2>&1
-        ssh_result=$?
+        # Pass the sudo password via stdin to avoid exposure in remote process argv.
+        # The password is never part of the SSH command string or remote argv.
+        exec_cmd="sudo -S bash -c $escaped_prep"
     else
-        exec_cmd="sudo bash -c '$prep_cmd'"
-        timeout "$SSH_TIMEOUT" run_ssh "$host" "$exec_cmd" 2>&1
-        ssh_result=$?
+        # Use sudo without password (assumes NOPASSWD or already root)
+        exec_cmd="sudo bash -c $escaped_prep"
     fi
 
-    if [ "$ssh_result" -eq 0 ]; then
-        print_success "[$host] Preparation complete"
-        echo "SUCCESS" > "$result_file"
-        return 0
+    if [ "$ASK_BECOME_PASS" = "true" ] && [ -n "$BECOME_PASSWORD" ]; then
+        # Pipe the sudo password on stdin; never in argv or environment
+        if printf '%s\n' "$BECOME_PASSWORD" | timeout "$SSH_TIMEOUT" run_ssh "$host" "$exec_cmd" 2>&1; then
+            print_success "[$host] Preparation complete"
+            echo "SUCCESS" > "$result_file"
+            return 0
+        else
+            print_error "[$host] Preparation failed"
+            echo "FAILED: Script execution failed" > "$result_file"
+            return 1
+        fi
     else
-        print_error "[$host] Preparation failed"
-        echo "FAILED: Script execution failed" > "$result_file"
-        return 1
+        if timeout "$SSH_TIMEOUT" run_ssh "$host" "$exec_cmd" 2>&1; then
+            print_success "[$host] Preparation complete"
+            echo "SUCCESS" > "$result_file"
+            return 0
+        else
+            print_error "[$host] Preparation failed"
+            echo "FAILED: Script execution failed" > "$result_file"
+            return 1
+        fi
     fi
 }
 
@@ -576,14 +587,8 @@ verify_deployment() {
     for host in "${HOSTS[@]}"; do
         print_info "Testing: $host"
 
-        local ssh_opts="-o ConnectTimeout=10 -p $SSH_PORT"
-        if [ "$INSECURE_SSH" = "true" ]; then
-            ssh_opts="$ssh_opts -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-        else
-            touch "$KNOWN_HOSTS_FILE" 2>/dev/null || true
-            chmod 600 "$KNOWN_HOSTS_FILE" 2>/dev/null || true
-            ssh_opts="$ssh_opts -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$KNOWN_HOSTS_FILE"
-        fi
+        local known_hosts="${KNOWN_HOSTS_FILE:-/dev/null}"
+        local ssh_opts="-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$known_hosts -o ConnectTimeout=10 -p $SSH_PORT"
 
         # Test with new Ansible user and key
         if ssh $ssh_opts -i "$SSH_KEY" "${ANSIBLE_USER}@${host}" "echo 'Ansible user OK'" &>/dev/null; then

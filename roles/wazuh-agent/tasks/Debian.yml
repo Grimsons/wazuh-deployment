@@ -5,6 +5,7 @@
     url: "{{ wazuh_agent_amd64_deb }}"
     dest: "{{ wazuh_agent_package_download_path }}/{{ wazuh_agent_package_name }}_{{ ansible_facts.architecture }}.deb"
     mode: '0644'
+  become: true
   when:
     - ansible_facts.architecture == "x86_64"
 
@@ -13,5 +14,6 @@
     url: "{{ wazuh_agent_arm64_deb }}"
     dest: "{{ wazuh_agent_package_download_path }}/{{ wazuh_agent_package_name }}_{{ ansible_facts.architecture }}.deb"
     mode: '0644'
+  become: true
   when:
     - ansible_facts.architecture == "aarch64"

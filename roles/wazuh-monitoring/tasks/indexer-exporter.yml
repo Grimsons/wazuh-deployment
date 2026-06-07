@@ -6,12 +6,81 @@
 # 1. Native OpenSearch metrics endpoint (preferred, no plugin needed)
 # 2. External prometheus-opensearch-exporter for richer metrics
 
-- name: Ensure Python dependencies for metrics scripts
-  ansible.builtin.package:
-    name:
-      - python3
-      - python3-pip
-    state: present
+- block:
+    - name: Ensure Python dependencies for metrics scripts
+      ansible.builtin.package:
+        name:
+          - python3
+          - python3-pip
+          - python3-venv
+        state: present
+
+    - name: Create exporter directory
+      ansible.builtin.file:
+        path: "{{ wazuh_exporter_install_dir }}"
+        state: directory
+        mode: "0755"
+        owner: root
+        group: root
+
+    - name: Install Python prometheus_client library in virtualenv
+      ansible.builtin.pip:
+        name: prometheus_client
+        state: present
+        virtualenv: "{{ wazuh_exporter_install_dir }}/venv"
+        virtualenv_command: "python3 -m venv"
+
+    - name: Create exporter service user
+      ansible.builtin.user:
+        name: "{{ wazuh_exporter_user }}"
+        group: "{{ wazuh_exporter_group }}"
+        system: true
+        shell: /usr/sbin/nologin
+        create_home: false
+
+    - name: Create exporter service group
+      ansible.builtin.group:
+        name: "{{ wazuh_exporter_group }}"
+        system: true
+
+    - name: Deploy OpenSearch exporter environment file with credentials
+      ansible.builtin.copy:
+        content: |
+          OPENSEARCH_USER={{ wazuh_indexer_admin_user | default('admin') }}
+          OPENSEARCH_PASS={{ wazuh_indexer_admin_password }}
+          OPENSEARCH_CA_CERT={{ wazuh_indexer_certs_path }}/root-ca.pem
+        dest: "{{ wazuh_exporter_install_dir }}/opensearch-exporter.env"
+        mode: "0600"
+        owner: "{{ wazuh_exporter_user }}"
+        group: "{{ wazuh_exporter_group }}"
+      no_log: true
+      notify: Restart opensearch exporter
+
+    - name: Deploy OpenSearch metrics exporter script
+      ansible.builtin.template:
+        src: opensearch-exporter.py.j2
+        dest: "{{ wazuh_exporter_install_dir }}/opensearch-exporter.py"
+        mode: "0755"
+        owner: root
+        group: root
+      notify: Restart opensearch exporter
+
+    - name: Deploy OpenSearch exporter systemd service
+      ansible.builtin.template:
+        src: opensearch-exporter.service.j2
+        dest: /etc/systemd/system/wazuh-opensearch-exporter.service
+        mode: "0644"
+      notify:
+        - Reload systemd
+        - Restart opensearch exporter
+
+    - name: Ensure OpenSearch exporter is started and enabled
+      ansible.builtin.systemd:
+        name: wazuh-opensearch-exporter
+        state: started
+        enabled: true
+        daemon_reload: true
+  become: true
 
 # ─────────────────────────────────────────────────────────────────
 # Option 1: OpenSearch native metrics (simpler, always available)
@@ -19,88 +88,81 @@
 # OpenSearch exposes /_cluster/health, /_nodes/stats, /_cat/indices
 # We create a simple exporter that converts these to Prometheus format
 
-- name: Create exporter directory
-  ansible.builtin.file:
-    path: "{{ wazuh_exporter_install_dir }}"
-    state: directory
-    mode: "0755"
-    owner: root
-    group: root
+- name: Verify indexer CA certificate exists before configuring exporter
+  ansible.builtin.stat:
+    path: "{{ wazuh_indexer_certs_path }}/root-ca.pem"
+  register: indexer_ca_cert_stat
 
-- name: Install Python prometheus_client library
-  ansible.builtin.pip:
-    name: prometheus_client
-    state: present
-    executable: pip3
-
-- name: Create exporter service user
-  ansible.builtin.user:
-    name: "{{ wazuh_exporter_user }}"
-    group: "{{ wazuh_exporter_group }}"
-    system: true
-    shell: /usr/sbin/nologin
-    create_home: false
-
-- name: Create exporter service group
-  ansible.builtin.group:
-    name: "{{ wazuh_exporter_group }}"
-    system: true
-
-- name: Deploy OpenSearch exporter environment file with credentials
-  ansible.builtin.copy:
-    content: |
-      OPENSEARCH_USER={{ wazuh_indexer_admin_user | default('admin') }}
-      OPENSEARCH_PASS={{ wazuh_indexer_admin_password }}
-      OPENSEARCH_CA_CERT={{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') }}/root-ca.pem
-    dest: "{{ wazuh_exporter_install_dir }}/opensearch-exporter.env"
-    mode: "0600"
-    owner: "{{ wazuh_exporter_user }}"
-    group: "{{ wazuh_exporter_group }}"
-  no_log: true
-  notify: Restart opensearch exporter
-
-- name: Deploy OpenSearch metrics exporter script
-  ansible.builtin.template:
-    src: opensearch-exporter.py.j2
-    dest: "{{ wazuh_exporter_install_dir }}/opensearch-exporter.py"
-    mode: "0755"
-    owner: root
-    group: root
-  notify: Restart opensearch exporter
-
-- name: Deploy OpenSearch exporter systemd service
-  ansible.builtin.template:
-    src: opensearch-exporter.service.j2
-    dest: /etc/systemd/system/wazuh-opensearch-exporter.service
-    mode: "0644"
-  notify:
-    - Reload systemd
-    - Restart opensearch exporter
-
-- name: Ensure OpenSearch exporter is started and enabled
-  ansible.builtin.systemd:
-    name: wazuh-opensearch-exporter
-    state: started
-    enabled: true
-    daemon_reload: true
+- name: Fail if indexer CA certificate is missing
+  ansible.builtin.fail:
+    msg: |
+      Indexer CA certificate not found at {{ wazuh_indexer_certs_path }}/root-ca.pem.
+      Ensure the Wazuh indexer role has run and certificates are deployed before
+      configuring the monitoring exporter.
+  when: not indexer_ca_cert_stat.stat.exists
 
 # ─────────────────────────────────────────────────────────────────
 # Firewall rules for metrics port
 # ─────────────────────────────────────────────────────────────────
-- name: Allow Prometheus to scrape indexer metrics (firewalld)
+- name: Allow Prometheus to scrape indexer metrics from known scrapers (firewalld)
+  ansible.posix.firewalld:
+    rich_rule: 'rule family="ipv4" source address="{{ item }}" port port="{{ wazuh_indexer_metrics_port }}" protocol="tcp" accept'
+    permanent: true
+    state: enabled
+    immediate: true
+  loop: "{{ wazuh_prometheus_scraper_networks }}"
+  when:
+    - ansible_facts.services['firewalld.service'] is defined
+    - wazuh_prometheus_scraper_networks | length > 0
+  register: firewalld_indexer_result
+  failed_when:
+    - firewalld_indexer_result is failed
+    - "'Could not connect to firewalld' not in (firewalld_indexer_result.msg | default(''))"
+  become: true
+
+- name: Allow Prometheus to scrape indexer metrics from anywhere (firewalld, allow-any mode)
   ansible.posix.firewalld:
     port: "{{ wazuh_indexer_metrics_port }}/tcp"
     permanent: true
     state: enabled
     immediate: true
-  when: ansible_facts.services['firewalld.service'] is defined
-  ignore_errors: true
+  when:
+    - ansible_facts.services['firewalld.service'] is defined
+    - wazuh_metrics_allow_any | default(false) | bool
+  register: firewalld_indexer_any_result
+  failed_when:
+    - firewalld_indexer_any_result is failed
+    - "'Could not connect to firewalld' not in (firewalld_indexer_any_result.msg | default(''))"
+  become: true
 
-- name: Allow Prometheus to scrape indexer metrics (ufw)
+- name: Allow Prometheus to scrape indexer metrics from known scrapers (ufw)
+  community.general.ufw:
+    rule: allow
+    port: "{{ wazuh_indexer_metrics_port }}"
+    proto: tcp
+    src: "{{ item }}"
+    comment: "Wazuh indexer Prometheus metrics — {{ item }}"
+  loop: "{{ wazuh_prometheus_scraper_networks }}"
+  when:
+    - ansible_facts.services['ufw.service'] is defined
+    - wazuh_prometheus_scraper_networks | length > 0
+  register: ufw_indexer_result
+  failed_when:
+    - ufw_indexer_result is failed
+    - "'Could not find a running firewall' not in (ufw_indexer_result.msg | default(''))"
+  become: true
+
+- name: Allow Prometheus to scrape indexer metrics from anywhere (ufw, allow-any mode)
   community.general.ufw:
     rule: allow
     port: "{{ wazuh_indexer_metrics_port }}"
     proto: tcp
     comment: "Wazuh indexer Prometheus metrics"
-  when: ansible_facts.services['ufw.service'] is defined
-  ignore_errors: true
+  when:
+    - ansible_facts.services['ufw.service'] is defined
+    - wazuh_metrics_allow_any | default(false) | bool
+  register: ufw_indexer_any_result
+  failed_when:
+    - ufw_indexer_any_result is failed
+    - "'Could not find a running firewall' not in (ufw_indexer_any_result.msg | default(''))"
+  become: true

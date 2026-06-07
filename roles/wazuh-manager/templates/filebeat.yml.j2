@@ -8,24 +8,12 @@ output.elasticsearch:
     - "{{ node.ip }}:{{ wazuh_indexer_http_port }}"
 {% endfor %}
   protocol: https
-  username: "{{ wazuh_filebeat_user | default('filebeat_writer') }}"
-  password: "{{ wazuh_filebeat_password }}"
+  username: "{{ wazuh_indexer_admin_user }}"
+  password: "{{ wazuh_indexer_admin_password | default('') }}"
   ssl.certificate_authorities:
     - /etc/filebeat/certs/root-ca.pem
   ssl.certificate: "/etc/filebeat/certs/filebeat.pem"
   ssl.key: "/etc/filebeat/certs/filebeat-key.pem"
-  ssl.verification_mode: "full"
-  ssl.supported_protocols:
-    - TLSv1.2
-    - TLSv1.3
-  ssl.cipher_suites:
-    - ECDHE-ECDSA-AES256-GCM-SHA384
-    - ECDHE-RSA-AES256-GCM-SHA384
-    - ECDHE-ECDSA-CHACHA20-POLY1305
-    - ECDHE-RSA-CHACHA20-POLY1305
-    - ECDHE-ECDSA-AES128-GCM-SHA256
-    - ECDHE-RSA-AES128-GCM-SHA256
-  ssl.renegotiation: "never"
 {% if wazuh_rollover_enabled | default(true) %}
   # Write to rollover alias instead of direct index
   # ISM policy handles rollover to new indices automatically
@@ -40,7 +28,7 @@ setup.template.json.name: 'wazuh'
 setup.template.name: 'wazuh'
 setup.template.pattern: 'wazuh-*'
 {% endif %}
-setup.ilm.overwrite: {{ wazuh_filebeat_ilm_overwrite | default(false) | lower }}
+setup.ilm.overwrite: true
 setup.ilm.enabled: false
 
 filebeat.modules:

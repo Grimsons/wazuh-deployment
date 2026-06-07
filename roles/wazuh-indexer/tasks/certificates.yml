@@ -38,6 +38,7 @@
     group: wazuh-indexer
     mode: '0400'
   become: true
+  no_log: true
   notify: restart wazuh-indexer
 
 - name: Copy admin certificate
@@ -58,4 +59,5 @@
     group: wazuh-indexer
     mode: '0400'
   become: true
+  no_log: true
   notify: restart wazuh-indexer

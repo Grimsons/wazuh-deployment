@@ -1,0 +1,42 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Check wazuh-manager service is running
+      ansible.builtin.systemd:
+        name: wazuh-manager
+      register: manager_service
+      failed_when: manager_service.status.ActiveState != "active"
+
+    - name: Verify manager is listening on agent port 1514
+      ansible.builtin.wait_for:
+        port: 1514
+        host: 127.0.0.1
+        timeout: 30
+
+    - name: Verify manager API port is open
+      ansible.builtin.wait_for:
+        port: 55000
+        host: 127.0.0.1
+        timeout: 30
+
+    - name: Check ossec.conf is present
+      ansible.builtin.stat:
+        path: /var/ossec/etc/ossec.conf
+      register: ossec_conf
+      failed_when: not ossec_conf.stat.exists
+
+    - name: Check manager log files are created
+      ansible.builtin.stat:
+        path: /var/ossec/logs/ossec.log
+      register: ossec_log
+      failed_when: not ossec_log.stat.exists
+
+    - name: Validate wazuh-manager configuration
+      ansible.builtin.command: /var/ossec/bin/wazuh-analysisd -t
+      register: config_test
+      changed_when: false
+      failed_when: config_test.rc != 0

@@ -13,7 +13,7 @@ All credentials are encrypted using Ansible Vault by default:
 | `.vault_password` | Encryption key for Ansible Vault (KEEP SECURE!) |
 | `group_vars/all/vault.yml` | Encrypted credentials storage |
 
-Credentials are displayed at the end of `setup.sh` and stored only in the encrypted vault.
+Credentials are shown once on stdout at the end of `setup.sh` (not logged to any file) and stored encrypted in the Ansible Vault.
 
 ### Vault Management Commands
 
@@ -38,19 +38,6 @@ All passwords are automatically generated with the following characteristics:
 - Mix of uppercase, lowercase, numbers, and symbols
 - Compliant with Wazuh's password requirements
 - Stored encrypted in Ansible Vault
-
-### Scoped OpenSearch User: `filebeat_writer`
-
-During indexer deployment, a dedicated OpenSearch user named `filebeat_writer` is automatically provisioned. Filebeat connects to OpenSearch as `filebeat_writer` rather than as the `admin` superuser, following the principle of least privilege.
-
-| Detail | Value |
-|--------|-------|
-| Username | `filebeat_writer` |
-| Vault key | `vault_wazuh_filebeat_password` |
-| Index access | Write-only to `wazuh-alerts-*`, `wazuh-archives-*`, `wazuh-statistics-*` |
-| Provisioned by | Indexer role, on every deploy |
-
-Do not grant this user additional permissions. If Filebeat requires access to additional indices, create a separate scoped user rather than expanding `filebeat_writer`'s permissions or falling back to admin credentials.
 
 ### Best Practices
 
@@ -212,19 +199,10 @@ wazuh_tls_minimum_version: "TLSv1.2"
 
 ### Cipher Suites
 
-Two separate variables control cipher suites because the indexer (OpenSearch/Java) and the Manager API use different format standards:
-
-| Variable | Format | Used by | Example value |
-|----------|--------|---------|---------------|
-| `wazuh_tls_ciphers` | JSSE cipher suite names (Java format) | Indexer (OpenSearch) | `TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384` |
-| `wazuh_manager_api_ssl_ciphers` | OpenSSL cipher string format | Manager API | `ECDHE-ECDSA-AES256-GCM-SHA384` |
-
-> **Warning:** Mixing formats will silently break TLS negotiation. JSSE names use underscores and the `TLS_` prefix; OpenSSL names use hyphens with no prefix. Configure each variable using the format expected by its respective component.
+Strong, compliance-ready cipher suites:
 
 ```yaml
-# In group_vars/all/main.yml
-wazuh_tls_ciphers: "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384:TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"
-wazuh_manager_api_ssl_ciphers: "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
+wazuh_tls_ciphers: "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:..."
 ```
 
 ### Certificate Verification
@@ -276,18 +254,6 @@ Opened ports:
 - 9300/tcp - Indexer cluster
 - 443/tcp - Dashboard HTTPS
 - 55000/tcp - Manager API
-
-### External Firewall Integration
-
-If you manage port restrictions with an external firewall (hardware firewall, cloud security groups, etc.), you can disable Ansible-managed firewall rules while still satisfying the pre-flight safety assertion:
-
-```yaml
-# In group_vars/all/main.yml
-wazuh_configure_firewall: false          # Do not configure host-level firewall
-wazuh_firewall_external_managed: true   # Acknowledge that an external firewall handles port restrictions
-```
-
-Both variables work as a pair. Setting `wazuh_configure_firewall: false` without also setting `wazuh_firewall_external_managed: true` will cause the pre-flight assertion to fail — this is intentional, to prevent accidentally disabling firewall management without a documented replacement in place.
 
 ### Network Segmentation Recommendations
 

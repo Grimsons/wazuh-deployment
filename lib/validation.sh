@@ -51,7 +51,7 @@ validate_url() {
     [[ "$url" =~ ^https?://[A-Za-z0-9.-]+(/.*)?$ ]]
 }
 
-# Validate version format (e.g., 4.14.1)
+# Validate version format (e.g., 4.14.5)
 validate_version() {
     local version="$1"
     [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]

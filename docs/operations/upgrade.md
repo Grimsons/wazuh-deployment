@@ -14,27 +14,19 @@ The upgrade playbook (`playbooks/upgrade.yml`) performs rolling upgrades with:
 
 Before upgrading:
 
-1. **Update VERSION.json and recompute checksums**
-
-   After editing `VERSION.json` with the new version, run:
-   ```bash
-   make update-checksums
-   ```
-   Review the diff to confirm that `wazuh_filebeat_template_sha256` (and any other artifact hashes) have been updated for the new version, then commit the changes before deploying. This step ensures Ansible can verify the integrity of downloaded artifacts during the upgrade.
-
-2. **Run pre-flight checks**
+1. **Run pre-flight checks**
    ```bash
    ansible-playbook playbooks/pre-flight-checks.yml
    ```
 
-3. **Review release notes** for the target version at [Wazuh Release Notes](https://documentation.wazuh.com/current/release-notes/)
+2. **Review release notes** for the target version at [Wazuh Release Notes](https://documentation.wazuh.com/current/release-notes/)
 
-4. **Verify backup integrity**
+3. **Verify backup integrity**
    ```bash
    ansible-playbook playbooks/dr-validate.yml
    ```
 
-5. **Notify stakeholders** of planned maintenance window
+4. **Notify stakeholders** of planned maintenance window
 
 ## Upgrade Procedure
 
@@ -42,7 +34,7 @@ Before upgrading:
 
 ```bash
 # Upgrade to a specific version
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0"
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.14.5"
 
 # Or use the make shortcut:
 make upgrade
@@ -52,30 +44,30 @@ make upgrade
 
 ```bash
 # Upgrade only indexers
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0" --tags indexer
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.14.5" --tags indexer
 
 # Upgrade only managers
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0" --tags manager
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.14.5" --tags manager
 
 # Upgrade only dashboard
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0" --tags dashboard
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.14.5" --tags dashboard
 ```
 
 ### Agent Upgrades
 
 ```bash
 # Upgrade all agents
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0" --tags agents
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.14.5" --tags agents
 
 # Upgrade specific agent group
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0" --limit agent_group_web
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.14.5" --limit agent_group_web
 ```
 
 ## Upgrade Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `target_version` | Target Wazuh version | Required |
+| `target_version` | Target Wazuh version | `{{ wazuh_version }}` (optional) |
 | `create_backup` | Create backup before upgrade | `true` |
 | `rolling_upgrade` | Use rolling upgrade for clusters | `true` |
 | `agent_batch_size` | Agents to upgrade per batch | `10` |

@@ -30,7 +30,7 @@
 
 - name: Configure firewall
   ansible.builtin.include_tasks: firewall.yml
-  when: wazuh_configure_firewall | default(true)
+  when: wazuh_configure_firewall | default(false)
 
 - name: Enable Wazuh Indexer service
   ansible.builtin.systemd:
@@ -155,6 +155,7 @@
     status_code: [200]
     return_content: true
   register: indexer_health
+  no_log: true
   until: indexer_health.status == 200
   retries: 10
   delay: 5

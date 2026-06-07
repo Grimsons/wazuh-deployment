@@ -1,0 +1,65 @@
+---
+# Wazuh Manager - Security Configuration Assessment (SCA) Policy Management
+# Deploys custom SCA policies (e.g., CIS benchmarks) to /var/ossec/ruleset/sca/
+#
+# Place custom SCA policy YAML files in files/sca/ to have them deployed.
+# Wazuh ships built-in CIS policies for common platforms; this task supplements them.
+
+- name: Ensure SCA policy directory exists
+  ansible.builtin.file:
+    path: /var/ossec/ruleset/sca
+    state: directory
+    owner: root
+    group: wazuh
+    mode: '0750'
+  become: true
+
+- name: Find custom SCA policy files
+  ansible.builtin.find:
+    paths: "{{ role_path }}/../../files/sca"
+    patterns: "*.yml,*.yaml"
+  register: custom_sca_policies
+  delegate_to: localhost
+  become: false
+
+- name: Deploy custom SCA policies
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "/var/ossec/ruleset/sca/{{ item.path | basename }}"
+    owner: root
+    group: wazuh
+    mode: '0640'
+  become: true
+  loop: "{{ custom_sca_policies.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  notify: restart wazuh-manager
+  when: custom_sca_policies.files | length > 0
+
+- name: Verify built-in CIS Linux benchmark policies are present
+  ansible.builtin.stat:
+    path: "/var/ossec/ruleset/sca/{{ item }}"
+  register: builtin_sca_check
+  become: true
+  loop: "{{ wazuh_sca_builtin_policies }}"
+  when: wazuh_sca_verify_builtin | default(true)
+
+- name: Report missing built-in SCA policies
+  ansible.builtin.debug:
+    msg: "WARNING: Built-in SCA policy not found: {{ item.item }} — ensure Wazuh is fully installed"
+  loop: "{{ builtin_sca_check.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item | default('') }}"
+  when:
+    - wazuh_sca_verify_builtin | default(true)
+    - item.stat is defined
+    - not item.stat.exists
+
+- name: Display SCA policy summary
+  ansible.builtin.debug:
+    msg: |
+      SCA Configuration:
+        Enabled: {{ wazuh_sca_enabled | default(true) }}
+        Interval: {{ wazuh_sca_interval | default('12h') }}
+        Custom policies deployed: {{ custom_sca_policies.files | length }}
+  when: wazuh_debug | default(false)

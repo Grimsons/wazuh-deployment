@@ -33,6 +33,10 @@
   ansible.builtin.include_tasks: custom_rules.yml
   when: wazuh_custom_content_enabled | default(false)
 
+- name: Manage SCA policies
+  ansible.builtin.include_tasks: sca.yml
+  when: wazuh_sca_enabled | default(true)
+
 - name: Configure Wazuh API
   ansible.builtin.include_tasks: api.yml
 
@@ -42,7 +46,7 @@
 
 - name: Configure firewall
   ansible.builtin.include_tasks: firewall.yml
-  when: wazuh_configure_firewall | default(true)
+  when: wazuh_configure_firewall | default(false)
 
 - name: Enable Wazuh Manager service
   ansible.builtin.systemd:

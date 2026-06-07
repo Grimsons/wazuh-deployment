@@ -203,12 +203,12 @@
   when: wazuh_custom_rules is defined and wazuh_custom_rules | length > 0
 
 # Validate configuration after deploying custom content
-- name: Validate Wazuh configuration
-  ansible.builtin.command: /var/ossec/bin/wazuh-logtest-legacy -t
+- name: Validate Wazuh configuration (rules, decoders, CDB lists)
+  ansible.builtin.command: /var/ossec/bin/wazuh-analysisd -t
   become: true
   register: config_test
   changed_when: false
-  failed_when: "'Configuration error' in config_test.stderr"
+  failed_when: config_test.rc != 0
 
 - name: Display custom content deployment summary
   ansible.builtin.debug:

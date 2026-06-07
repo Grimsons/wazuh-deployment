@@ -38,4 +38,5 @@
     group: wazuh-dashboard
     mode: '0400'
   become: true
+  no_log: true
   notify: restart wazuh-dashboard

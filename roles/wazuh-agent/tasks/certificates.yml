@@ -1,0 +1,107 @@
+---
+# Wazuh Agent - Certificate Deployment
+# Deploys Root CA certificate for TLS agent-to-manager communication.
+# Primary: copy from control node (wazuh_certs_path).
+# Fallback: fetch from first manager node (already has root-ca.pem deployed).
+
+- name: Set certificate paths per platform
+  ansible.builtin.set_fact:
+    agent_certs_dir: >-
+      {{ '/var/ossec/etc/certs' if ansible_system == 'Linux'
+       else '/Library/Ossec/etc/certs' if ansible_system == 'Darwin'
+       else 'C:\\Program Files (x86)\\ossec-agent\\certs' }}
+    agent_ca_path: >-
+      {{ '/var/ossec/etc/certs/root-ca.pem' if ansible_system == 'Linux'
+       else '/Library/Ossec/etc/certs/root-ca.pem' if ansible_system == 'Darwin'
+       else 'C:\\Program Files (x86)\\ossec-agent\\certs\\root-ca.pem' }}
+
+- name: Create certificates directory (Linux/macOS)
+  ansible.builtin.file:
+    path: "{{ agent_certs_dir }}"
+    state: directory
+    owner: root
+    group: wazuh
+    mode: '0750'
+  become: true
+  when: ansible_os_family != 'Windows'
+
+- name: Create certificates directory (Windows)
+  ansible.windows.win_file:
+    path: "{{ agent_certs_dir }}"
+    state: directory
+  when: ansible_os_family == 'Windows'
+
+- name: Copy Root CA from control node (Linux/macOS)
+  ansible.builtin.copy:
+    src: "{{ wazuh_certs_path | default('files/certs') }}/root-ca.pem"
+    dest: "{{ agent_ca_path }}"
+    owner: root
+    group: wazuh
+    mode: '0400'
+  become: true
+  register: ca_copy_result
+  ignore_errors: true
+  when: ansible_os_family != 'Windows'
+
+- name: Copy Root CA from control node (Windows)
+  ansible.windows.win_copy:
+    src: "{{ wazuh_certs_path | default('files/certs') }}/root-ca.pem"
+    dest: "{{ agent_ca_path }}"
+  when: ansible_os_family == 'Windows'
+  register: ca_copy_win_result
+  ignore_errors: true
+
+- name: Fallback — slurp Root CA from first manager node
+  ansible.builtin.slurp:
+    src: /var/ossec/etc/certs/root-ca.pem
+  register: ca_slurp
+  delegate_to: "{{ wazuh_manager_nodes[0].name }}"
+  ignore_errors: true
+  when:
+    - ansible_os_family != 'Windows'
+    - ca_copy_result.failed | default(false)
+
+- name: Fallback — write Root CA to agent (Linux/macOS)
+  ansible.builtin.copy:
+    content: "{{ ca_slurp.content | b64decode }}"
+    dest: "{{ agent_ca_path }}"
+    owner: root
+    group: wazuh
+    mode: '0400'
+  become: true
+  when:
+    - ansible_os_family != 'Windows'
+    - ca_copy_result.failed | default(false)
+    - ca_slurp is defined
+    - ca_slurp.content is defined
+
+- name: Fallback — slurp Root CA from manager (Windows)
+  ansible.builtin.slurp:
+    src: /var/ossec/etc/certs/root-ca.pem
+  register: ca_slurp_win
+  delegate_to: "{{ wazuh_manager_nodes[0].name }}"
+  ignore_errors: true
+  when:
+    - ansible_os_family == 'Windows'
+    - ca_copy_win_result.failed | default(false)
+
+- name: Fallback — write Root CA to agent (Windows)
+  ansible.builtin.copy:
+    content: "{{ ca_slurp_win.content | b64decode }}"
+    dest: "{{ agent_ca_path }}"
+  when:
+    - ansible_os_family == 'Windows'
+    - ca_copy_win_result.failed | default(false)
+    - ca_slurp_win is defined
+    - ca_slurp_win.content is defined
+
+- name: Warn if Root CA could not be deployed
+  ansible.builtin.debug:
+    msg: >
+      WARNING: Root CA certificate could not be deployed to agent.
+      Agent TLS will fail until root-ca.pem is manually placed at {{ agent_ca_path }}.
+      Either run from the Ansible control node with certs in {{ wazuh_certs_path | default('files/certs') }},
+      or ensure the first manager node has /var/ossec/etc/certs/root-ca.pem deployed.
+  when:
+    - ca_copy_result.failed | default(false) or ca_copy_win_result.failed | default(false)
+    - ca_slurp.content is not defined and ca_slurp_win.content is not defined

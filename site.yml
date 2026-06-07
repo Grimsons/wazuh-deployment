@@ -26,7 +26,7 @@
   vars:
     # Override connection to use initial SSH user for bootstrap
     ansible_user: "{{ wazuh_bootstrap_user | default('root') }}"
-    ansible_ssh_pass: "{{ vault_ansible_connection_password | default(wazuh_bootstrap_password) | default(omit) }}"
+    ansible_ssh_pass: "{{ vault_ansible_connection_password | default(vault_bootstrap_ssh_pass) | default(omit) }}"
     ansible_ssh_private_key_file: "{{ wazuh_bootstrap_ssh_key | default(omit) }}"
     ansible_user_name: "{{ wazuh_ansible_user | default('wazuh-deploy') }}"
     ssh_public_key_file: "{{ playbook_dir }}/keys/wazuh_ansible_key.pub"
@@ -100,7 +100,7 @@
       ansible.builtin.command:
         cmd: >
           ssh -i {{ playbook_dir }}/keys/wazuh_ansible_key
-          -o StrictHostKeyChecking=no
+          -o StrictHostKeyChecking=accept-new
           -o UserKnownHostsFile=/dev/null
           -o BatchMode=yes
           {{ ansible_user_name }}@{{ inventory_hostname }}
@@ -324,7 +324,8 @@
   hosts: wazuh_indexers
   become: true
   gather_facts: false  # Already gathered in pre-flight
-  serial: "{{ wazuh_indexer_deploy_serial | default(omit) }}"
+  serial: "{{ wazuh_indexer_deploy_serial | default(1) }}"
+  any_errors_fatal: true
   roles:
     - role: wazuh-indexer
   tags:
@@ -384,7 +385,8 @@
   hosts: wazuh_managers
   become: true
   gather_facts: false  # Already gathered in pre-flight
-  serial: "{{ wazuh_manager_deploy_serial | default(omit) }}"
+  serial: "{{ wazuh_manager_deploy_serial | default(1) }}"
+  any_errors_fatal: true
   roles:
     - role: wazuh-manager
   tags:
@@ -442,6 +444,7 @@
 - name: Deploy Wazuh Dashboard
   hosts: wazuh_dashboards
   become: true
+  any_errors_fatal: true
   gather_facts: false  # Already gathered in pre-flight
   roles:
     - role: wazuh-dashboard

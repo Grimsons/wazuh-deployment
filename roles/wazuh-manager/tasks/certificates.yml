@@ -7,7 +7,7 @@
     state: directory
     owner: wazuh
     group: wazuh
-    mode: '0700'
+    mode: '0750'
   become: true
 
 - name: Copy root CA certificate
@@ -38,13 +38,5 @@
     group: wazuh
     mode: '0400'
   become: true
+  no_log: true
   notify: restart wazuh-manager
-
-- name: Harden cert directory — remove group execute bit (prevents listing by group members)
-  ansible.builtin.file:
-    path: /var/ossec/etc/certs
-    state: directory
-    owner: wazuh
-    group: wazuh
-    mode: '0700'
-  become: true

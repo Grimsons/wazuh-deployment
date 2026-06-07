@@ -1,0 +1,10 @@
+# CRLF line endings (Windows-style) cause ShellCheck to flag literal \r chars
+# and here-document parsing issues. Files remain valid on Linux — bash handles CRLF.
+# CRLF line endings (Windows-style) cause ShellCheck to flag literal \r chars,
+# here-document parsing issues, and broken line continuations.
+# Files remain valid on Linux — bash handles CRLF.
+disable=SC1017,SC1073,SC1044,SC1072,SC2287,SC2288
+
+# Jinja2 templates embedded in shell (.j2 files) contain {{ }} markers that
+# ShellCheck misinterprets as function/parameter syntax.
+disable=SC1064,SC1065,SC1066

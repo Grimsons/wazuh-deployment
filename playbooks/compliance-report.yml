@@ -4,10 +4,10 @@
 #
 # Usage:
 #   Full compliance report:
-#     ansible-playbook playbooks/compliance-report.yml
+#     ansible-playbook playbooks/compliance-report.yml -i inventory/hosts.yml
 #
 #   SCA-only report:
-#     ansible-playbook playbooks/compliance-report.yml --tags sca
+#     ansible-playbook playbooks/compliance-report.yml -i inventory/hosts.yml --tags sca
 #
 #   Vulnerability-only report:
 #     ansible-playbook playbooks/compliance-report.yml --tags vulnerability
@@ -37,7 +37,7 @@
         method: POST
         user: "{{ wazuh_api_user | default('wazuh') }}"
         password: "{{ wazuh_api_password | default(vault_wazuh_api_password) }}"
-        validate_certs: false
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         return_content: true
         status_code: [200]
       register: api_auth
@@ -59,7 +59,7 @@
         method: GET
         headers:
           Authorization: "Bearer {{ api_token }}"
-        validate_certs: false
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         return_content: true
       register: agent_summary
       tags: [agents, sca, vulnerability]
@@ -70,7 +70,7 @@
         method: GET
         headers:
           Authorization: "Bearer {{ api_token }}"
-        validate_certs: false
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         return_content: true
       register: agent_list
       tags: [agents, sca, vulnerability]
@@ -84,7 +84,7 @@
         method: GET
         headers:
           Authorization: "Bearer {{ api_token }}"
-        validate_certs: false
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         return_content: true
       loop: "{{ agent_list.json.data.affected_items | selectattr('status', 'equalto', 'active') | list }}"
       loop_control:
@@ -124,7 +124,7 @@
         method: GET
         headers:
           Authorization: "Bearer {{ api_token }}"
-        validate_certs: false
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         return_content: true
       loop: "{{ agent_list.json.data.affected_items | selectattr('status', 'equalto', 'active') | list }}"
       loop_control:

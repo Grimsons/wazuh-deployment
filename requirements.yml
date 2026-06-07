@@ -1,9 +1,20 @@
 ---
+# Ansible collection dependencies
+# Pinned to exact versions to prevent supply chain attacks via minor-version updates.
+# To upgrade: review changelog, test in molecule, then update the version here.
+# Last reviewed: 2026-05-09
 collections:
   - name: community.general
+    version: "9.3.0"
   - name: community.docker
+    version: "3.13.0"
   - name: ansible.windows
+    version: "2.5.0"
   - name: community.windows
+    version: "2.3.0"
   - name: ansible.posix
+    version: "1.5.4"
   - name: ansible.utils
+    version: "4.1.0"
   - name: ansible.netcommon
+    version: "6.1.3"

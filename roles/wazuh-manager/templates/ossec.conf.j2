@@ -10,11 +10,11 @@
     <logall>{{ 'yes' if wazuh_logall | default(false) else 'no' }}</logall>
     <logall_json>{{ 'yes' if wazuh_logall_json | default(false) else 'no' }}</logall_json>
     <!-- Email notifications -->
-    <email_notification>{{ 'yes' if wazuh_email_notification_enabled else 'no' }}</email_notification>
-{% if wazuh_email_notification_enabled %}
-    <smtp_server>{{ wazuh_email_smtp_server }}</smtp_server>
-    <email_from>{{ wazuh_email_from }}</email_from>
-    <email_to>{{ wazuh_email_to }}</email_to>
+    <email_notification>{{ 'yes' if wazuh_email_notification_enabled | default(false) else 'no' }}</email_notification>
+{% if wazuh_email_notification_enabled | default(false) %}
+    <smtp_server>{{ wazuh_email_smtp_server | default('') }}</smtp_server>
+    <email_from>{{ wazuh_email_from | default('') }}</email_from>
+    <email_to>{{ wazuh_email_to | default('') }}</email_to>
 {% endif %}
     <email_maxperhour>{{ wazuh_email_maxperhour | default(12) }}</email_maxperhour>
     <email_log_source>alerts.log</email_log_source>
@@ -74,12 +74,12 @@
   <!-- Cluster Configuration -->
 {% if wazuh_manager_cluster_enabled | default(false) %}
   <cluster>
-    <name>{{ wazuh_manager_cluster_name }}</name>
-    <node_name>{{ manager_node_name | default('manager-1') }}</node_name>
-    <node_type>{{ manager_node_type | default('master') }}</node_type>
-    <key>{{ wazuh_manager_cluster_key }}</key>
+    <name>{{ wazuh_manager_cluster_name | default('wazuh-cluster') }}</name>
+    <node_name>{{ wazuh_manager_cluster_node_name | default('manager-1') }}</node_name>
+    <node_type>{{ wazuh_manager_cluster_node_type | default('master') }}</node_type>
+    <key>{{ wazuh_manager_cluster_key | default('') }}</key>
     <port>{{ wazuh_manager_cluster_port | default(1516) }}</port>
-    <bind_addr>{{ wazuh_manager_cluster_bind_addr | default(ansible_default_ipv4.address) }}</bind_addr>
+    <bind_addr>{{ wazuh_manager_cluster_bind_addr | default('0.0.0.0') }}</bind_addr>
     <nodes>
 {% for node in wazuh_manager_nodes %}
       <node>{{ node.ip }}</node>
@@ -91,11 +91,11 @@
 {% else %}
   <cluster>
     <name>wazuh</name>
-    <node_name>{{ manager_node_name | default('manager-1') }}</node_name>
+      <node_name>{{ wazuh_manager_cluster_node_name | default("manager-1") }}</node_name>
     <node_type>master</node_type>
     <key></key>
     <port>1516</port>
-    <bind_addr>{{ ansible_default_ipv4.address }}</bind_addr>
+    <bind_addr>0.0.0.0</bind_addr>
     <nodes>
       <node>{{ ansible_default_ipv4.address | default(wazuh_manager_nodes[0].ip) }}</node>
     </nodes>
@@ -276,6 +276,24 @@
     <rids_closing_time>{{ wazuh_remote_rids_closing_time | default('5m') }}</rids_closing_time>
   </remote>
 
+{% if wazuh_agent_tls_enabled | default(true) %}
+  <!-- TLS encrypted agent connections -->
+  <remote>
+    <connection>secure</connection>
+    <port>{{ wazuh_manager_agent_port | default(1514) }}</port>
+    <protocol>tls</protocol>
+    <ssl>
+      <certificate>/var/ossec/etc/certs/server.pem</certificate>
+      <key>/var/ossec/etc/certs/server-key.pem</key>
+      <certificate_authorities>
+        <ca>/var/ossec/etc/certs/root-ca.pem</ca>
+      </certificate_authorities>
+    </ssl>
+    <queue_size>{{ wazuh_remote_queue_size | default(131072) }}</queue_size>
+    <rids_closing_time>{{ wazuh_remote_rids_closing_time | default('5m') }}</rids_closing_time>
+  </remote>
+{% endif %}
+
   <!-- Remote syslog listeners (for network devices: Cisco DNA Center, firewalls, etc.) -->
 {% if wazuh_syslog_listeners is defined and wazuh_syslog_listeners | length > 0 %}
 {% for listener in wazuh_syslog_listeners %}
@@ -383,10 +401,10 @@
       <aws_profile>{{ bucket.aws_profile }}</aws_profile>
 {% endif %}
 {% if bucket.access_key is defined %}
-      <access_key>{{ bucket.access_key | e }}</access_key>
+      <access_key>{{ bucket.access_key }}</access_key>
 {% endif %}
 {% if bucket.secret_key is defined %}
-      <secret_key>{{ bucket.secret_key | e }}</secret_key>
+      <secret_key>{{ bucket.secret_key }}</secret_key>
 {% endif %}
 {% if bucket.iam_role_arn is defined %}
       <iam_role_arn>{{ bucket.iam_role_arn }}</iam_role_arn>
@@ -411,10 +429,10 @@
       <aws_profile>{{ service.aws_profile }}</aws_profile>
 {% endif %}
 {% if service.access_key is defined %}
-      <access_key>{{ service.access_key | e }}</access_key>
+      <access_key>{{ service.access_key }}</access_key>
 {% endif %}
 {% if service.secret_key is defined %}
-      <secret_key>{{ service.secret_key | e }}</secret_key>
+      <secret_key>{{ service.secret_key }}</secret_key>
 {% endif %}
 {% if service.iam_role_arn is defined %}
       <iam_role_arn>{{ service.iam_role_arn }}</iam_role_arn>
@@ -441,8 +459,8 @@
     <run_on_start>{{ 'yes' if wazuh_azure_run_on_start | default(true) else 'no' }}</run_on_start>
 {% for log_analytics in wazuh_azure_log_analytics | default([]) %}
     <log_analytics>
-      <application_id>{{ log_analytics.application_id | e }}</application_id>
-      <application_key>{{ log_analytics.application_key | e }}</application_key>
+      <application_id>{{ log_analytics.application_id }}</application_id>
+      <application_key>{{ log_analytics.application_key }}</application_key>
 {% if log_analytics.tenantdomain is defined %}
       <tenantdomain>{{ log_analytics.tenantdomain }}</tenantdomain>
 {% endif %}
@@ -463,8 +481,8 @@
 {% endfor %}
 {% for graph in wazuh_azure_graph | default([]) %}
     <graph>
-      <application_id>{{ graph.application_id | e }}</application_id>
-      <application_key>{{ graph.application_key | e }}</application_key>
+      <application_id>{{ graph.application_id }}</application_id>
+      <application_key>{{ graph.application_key }}</application_key>
 {% if graph.tenantdomain is defined %}
       <tenantdomain>{{ graph.tenantdomain }}</tenantdomain>
 {% endif %}
@@ -484,8 +502,8 @@
 {% endfor %}
 {% for storage in wazuh_azure_storage | default([]) %}
     <storage>
-      <account_name>{{ storage.account_name | e }}</account_name>
-      <account_key>{{ storage.account_key | e }}</account_key>
+      <account_name>{{ storage.account_name }}</account_name>
+      <account_key>{{ storage.account_key }}</account_key>
 {% if storage.auth_path is defined %}
       <auth_path>{{ storage.auth_path }}</auth_path>
 {% endif %}
@@ -514,8 +532,8 @@
     <disabled>no</disabled>
     <interval>{{ wazuh_gcp_interval | default('1m') }}</interval>
     <run_on_start>{{ 'yes' if wazuh_gcp_run_on_start | default(true) else 'no' }}</run_on_start>
-    <project_id>{{ wazuh_gcp_project_id }}</project_id>
-    <subscription_name>{{ wazuh_gcp_subscription_name }}</subscription_name>
+    <project_id>{{ wazuh_gcp_project_id | default('') }}</project_id>
+    <subscription_name>{{ wazuh_gcp_subscription_name | default('') }}</subscription_name>
 {% if wazuh_gcp_credentials_file is defined %}
     <credentials_file>{{ wazuh_gcp_credentials_file }}</credentials_file>
 {% endif %}
@@ -567,7 +585,7 @@
 {% if wazuh_syslog_output_enabled | default(false) %}
   <!-- Syslog Output -->
   <syslog_output>
-    <server>{{ wazuh_syslog_output_server }}</server>
+    <server>{{ wazuh_syslog_output_server | default('') }}</server>
     <port>{{ wazuh_syslog_output_port | default(514) }}</port>
     <format>{{ wazuh_syslog_output_format | default('default') }}</format>
 {% if wazuh_syslog_output_level is defined %}
@@ -586,12 +604,12 @@
   <!-- Integrations (explicit) -->
 {% for integration in wazuh_integrations %}
   <integration>
-    <name>{{ integration.name | e }}</name>
+    <name>{{ integration.name }}</name>
 {% if integration.hook_url is defined %}
-    <hook_url>{{ integration.hook_url | e }}</hook_url>
+    <hook_url>{{ integration.hook_url }}</hook_url>
 {% endif %}
 {% if integration.api_key is defined %}
-    <api_key>{{ integration.api_key | e }}</api_key>
+    <api_key>{{ integration.api_key }}</api_key>
 {% endif %}
 {% if integration.level is defined %}
     <level>{{ integration.level }}</level>
@@ -600,10 +618,10 @@
     <rule_id>{{ integration.rule_id }}</rule_id>
 {% endif %}
 {% if integration.group is defined %}
-    <group>{{ integration.group | e }}</group>
+    <group>{{ integration.group }}</group>
 {% endif %}
 {% if integration.alert_format is defined %}
-    <alert_format>{{ integration.alert_format | e }}</alert_format>
+    <alert_format>{{ integration.alert_format }}</alert_format>
 {% endif %}
 {% if integration.options is defined %}
     <options>{{ integration.options | to_json }}</options>
@@ -615,7 +633,7 @@
 {% if wazuh_alerting_profile == 'full' and wazuh_slack_hook_url is defined %}
   <integration>
     <name>slack</name>
-    <hook_url>{{ wazuh_slack_hook_url | e }}</hook_url>
+    <hook_url>{{ wazuh_slack_hook_url }}</hook_url>
     <level>10</level>
     <alert_format>json</alert_format>
   </integration>
@@ -653,7 +671,7 @@
     <api_auth>
       <tenant_id>{{ tenant.tenant_id }}</tenant_id>
       <client_id>{{ tenant.client_id }}</client_id>
-      <client_secret>{{ tenant.client_secret | e }}</client_secret>
+      <client_secret>{{ tenant.client_secret }}</client_secret>
       <api_type>{{ tenant.api_type | default('commercial') }}</api_type>
     </api_auth>
 {% for subscription in tenant.subscriptions | default(['Audit.AzureActiveDirectory', 'Audit.Exchange', 'Audit.SharePoint', 'Audit.General', 'DLP.All']) %}
@@ -677,7 +695,7 @@
 {% for org in wazuh_github_organizations | default([]) %}
     <api_auth>
       <org_name>{{ org.name }}</org_name>
-      <api_token>{{ org.api_token | e }}</api_token>
+      <api_token>{{ org.api_token }}</api_token>
 {% if org.event_type is defined %}
       <event_type>{{ org.event_type }}</event_type>
 {% endif %}

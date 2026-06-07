@@ -104,14 +104,47 @@
             - indexer-config.tar.gz
             - indexer-certs.tar.gz
 
+        - name: Check if indexer cert archive is already vault-encrypted
+          ansible.builtin.command:
+            cmd: >
+              head -c 14
+              {{ backup_base_path | quote }}/{{ backup_timestamp | quote }}/indexer/{{ inventory_hostname | quote }}/indexer-certs.tar.gz
+          delegate_to: localhost
+          become: false
+          register: indexer_cert_header
+          changed_when: false
+
+        - name: Encrypt fetched indexer cert archive on controller
+          ansible.builtin.command:
+            cmd: >
+              ansible-vault encrypt
+              {{ backup_base_path | quote }}/{{ backup_timestamp | quote }}/indexer/{{ inventory_hostname | quote }}/indexer-certs.tar.gz
+          environment:
+            ANSIBLE_VAULT_PASSWORD_FILE: "{{ playbook_dir }}/../.vault_password"
+          delegate_to: localhost
+          become: false
+          changed_when: true
+          when: "'$ANSIBLE_VAULT' not in (indexer_cert_header.stdout | default(''))"
+
         - name: Cleanup temporary backup directory
           ansible.builtin.file:
             path: /tmp/wazuh-backup-{{ backup_timestamp }}
             state: absent
+      rescue:
+        - name: Remove unencrypted backups on failure
+          ansible.builtin.file:
+            path: "{{ backup_base_path }}/{{ backup_timestamp }}/indexer/{{ inventory_hostname }}"
+            state: absent
+          delegate_to: localhost
+          become: false
+
+        - name: Fail with backup error message
+          ansible.builtin.fail:
+            msg: "Indexer backup failed. Unencrypted data removed from {{ backup_base_path }}/{{ backup_timestamp }}/indexer/{{ inventory_hostname }}."
 
         - name: Create indexer snapshot (optional - for data backup)
           ansible.builtin.uri:
-            url: "https://127.0.0.1:9200/_snapshot/wazuh_backup"
+            url: "https://127.0.0.1:{{ wazuh_indexer_http_port | default(9200) }}/_snapshot/wazuh_backup"
             method: PUT
             user: "{{ wazuh_indexer_admin_user }}"
             password: "{{ wazuh_indexer_admin_password }}"
@@ -206,10 +239,47 @@
             - rbac.db
           ignore_errors: true
 
+        - name: Check if manager cert archive is already vault-encrypted
+          ansible.builtin.command:
+            cmd: >
+              head -c 14
+              {{ backup_base_path | quote }}/{{ backup_timestamp | quote }}/manager/{{ inventory_hostname | quote }}/manager-certs.tar.gz
+          delegate_to: localhost
+          become: false
+          register: manager_cert_header
+          changed_when: false
+          when: >
+            (backup_base_path + '/' + backup_timestamp + '/manager/' + inventory_hostname + '/manager-certs.tar.gz') is file
+
+        - name: Encrypt fetched manager cert archive on controller
+          ansible.builtin.command:
+            cmd: >
+              ansible-vault encrypt
+              {{ backup_base_path | quote }}/{{ backup_timestamp | quote }}/manager/{{ inventory_hostname | quote }}/manager-certs.tar.gz
+          environment:
+            ANSIBLE_VAULT_PASSWORD_FILE: "{{ playbook_dir }}/../.vault_password"
+          delegate_to: localhost
+          become: false
+          changed_when: true
+          when: >
+            (backup_base_path + '/' + backup_timestamp + '/manager/' + inventory_hostname + '/manager-certs.tar.gz') is file and
+            '$ANSIBLE_VAULT' not in (manager_cert_header.stdout | default(''))
+
         - name: Cleanup temporary backup directory
           ansible.builtin.file:
             path: /tmp/wazuh-backup-{{ backup_timestamp }}
             state: absent
+      rescue:
+        - name: Remove unencrypted backups on failure
+          ansible.builtin.file:
+            path: "{{ backup_base_path }}/{{ backup_timestamp }}/manager/{{ inventory_hostname }}"
+            state: absent
+          delegate_to: localhost
+          become: false
+
+        - name: Fail with backup error message
+          ansible.builtin.fail:
+            msg: "Manager backup failed. Unencrypted data removed from {{ backup_base_path }}/{{ backup_timestamp }}/manager/{{ inventory_hostname }}."
 
 - name: Backup Wazuh Dashboard
   hosts: wazuh_dashboards
@@ -258,10 +328,47 @@
             - dashboard-config.tar.gz
             - dashboard-certs.tar.gz
 
+        - name: Check if dashboard cert archive is already vault-encrypted
+          ansible.builtin.command:
+            cmd: >
+              head -c 14
+              {{ backup_base_path | quote }}/{{ backup_timestamp | quote }}/dashboard/{{ inventory_hostname | quote }}/dashboard-certs.tar.gz
+          delegate_to: localhost
+          become: false
+          register: dashboard_cert_header
+          changed_when: false
+          when: >
+            (backup_base_path + '/' + backup_timestamp + '/dashboard/' + inventory_hostname + '/dashboard-certs.tar.gz') is file
+
+        - name: Encrypt fetched dashboard cert archive on controller
+          ansible.builtin.command:
+            cmd: >
+              ansible-vault encrypt
+              {{ backup_base_path | quote }}/{{ backup_timestamp | quote }}/dashboard/{{ inventory_hostname | quote }}/dashboard-certs.tar.gz
+          environment:
+            ANSIBLE_VAULT_PASSWORD_FILE: "{{ playbook_dir }}/../.vault_password"
+          delegate_to: localhost
+          become: false
+          changed_when: true
+          when: >
+            (backup_base_path + '/' + backup_timestamp + '/dashboard/' + inventory_hostname + '/dashboard-certs.tar.gz') is file and
+            '$ANSIBLE_VAULT' not in (dashboard_cert_header.stdout | default(''))
+
         - name: Cleanup temporary backup directory
           ansible.builtin.file:
             path: /tmp/wazuh-backup-{{ backup_timestamp }}
             state: absent
+      rescue:
+        - name: Remove unencrypted backups on failure
+          ansible.builtin.file:
+            path: "{{ backup_base_path }}/{{ backup_timestamp }}/dashboard/{{ inventory_hostname }}"
+            state: absent
+          delegate_to: localhost
+          become: false
+
+        - name: Fail with backup error message
+          ansible.builtin.fail:
+            msg: "Dashboard backup failed. Unencrypted data removed from {{ backup_base_path }}/{{ backup_timestamp }}/dashboard/{{ inventory_hostname }}."
 
 - name: Backup summary
   hosts: localhost

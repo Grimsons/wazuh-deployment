@@ -1,0 +1,49 @@
+<!--
+  Sysmon Event 22 (DNS Query) Detection Rules
+  Rule ID range: 800650-800679
+  Parent group: sysmon_event22 (Windows Sysmon Event 22)
+
+  Prerequisites:
+    - Sysmon installed on Windows endpoints with Event 22 logging enabled
+    - files/agent_groups/windows-sysmon-config.xml deployed
+    - malicious-ioc/malicious-domains CDB list loaded (already in wazuh_cdb_lists)
+-->
+<group name="windows,sysmon,custom_dns_detection,">
+
+  <!-- ═══ Long Subdomain — DNS Tunnelling / Exfiltration (T1048.003) ═══ -->
+  <!-- Subdomains > 50 chars suggest base64-encoded data in DNS queries -->
+  <rule id="800650" level="10">
+    <if_group>sysmon_event22</if_group>
+    <field name="win.eventdata.queryName">\w{50,}\.\w+\.\w+</field>
+    <description>Sysmon DNS: Unusually long subdomain query from $(win.eventdata.image) - possible DNS tunnelling or exfiltration</description>
+    <mitre>
+      <id>T1048.003</id>
+      <id>T1071.004</id>
+    </mitre>
+    <group>dns_anomaly,exfiltration,</group>
+  </rule>
+
+  <!-- ═══ High-Risk TLD (T1071.004) ═══ -->
+  <rule id="800651" level="8">
+    <if_group>sysmon_event22</if_group>
+    <field name="win.eventdata.queryName">\.tk$|\.ml$|\.ga$|\.cf$|\.gq$|\.top$|\.xyz$|\.club$|\.online$</field>
+    <description>Sysmon DNS: Query to high-risk TLD by $(win.eventdata.image) - possible C2 or phishing infrastructure</description>
+    <mitre>
+      <id>T1071.004</id>
+    </mitre>
+    <group>dns_anomaly,</group>
+  </rule>
+
+  <!-- ═══ Known Malicious Domain via CDB (T1071.004 / T1568) ═══ -->
+  <rule id="800652" level="12">
+    <if_group>sysmon_event22</if_group>
+    <list field="win.eventdata.queryName" lookup="match_key">etc/lists/malicious-ioc/malicious-domains</list>
+    <description>Sysmon DNS: Query to known malicious domain $(win.eventdata.queryName) by $(win.eventdata.image)</description>
+    <mitre>
+      <id>T1071.004</id>
+      <id>T1568</id>
+    </mitre>
+    <group>dns_anomaly,threat_intel,attack,</group>
+  </rule>
+
+</group>

@@ -106,8 +106,6 @@ ansible-playbook site.yml --tags bootstrap,all
 
 The bootstrap play runs first, then continues with the full deployment using the newly created `wazuh-deploy` user.
 
-> **Note on `wazuh_indexer_allow_default_init`:** This variable controls OpenSearch security bootstrapping. It must be `true` only during the initial cluster setup (first deploy) so that OpenSearch can initialise its internal security configuration. The `make deploy-bootstrap` target handles this automatically. For all subsequent deployments this variable must be `false` (its default) to prevent security re-initialisation, which would overwrite any credential changes made after the first deploy.
-
 > **Note:** You do not need to pass `--vault-password-file` manually. The generated `ansible.cfg` already sets `vault_password_file = .vault_password`, so Ansible picks it up automatically.
 
 ### 3. Deploy (Subsequent Runs)
@@ -320,8 +318,6 @@ wazuh_manager_nodes:
     ip: "<manager-2-ip>"
 ```
 
-> **Important — `wazuh_manager_cluster_bind_addr`:** When the manager cluster is enabled, this variable must be set to a specific interface IP address. The value `0.0.0.0` is explicitly rejected by pre-flight assertions to prevent unintended cluster port exposure on all interfaces. Always set it to the exact IP of the network interface the cluster should listen on.
-
 ## Tags
 
 Use tags for selective deployment:
@@ -418,7 +414,7 @@ If MITRE technique aggregations fail in the dashboard:
 1. Back up `.vault_password` securely -- required to decrypt credentials
 2. Use external CA certificates for production environments
 3. Restrict network access to management ports
-4. Firewall rules are managed by Ansible by default (`wazuh_configure_firewall: true`). To use an external firewall instead, set `wazuh_configure_firewall: false` and `wazuh_firewall_external_managed: true`.
+4. Enable firewall rules (`wazuh_configure_firewall: true`)
 5. Keep deployment user locked down between deployments
 6. Rotate credentials regularly (`./scripts/manage-vault.sh rotate`)
 7. Enable audit logging for compliance

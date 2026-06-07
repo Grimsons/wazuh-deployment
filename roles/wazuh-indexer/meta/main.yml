@@ -1,0 +1,31 @@
+---
+dependencies: []
+
+galaxy_info:
+  role_name: wazuh_indexer
+  author: Wazuh
+  description: Deploy and configure Wazuh indexer (OpenSearch) nodes
+  company: Wazuh
+  license: Apache-2.0
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - focal
+        - jammy
+        - noble
+    - name: Debian
+      versions:
+        - bullseye
+        - bookworm
+    - name: EL
+      versions:
+        - "8"
+        - "9"
+  galaxy_tags:
+    - wazuh
+    - security
+    - siem
+    - xdr
+    - opensearch
+    - indexing

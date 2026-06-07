@@ -9,6 +9,7 @@
     group: wazuh
     mode: '0640'
   become: true
+  no_log: true
   notify: restart wazuh-manager
 
 - name: Configure API SSL certificates directory

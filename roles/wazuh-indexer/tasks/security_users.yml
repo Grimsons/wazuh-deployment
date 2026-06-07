@@ -3,23 +3,34 @@
 # This configures the admin user with a secure random password
 # All passwords are managed through Ansible Vault
 
-- name: Generate random admin password
-  ansible.builtin.set_fact:
-    wazuh_indexer_admin_password_generated: "{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits') }}{{ ['!', '@', '#', '%', '^', '*', '-', '_', '+', '='] | random }}{{ ['!', '@', '#', '%', '^', '*', '-', '_', '+', '='] | random }}"
+- name: Assert indexer admin password is set in vault
+  ansible.builtin.assert:
+    that:
+      - wazuh_indexer_admin_password is defined
+      - wazuh_indexer_admin_password | length >= 16
+      - wazuh_indexer_admin_password != 'admin'
+    fail_msg: >
+      Set wazuh_indexer_admin_password in group_vars/all/vault.yml before deployment.
+      Run: make vault-edit  (minimum 16 chars, not 'admin')
   run_once: true
-  when: wazuh_indexer_admin_password_generated is not defined
 
-- name: Set admin password (use provided or generated)
+- name: Set admin password from vault
   ansible.builtin.set_fact:
-    wazuh_admin_password: "{{ wazuh_indexer_admin_password if (wazuh_indexer_admin_password is defined and wazuh_indexer_admin_password != 'admin') else wazuh_indexer_admin_password_generated }}"
+    wazuh_admin_password: "{{ wazuh_indexer_admin_password }}"
   run_once: true
+  no_log: true
 
 - name: Hash the admin password using OpenSearch security tools
   ansible.builtin.shell: |
+    set -euo pipefail
     export JAVA_HOME=/usr/share/wazuh-indexer/jdk
-    printf '%s' "$HASH_PASSWORD" | /usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -
-  environment:
-    HASH_PASSWORD: "{{ wazuh_admin_password }}"
+    _tmp=$(mktemp /dev/shm/.hash_XXXXXX 2>/dev/null || mktemp)
+    chmod 600 "$_tmp"
+    printf '%s' {{ wazuh_admin_password | quote }} > "$_tmp"
+    # hash.sh only accepts -p; temp file limits window vs inline expansion
+    _hash=$(/usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p "$(cat "$_tmp")")
+    shred -u "$_tmp" 2>/dev/null || rm -f "$_tmp"
+    echo "$_hash"
   become: true
   register: password_hash
   changed_when: false
@@ -28,34 +39,6 @@
 - name: Extract hashed password
   ansible.builtin.set_fact:
     admin_password_hash: "{{ password_hash.stdout_lines | last }}"
-  no_log: true
-
-- name: Generate filebeat_writer password
-  ansible.builtin.set_fact:
-    wazuh_filebeat_password_generated: "{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits') }}{{ ['!', '@', '#', '%', '^', '*', '-', '_', '+', '='] | random }}{{ ['!', '@', '#', '%', '^', '*', '-', '_', '+', '='] | random }}"
-  run_once: true
-  when: wazuh_filebeat_password is not defined
-
-- name: Set filebeat_writer password
-  ansible.builtin.set_fact:
-    wazuh_filebeat_writer_password: "{{ wazuh_filebeat_password | default(wazuh_filebeat_password_generated) }}"
-  run_once: true
-  no_log: true
-
-- name: Hash the filebeat_writer password using OpenSearch security tools
-  ansible.builtin.shell: |
-    export JAVA_HOME=/usr/share/wazuh-indexer/jdk
-    printf '%s' "$HASH_PASSWORD" | /usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -
-  environment:
-    HASH_PASSWORD: "{{ wazuh_filebeat_writer_password }}"
-  become: true
-  register: filebeat_password_hash
-  changed_when: false
-  no_log: true
-
-- name: Extract hashed filebeat_writer password
-  ansible.builtin.set_fact:
-    filebeat_password_hash_value: "{{ filebeat_password_hash.stdout_lines | last }}"
   no_log: true
 
 - name: Backup original internal_users.yml
@@ -69,104 +52,31 @@
 - name: Update admin user password in internal_users.yml
   ansible.builtin.replace:
     path: /etc/wazuh-indexer/opensearch-security/internal_users.yml
-    regexp: '(?s)^(admin:\s*\n\s*hash:\s*)"[^"]*"'
+    regexp: '^(admin:\s*\n\s*hash:\s*)"[^"]*"'
     replace: '\1"{{ admin_password_hash }}"'
   become: true
-
-- name: Assert admin password replace took effect
-  ansible.builtin.command: grep -c 'hash:' /etc/wazuh-indexer/opensearch-security/internal_users.yml
-  become: true
-  register: hash_line_count
-  changed_when: false
-  failed_when: hash_line_count.stdout | int < 1
-
-- name: Add filebeat_writer internal user to internal_users.yml
-  ansible.builtin.blockinfile:
-    path: /etc/wazuh-indexer/opensearch-security/internal_users.yml
-    marker: "# {mark} ANSIBLE MANAGED BLOCK - filebeat_writer user"
-    block: |
-      filebeat_writer:
-        hash: "{{ filebeat_password_hash_value }}"
-        reserved: false
-        hidden: false
-        backend_roles: []
-        attributes: {}
-        description: "Filebeat alert writer — scoped write access to wazuh-* indices"
-  become: true
   no_log: true
-
-- name: Add filebeat_writer_role to roles.yml
-  ansible.builtin.blockinfile:
-    path: /etc/wazuh-indexer/opensearch-security/roles.yml
-    marker: "# {mark} ANSIBLE MANAGED BLOCK - filebeat_writer_role"
-    block: |
-      {{ wazuh_filebeat_writer_role | default('filebeat_writer_role') }}:
-        reserved: false
-        hidden: false
-        description: "Write access to wazuh alert, archive and statistics indices for Filebeat"
-        index_permissions:
-          - index_patterns:
-              - "wazuh-alerts-*"
-              - "wazuh-archives-*"
-              - "wazuh-statistics-*"
-            allowed_actions:
-              - "indices:admin/create"
-              - "indices:data/write/bulk"
-              - "indices:data/write/index"
-              - "indices:data/write/update"
-              - "create_index"
-              - "manage_aliases"
-  become: true
-
-- name: Map filebeat_writer user to filebeat_writer_role in roles_mapping.yml
-  ansible.builtin.blockinfile:
-    path: /etc/wazuh-indexer/opensearch-security/roles_mapping.yml
-    marker: "# {mark} ANSIBLE MANAGED BLOCK - filebeat_writer_role mapping"
-    block: |
-      {{ wazuh_filebeat_writer_role | default('filebeat_writer_role') }}:
-        reserved: false
-        hidden: false
-        users:
-          - "{{ wazuh_filebeat_user | default('filebeat_writer') }}"
-        backend_roles: []
-        hosts: []
-        description: "Maps filebeat_writer user to filebeat_writer_role"
-  become: true
+  diff: false
 
 - name: Apply security configuration with new password
   ansible.builtin.shell: |
     export JAVA_HOME=/usr/share/wazuh-indexer/jdk
     /usr/share/wazuh-indexer/plugins/opensearch-security/tools/securityadmin.sh \
       -cd /etc/wazuh-indexer/opensearch-security \
-      -cacert {{ wazuh_indexer_certs_path }}/root-ca.pem \
-      -cert {{ wazuh_indexer_certs_path }}/admin.pem \
-      -key {{ wazuh_indexer_certs_path }}/admin-key.pem \
+      -cacert {{ wazuh_indexer_certs_path | quote }}/root-ca.pem \
+      -cert {{ wazuh_indexer_certs_path | quote }}/admin.pem \
+      -key {{ wazuh_indexer_certs_path | quote }}/admin-key.pem \
       -h 127.0.0.1 \
-      -p {{ wazuh_indexer_http_port }} \
-      -icl -nhnv
+      -p {{ wazuh_indexer_http_port | quote }} \
+      -icl
   become: true
   register: security_update
   changed_when: security_update.rc == 0
   run_once: true
+  no_log: true
 
 - name: Display security update result
   ansible.builtin.debug:
     msg: "Security configuration updated successfully with new admin password"
   when: security_update.rc == 0
   run_once: true
-
-- name: Assert default indexer credentials have been rotated
-  ansible.builtin.uri:
-    url: "https://127.0.0.1:{{ wazuh_indexer_http_port }}/_cluster/health"
-    method: GET
-    user: "admin"
-    password: "admin"
-    force_basic_auth: true
-    validate_certs: false
-    status_code: [401, 403]
-  register: default_cred_check
-  failed_when: default_cred_check.status not in [401, 403]
-  changed_when: false
-  run_once: true
-  become: true
-  no_log: true

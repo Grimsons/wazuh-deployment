@@ -8,9 +8,9 @@ This section outlines the supported platforms, versions, and dependencies for de
 
 | This Toolkit | Wazuh Version | OpenSearch | Filebeat | Notes |
 |--------------|---------------|------------|----------|-------|
-| 1.x          | 4.14.x        | 2.11.x     | 7.10.2   | Current stable |
-| 1.x          | 4.13.x        | 2.11.x     | 7.10.2   | Supported |
-| 1.x          | 4.12.x        | 2.11.x     | 7.10.2   | Supported |
+| 1.x          | 4.14.x        | 2.18.x     | 7.10.2   | Current stable |
+| 1.x          | 4.13.x        | 2.17.x     | 7.10.2   | Supported |
+| 1.x          | 4.12.x        | 2.16.x     | 7.10.2   | Supported |
 
 ### Control Node Requirements
 

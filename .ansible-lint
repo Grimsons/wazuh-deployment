@@ -1,0 +1,12 @@
+---
+profile: production
+skip_list:
+  - yaml[indentation]
+  - yaml[line-length]
+  - no-changed-when
+  - experimental
+exclude_paths:
+  - .git/
+  - .github/
+  - molecule/
+  - roles/*/molecule/

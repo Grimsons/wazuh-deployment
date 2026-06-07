@@ -15,6 +15,7 @@
   until: api_status.status == 200 and api_status.json.status.overall.state == "green"
   retries: 30
   delay: 10
+  no_log: true
 
 - name: Define index patterns to create
   ansible.builtin.set_fact:
@@ -41,6 +42,7 @@
       osd-xsrf: "true"
     status_code: [200]
   register: existing_patterns
+  no_log: true
 
 - name: Extract existing pattern IDs
   ansible.builtin.set_fact:
@@ -62,6 +64,7 @@
   loop_control:
     label: "{{ item.title }}"
   ignore_errors: true
+  no_log: true
 
 - name: Create or update index patterns with field mappings
   ansible.builtin.uri:
@@ -87,6 +90,7 @@
   when: item.1.status is defined and item.1.status == 200
   register: pattern_creation
   ignore_errors: true
+  no_log: true
 
 - name: Set default index pattern to wazuh-alerts-*
   ansible.builtin.uri:
@@ -104,6 +108,7 @@
       value: "wazuh-alerts-*"
     status_code: [200, 400]
   ignore_errors: true
+  no_log: true
 
 - name: Display index pattern setup result
   ansible.builtin.debug:

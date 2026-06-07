@@ -55,32 +55,17 @@ wazuh_indexer_nodes:
 # ═══════════════════════════════════════════════════════════════
 wazuh_manager_api_port: 55000
 wazuh_manager_agent_port: 1514
-wazuh_api_user: "wazuh"
-
-# Filebeat writer — scoped OpenSearch user for alert ingestion (not admin)
-# Password stored in vault as vault_wazuh_filebeat_password
-wazuh_filebeat_user: "filebeat_writer"
-wazuh_filebeat_password: "{{ vault_wazuh_filebeat_password }}"
+wazuh_api_user: "wazuh-wui"
 
 # API password is auto-generated during deployment by default
 # Credentials saved to: ./credentials/api_password.txt
 # To use a custom password, uncomment and set:
 # wazuh_api_password: "YourSecurePassword"
 
-# Firewall management
-# true  = Ansible configures UFW/firewalld rules on the manager (recommended)
-# false = External firewall (cloud security groups, perimeter FW) handles port
-#         restriction. Must also set wazuh_firewall_external_managed: true to
-#         pass pre-flight security checks.
-wazuh_configure_firewall: true
-# wazuh_firewall_external_managed: false
-
 # Manager cluster settings (for multi-node deployments)
 wazuh_manager_cluster_enabled: false
 # wazuh_manager_cluster_name: "wazuh-manager-cluster"
-# wazuh_manager_cluster_key: "{{ vault_wazuh_manager_cluster_key }}"
-# Bind cluster port to private/management interface only (never 0.0.0.0)
-# wazuh_manager_cluster_bind_addr: "10.0.0.20"
+# wazuh_manager_cluster_key: "your-32-char-cluster-key-here!!"
 
 # Manager node list
 wazuh_manager_nodes:
@@ -94,13 +79,8 @@ wazuh_manager_nodes:
 # Wazuh Dashboard Settings
 # ═══════════════════════════════════════════════════════════════
 wazuh_dashboard_port: 443
-# FQDN used to build CORS allow-list for the Manager API when CORS is enabled.
-# wazuh_dashboard_fqdn: "wazuh.example.com"
 # Dashboard uses the indexer admin credentials (admin user)
 # No separate password configuration needed
-
-# Set to true once you have confirmed backup destinations use encrypted storage.
-# wazuh_backup_encryption_confirmed: false
 
 # Dashboard node list
 wazuh_dashboard_nodes:
@@ -167,11 +147,17 @@ wazuh_dashboard_cookie_same_site: "Strict"
 wazuh_dashboard_xframe_options: "DENY"
 wazuh_dashboard_csp_strict: true
 
-# API security hardening (names match api.yaml.j2 template variables)
-wazuh_manager_api_max_login_attempts: 5      # Lock after N failed attempts
-wazuh_manager_api_block_time: 900            # Lockout duration (seconds)
-wazuh_manager_api_max_requests_per_minute: 100  # Max requests per minute
-wazuh_manager_api_https: true               # Force HTTPS
+# API security hardening (brute-force protection)
+wazuh_api_max_login_attempts: 5              # Lock after N failed attempts
+wazuh_manager_api_block_time: 900            # Lockout duration (seconds) — replaces wazuh_api_lockout_time
+wazuh_manager_api_max_requests_per_minute: 100  # Max requests per minute — replaces wazuh_api_rate_limit
+wazuh_manager_api_https: true                # Force HTTPS — replaces wazuh_api_https_only
+
+# Backward-compatible aliases for renamed API vars
+# Remove after all deployments have migrated to the new names
+# wazuh_manager_api_block_time: "{{ wazuh_api_lockout_time | default(900) }}"
+# wazuh_manager_api_max_requests_per_minute: "{{ wazuh_api_rate_limit | default(100) }}"
+# wazuh_manager_api_https: "{{ wazuh_api_https_only | default(true) }}"
 
 # Indexer security
 wazuh_indexer_ssl_http_enabled: true
@@ -329,14 +315,17 @@ wazuh_log_rotation_compress: true
 # ═══════════════════════════════════════════════════════════════
 # Firewall configuration (installs and enables UFW/firewalld if needed)
 wazuh_configure_firewall: true
-# If using external firewall (cloud security groups, perimeter FW), set both:
-# wazuh_configure_firewall: false
-# wazuh_firewall_external_managed: true
 
-# Allow agents from any network (recommended for flexibility)
-# When true, firewall allows agent connections (1514, 1515) from anywhere
-# When false, only allows from auto-detected or explicitly configured subnets
-wazuh_allow_agents_from_any: true
+# Allow agents from any network
+# When false (recommended), only allows agent connections from auto-detected or explicitly configured subnets
+# Change to true only if agents connect from many different networks
+wazuh_allow_agents_from_any: false
+
+# Bind addresses for Wazuh services
+# 127.0.0.1 = local only (single-node, security best practice)
+# 0.0.0.0  = all interfaces (required for multi-node clusters)
+wazuh_indexer_network_host: "127.0.0.1"
+wazuh_dashboard_host: "127.0.0.1"
 
 # Network subnets are auto-detected from the host's default interface.
 # These settings only apply when wazuh_allow_agents_from_any is false:
@@ -346,7 +335,7 @@ wazuh_allow_agents_from_any: true
 # wazuh_allowed_cluster_networks:
 #   - "10.0.0.0/24"
 
-# SELinux configuration
+# SELinux configuration (PLACEHOLDER — not yet consumed by any role; reserved for future use)
 wazuh_configure_selinux: true
 
 # Package repository settings

@@ -6,10 +6,10 @@
 # 1. Run: ./scripts/manage-vault.sh init    (creates vault password)
 # 2. Run: ./scripts/manage-vault.sh create  (creates encrypted vault.yml)
 # 3. Or manually copy this to vault.yml and encrypt:
-#    cp vault.yml.example vault.yml
-#    ansible-vault encrypt vault.yml --vault-password-file .vault_password
+#    cp group_vars/all/vault.yml.example group_vars/all/vault.yml
+#    ansible-vault encrypt group_vars/all/vault.yml --vault-password-file .vault_password
 #
-# The encrypted group_vars/vault.yml is automatically loaded by Ansible
+# The encrypted group_vars/all/vault.yml is automatically loaded by Ansible
 # when running playbooks with --vault-password-file .vault_password
 
 # ═══════════════════════════════════════════════════════════════
@@ -27,6 +27,14 @@ vault_ansible_user: "wazuh-deploy"
 # - SSH password authentication (if not using keys)
 # - WinRM connection to Windows hosts
 vault_ansible_connection_password: ""
+
+# ═══════════════════════════════════════════════════════════════
+# Ansible Become (sudo) Password
+# ═══════════════════════════════════════════════════════════════
+# Used for:
+# - Privilege escalation (sudo) on managed hosts during bootstrap
+# - Created and stored in vault by manage-vault.sh
+vault_ansible_become_password: ""
 
 # ═══════════════════════════════════════════════════════════════
 # Bootstrap SSH Password (Initial Setup Only)
@@ -69,3 +77,18 @@ wazuh_agent_enrollment_password: "{{ vault_wazuh_agent_enrollment_password }}"
 # - Inter-node authentication in manager clusters
 # - Must be identical across all manager nodes
 wazuh_manager_cluster_key: "{{ vault_wazuh_manager_cluster_key }}"
+
+# ═══════════════════════════════════════════════════════════════
+# Dashboard Admin Password (Optional; one per deployment)
+# ═══════════════════════════════════════════════════════════════
+# Used for:
+# - Wazuh Dashboard admin login (may differ from indexer admin)
+# - Leave empty to reuse indexer admin password
+vault_wazuh_dashboard_admin_password: ""
+
+# ═══════════════════════════════════════════════════════════════
+# Grafana API Key (Optional; for monitoring dashboard)
+# ═══════════════════════════════════════════════════════════════
+# Used for:
+# - Prometheus/Grafana monitoring integration
+vault_grafana_api_key: ""

@@ -21,6 +21,7 @@
     - "{{ wazuh_grafana_provisioning_dir }}"
     - "/etc/grafana/provisioning/datasources"
   when: grafana_installed.stat.exists
+  become: true
 
 # ─────────────────────────────────────────────────────────────────
 # Dashboard Provisioning via Files (preferred)
@@ -33,6 +34,7 @@
     owner: grafana
     group: grafana
   when: grafana_installed.stat.exists
+  become: true
   notify: Restart grafana
 
 - name: Create dashboard provisioning config
@@ -55,6 +57,7 @@
     owner: grafana
     group: grafana
   when: grafana_installed.stat.exists
+  become: true
   notify: Restart grafana
 
 # ─────────────────────────────────────────────────────────────────
@@ -85,6 +88,7 @@
   when:
     - grafana_installed.stat.exists
     - not prometheus_ds.stat.exists
+  become: true
 
 - name: Display dashboard import instructions
   ansible.builtin.debug:

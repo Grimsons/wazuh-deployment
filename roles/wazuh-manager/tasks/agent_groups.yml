@@ -96,3 +96,49 @@
         - {{ group.name }}: {{ group.description | default('No description') }}
       {% endfor %}
   run_once: true
+
+# ═══════════════════════════════════════════════════════════════
+# Auto Agent Group Assignment
+# Assigns connected agents to groups based on OS platform
+# ═══════════════════════════════════════════════════════════════
+- name: Auto-assign agents to OS-based groups
+  when: wazuh_auto_group_assignment_enabled | default(false)
+  run_once: true
+  block:
+    - name: Get all registered agents
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:{{ wazuh_manager_api_port | default(55000) }}/agents?limit=500&status=active,disconnected"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ wazuh_api_token }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        return_content: true
+      register: all_agents
+      no_log: true
+
+    - name: Build agent platform list
+      ansible.builtin.set_fact:
+        agents_by_platform: >-
+          {{ all_agents.json.data.affected_items | default([])
+             | selectattr('id', 'ne', '000')
+             | list }}
+
+    - name: Assign agents to groups based on OS platform
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:{{ wazuh_manager_api_port | default(55000) }}/agents/{{ item.id }}/group/{{ target_group }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ wazuh_api_token }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        status_code: [200, 400]
+      vars:
+        agent_platform: "{{ item.os.platform | default('linux') | lower }}"
+        target_group: "{{ wazuh_auto_group_assignment_rules[agent_platform] | default(wazuh_auto_group_assignment_rules['linux']) }}"
+      loop: "{{ agents_by_platform }}"
+      loop_control:
+        label: "{{ item.name | default(item.id) }} ({{ item.os.platform | default('unknown') }}) → {{ target_group }}"
+      when:
+        - item.os is defined
+        - item.os.platform | lower in wazuh_auto_group_assignment_rules
+      no_log: true
+      ignore_errors: true

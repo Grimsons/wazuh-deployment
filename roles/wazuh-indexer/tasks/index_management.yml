@@ -208,6 +208,7 @@
         validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 404]
         return_content: true
+      no_log: true
       register: alerts_policy_check
 
     - name: Apply wazuh-alerts ISM policy
@@ -223,6 +224,7 @@
         status_code: [200, 201]
         headers:
           Content-Type: "application/json"
+      no_log: true
   rescue:
     - name: Re-fetch wazuh-alerts ISM policy after conflict
       ansible.builtin.uri:
@@ -234,6 +236,7 @@
         validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200]
         return_content: true
+      no_log: true
       register: alerts_policy_retry
 
     - name: Update wazuh-alerts ISM policy (conflict recovery)
@@ -249,6 +252,7 @@
         status_code: [200, 201]
         headers:
           Content-Type: "application/json"
+      no_log: true
   when: wazuh_retention_enabled | default(true)
 
 # ═══════════════════════════════════════════════════════════════
@@ -266,6 +270,7 @@
         validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 404]
         return_content: true
+      no_log: true
       register: archives_policy_check
 
     - name: Apply wazuh-archives ISM policy
@@ -281,6 +286,7 @@
         status_code: [200, 201]
         headers:
           Content-Type: "application/json"
+      no_log: true
   rescue:
     - name: Re-fetch wazuh-archives ISM policy after conflict
       ansible.builtin.uri:
@@ -292,6 +298,7 @@
         validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200]
         return_content: true
+      no_log: true
       register: archives_policy_retry
 
     - name: Update wazuh-archives ISM policy (conflict recovery)
@@ -307,6 +314,7 @@
         status_code: [200, 201]
         headers:
           Content-Type: "application/json"
+      no_log: true
   when: wazuh_retention_enabled | default(true)
 
 # ═══════════════════════════════════════════════════════════════
@@ -324,6 +332,7 @@
         validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 404]
         return_content: true
+      no_log: true
       register: monitoring_policy_check
 
     - name: Apply wazuh-monitoring ISM policy
@@ -339,6 +348,7 @@
         status_code: [200, 201]
         headers:
           Content-Type: "application/json"
+      no_log: true
   rescue:
     - name: Re-fetch wazuh-monitoring ISM policy after conflict
       ansible.builtin.uri:
@@ -350,6 +360,7 @@
         validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200]
         return_content: true
+      no_log: true
       register: monitoring_policy_retry
 
     - name: Update wazuh-monitoring ISM policy (conflict recovery)
@@ -365,6 +376,7 @@
         status_code: [200, 201]
         headers:
           Content-Type: "application/json"
+      no_log: true
   when: wazuh_retention_enabled | default(true)
 
 - name: Create or update wazuh-statistics ISM policy
@@ -379,6 +391,7 @@
         validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 404]
         return_content: true
+      no_log: true
       register: statistics_policy_check
 
     - name: Apply wazuh-statistics ISM policy
@@ -394,6 +407,7 @@
         status_code: [200, 201]
         headers:
           Content-Type: "application/json"
+      no_log: true
   rescue:
     - name: Re-fetch wazuh-statistics ISM policy after conflict
       ansible.builtin.uri:
@@ -405,6 +419,7 @@
         validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200]
         return_content: true
+      no_log: true
       register: statistics_policy_retry
 
     - name: Update wazuh-statistics ISM policy (conflict recovery)
@@ -420,6 +435,7 @@
         status_code: [200, 201]
         headers:
           Content-Type: "application/json"
+      no_log: true
   when: wazuh_retention_enabled | default(true)
 
 # ═══════════════════════════════════════════════════════════════
@@ -633,6 +649,7 @@
     status_code: [200]
     headers:
       Content-Type: "application/json"
+  no_log: true
   register: alerts_template_result
   changed_when: alerts_template_result.status == 200
   when: wazuh_rollover_enabled | default(true)
@@ -845,6 +862,7 @@
     status_code: [200]
     headers:
       Content-Type: "application/json"
+  no_log: true
   register: archives_template_result
   changed_when: archives_template_result.status == 200
   when: wazuh_rollover_enabled | default(true)
@@ -871,6 +889,7 @@
     status_code: [200]
     headers:
       Content-Type: "application/json"
+  no_log: true
   register: monitoring_template_result
   changed_when: monitoring_template_result.status == 200
   when: wazuh_rollover_enabled | default(true)
@@ -897,6 +916,7 @@
     status_code: [200]
     headers:
       Content-Type: "application/json"
+  no_log: true
   register: statistics_template_result
   changed_when: statistics_template_result.status == 200
   when: wazuh_rollover_enabled | default(true)
@@ -916,6 +936,7 @@
     force_basic_auth: true
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200, 404]
+  no_log: true
   register: alerts_bootstrap_check
   when: wazuh_rollover_enabled | default(true)
 
@@ -932,6 +953,7 @@
     status_code: [200]
     headers:
       Content-Type: "application/json"
+  no_log: true
   when:
     - wazuh_rollover_enabled | default(true)
     - alerts_bootstrap_check.status == 404
@@ -945,6 +967,7 @@
     force_basic_auth: true
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200, 404]
+  no_log: true
   register: archives_bootstrap_check
   when: wazuh_rollover_enabled | default(true)
 
@@ -961,6 +984,7 @@
     status_code: [200]
     headers:
       Content-Type: "application/json"
+  no_log: true
   when:
     - wazuh_rollover_enabled | default(true)
     - archives_bootstrap_check.status == 404
@@ -974,6 +998,7 @@
     force_basic_auth: true
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200, 404]
+  no_log: true
   register: monitoring_bootstrap_check
   when: wazuh_rollover_enabled | default(true)
 
@@ -990,6 +1015,7 @@
     status_code: [200]
     headers:
       Content-Type: "application/json"
+  no_log: true
   when:
     - wazuh_rollover_enabled | default(true)
     - monitoring_bootstrap_check.status == 404
@@ -1003,6 +1029,7 @@
     force_basic_auth: true
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200, 404]
+  no_log: true
   register: statistics_bootstrap_check
   when: wazuh_rollover_enabled | default(true)
 
@@ -1019,6 +1046,7 @@
     status_code: [200]
     headers:
       Content-Type: "application/json"
+  no_log: true
   when:
     - wazuh_rollover_enabled | default(true)
     - statistics_bootstrap_check.status == 404
@@ -1035,6 +1063,7 @@
     force_basic_auth: true
     validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200]
+  no_log: true
   register: existing_indices
   when: wazuh_retention_enabled | default(true)
   ignore_errors: true
@@ -1217,6 +1246,7 @@
     status_code: [200]
     headers:
       Content-Type: "application/json"
+  no_log: true
   loop: "{{ existing_indices.json | default([]) }}"
   when:
     - wazuh_rollover_enabled | default(true)
@@ -1239,6 +1269,7 @@
     status_code: [200, 409]
     headers:
       Content-Type: "application/json"
+  no_log: true
   loop: "{{ existing_indices.json | default([]) }}"
   when:
     - wazuh_retention_enabled | default(true)
@@ -1261,6 +1292,7 @@
     status_code: [200, 409]
     headers:
       Content-Type: "application/json"
+  no_log: true
   loop: "{{ existing_indices.json | default([]) }}"
   when:
     - wazuh_retention_enabled | default(true)
@@ -1283,6 +1315,7 @@
     status_code: [200, 409]
     headers:
       Content-Type: "application/json"
+  no_log: true
   loop: "{{ existing_indices.json | default([]) }}"
   when:
     - wazuh_retention_enabled | default(true)
@@ -1305,6 +1338,7 @@
     status_code: [200, 409]
     headers:
       Content-Type: "application/json"
+  no_log: true
   loop: "{{ existing_indices.json | default([]) }}"
   when:
     - wazuh_retention_enabled | default(true)
@@ -1331,6 +1365,7 @@
     status_code: [200]
     headers:
       Content-Type: "application/json"
+  no_log: true
   register: ism_settings_result
   changed_when: ism_settings_result.status == 200
   when: wazuh_retention_enabled | default(true)

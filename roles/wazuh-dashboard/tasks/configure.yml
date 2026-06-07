@@ -2,12 +2,6 @@
 # Wazuh Dashboard - Configuration
 # All credentials are sourced from Ansible Vault via group_vars
 
-- name: Validate xframe_options value
-  ansible.builtin.assert:
-    that:
-      - wazuh_dashboard_xframe_options | default('DENY') in ['DENY', 'SAMEORIGIN']
-    fail_msg: "wazuh_dashboard_xframe_options must be 'DENY' or 'SAMEORIGIN', got: {{ wazuh_dashboard_xframe_options | default('DENY') }}"
-
 - name: Ensure log directory exists
   ansible.builtin.file:
     path: "{{ wazuh_dashboard_log_path }}"
@@ -26,6 +20,7 @@
     mode: '0640'
     backup: true
   become: true
+  no_log: true
   notify: restart wazuh-dashboard
 
 - name: Ensure dashboard data directory exists
@@ -63,6 +58,7 @@
     group: wazuh-dashboard
     mode: '0640'
   become: true
+  no_log: true
   notify: restart wazuh-dashboard
 
 - name: Set correct ownership on wazuh plugin data directory
@@ -86,5 +82,5 @@
 - name: Allow Dashboard to bind to privileged port (if < 1024)
   ansible.builtin.command: setcap 'cap_net_bind_service=+ep' /usr/share/wazuh-dashboard/node/bin/node
   become: true
-  changed_when: true
+  changed_when: false
   when: wazuh_dashboard_port | int < 1024

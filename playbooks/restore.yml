@@ -84,6 +84,10 @@
             remote_src: true
           when: indexer_backup_check.stat.exists
 
+        # NOTE: ansible.builtin.copy auto-decrypts vault-encrypted source files in memory.
+        # This requires --vault-password-file or ANSIBLE_VAULT_PASSWORD_FILE to be set.
+        # Without vault access, raw encrypted bytes are copied and unarchive fails with
+        # a "not a gzip file" error. Run via deploy-with-rollback.sh which enforces this.
         - name: Copy indexer certs backup to host
           ansible.builtin.copy:
             src: "{{ backup_source_path }}/indexer/{{ inventory_hostname }}/indexer-certs.tar.gz"
@@ -98,7 +102,7 @@
             remote_src: true
           when: indexer_backup_check.stat.exists
 
-        - name: Fix indexer permissions
+        - name: Fix indexer directory permissions post-restore
           ansible.builtin.file:
             path: "{{ item }}"
             owner: wazuh-indexer
@@ -106,6 +110,8 @@
             recurse: true
           loop:
             - /etc/wazuh-indexer
+            - /var/lib/wazuh-indexer
+            - /var/log/wazuh-indexer
           when: indexer_backup_check.stat.exists
 
         - name: Cleanup restore files
@@ -224,12 +230,44 @@
             mode: '0640'
           when: rbac_check.stat.exists
 
-        - name: Fix manager permissions
+        - name: Fix manager writable directory permissions post-restore
           ansible.builtin.file:
-            path: /var/ossec
+            path: "{{ item }}"
             owner: wazuh
             group: wazuh
             recurse: true
+          loop:
+            - /var/ossec/etc/shared
+            - /var/ossec/etc/decoders
+            - /var/ossec/etc/rules
+            - /var/ossec/etc/lists
+            - /var/ossec/logs
+            - /var/ossec/queue
+            - /var/ossec/var
+            - /var/ossec/tmp
+            - /var/ossec/stats
+          when: manager_backup_check.stat.exists
+
+        - name: Restore root ownership on manager config files post-restore
+          ansible.builtin.file:
+            path: "{{ item }}"
+            owner: root
+            group: wazuh
+            mode: '0640'
+          loop:
+            - /var/ossec/etc/ossec.conf
+          when: manager_backup_check.stat.exists
+          failed_when: false
+
+        - name: Restore root ownership on manager binaries post-restore
+          ansible.builtin.file:
+            path: "{{ item }}"
+            owner: root
+            group: wazuh
+            recurse: true
+          loop:
+            - /var/ossec/bin
+            - /var/ossec/lib
           when: manager_backup_check.stat.exists
 
         - name: Cleanup restore files
@@ -323,6 +361,88 @@
           when:
             - dashboard_backup_check.stat.exists
             - restart_services | default(true) | bool
+
+- name: Post-Restore Validation
+  hosts: wazuh_indexers:wazuh_managers:wazuh_dashboards
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Verify indexer service is running after restore
+      ansible.builtin.systemd:
+        name: wazuh-indexer
+      register: indexer_post_restore
+      until: indexer_post_restore.status.ActiveState == "active"
+      retries: 12
+      delay: 10
+      failed_when: indexer_post_restore.status.ActiveState != "active"
+      when: inventory_hostname in groups.get('wazuh_indexers', [])
+
+    - name: Verify indexer cluster health after restore
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health"
+        method: GET
+        user: "{{ wazuh_indexer_admin_user | default('admin') }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        return_content: true
+      register: indexer_cluster_health
+      until: indexer_cluster_health.status == 200 and indexer_cluster_health.json.status in ['green', 'yellow']
+      retries: 12
+      delay: 10
+      failed_when: >
+        indexer_cluster_health.status | default(0) != 200 or
+        indexer_cluster_health.json.status | default('red') not in ['green', 'yellow']
+      no_log: true
+      when: inventory_hostname in groups.get('wazuh_indexers', [])
+
+    - name: Verify manager service is running after restore
+      ansible.builtin.systemd:
+        name: wazuh-manager
+      register: manager_post_restore
+      until: manager_post_restore.status.ActiveState == "active"
+      retries: 12
+      delay: 10
+      failed_when: manager_post_restore.status.ActiveState != "active"
+      when: inventory_hostname in groups.get('wazuh_managers', [])
+
+    - name: Verify manager API is responding after restore
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:{{ wazuh_manager_api_port | default(55000) }}/"
+        method: GET
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        status_code: [200, 401]
+      register: manager_api_post_restore
+      until: manager_api_post_restore.status in [200, 401]
+      retries: 12
+      delay: 10
+      failed_when: false
+      when: inventory_hostname in groups.get('wazuh_managers', [])
+
+    - name: Verify dashboard service is running after restore
+      ansible.builtin.systemd:
+        name: wazuh-dashboard
+      register: dashboard_post_restore
+      until: dashboard_post_restore.status.ActiveState == "active"
+      retries: 12
+      delay: 10
+      failed_when: dashboard_post_restore.status.ActiveState != "active"
+      when: inventory_hostname in groups.get('wazuh_dashboards', [])
+
+    - name: Report restore validation results
+      ansible.builtin.debug:
+        msg: |
+          Post-restore validation for {{ inventory_hostname }}:
+          {% if inventory_hostname in groups.get('wazuh_indexers', []) %}
+            Indexer service: {{ indexer_post_restore.status.ActiveState | default('unknown') }}
+            Cluster health:  {{ indexer_cluster_health.json.status | default('unknown') }}
+          {% endif %}
+          {% if inventory_hostname in groups.get('wazuh_managers', []) %}
+            Manager service: {{ manager_post_restore.status.ActiveState | default('unknown') }}
+            Manager API:     {{ 'up' if manager_api_post_restore.status | default(0) in [200, 401] else 'down' }}
+          {% endif %}
+          {% if inventory_hostname in groups.get('wazuh_dashboards', []) %}
+            Dashboard service: {{ dashboard_post_restore.status.ActiveState | default('unknown') }}
+          {% endif %}
 
 - name: Restore summary
   hosts: localhost

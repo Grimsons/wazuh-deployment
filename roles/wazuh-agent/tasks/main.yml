@@ -8,7 +8,6 @@
     - "{{ ansible_distribution }}.yml"
     - "{{ ansible_os_family }}.yml"
     - "default.yml"
-  ignore_errors: true
 
 - name: Include Linux tasks
   ansible.builtin.include_tasks: linux.yml
@@ -21,3 +20,20 @@
 - name: Include macOS tasks
   ansible.builtin.include_tasks: macos.yml
   when: ansible_system == 'Darwin'
+
+- name: Fail if wazuh_manager_nodes is undefined or empty
+  ansible.builtin.fail:
+    msg: >
+      CRITICAL: 'wazuh_manager_nodes' is undefined or empty.
+
+      Define it in group_vars/all/main.yml. Example:
+
+        wazuh_manager_nodes:
+          - name: manager-1
+            ip: 10.0.0.1
+  when: wazuh_manager_nodes is not defined or wazuh_manager_nodes | length == 0
+  tags: always
+
+- name: Deploy Root CA certificate for TLS agent communication
+  ansible.builtin.include_tasks: certificates.yml
+  when: wazuh_agent_tls_enabled | default(true)
