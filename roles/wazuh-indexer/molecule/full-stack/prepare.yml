@@ -32,12 +32,12 @@
       ansible.builtin.copy:
         dest: "{{ git_root.stdout }}/group_vars/all/main.yml"
         content: |
-      wazuh_indexer_nodes:
-        - name: indexer-1
-          ip: 127.0.0.1
-      wazuh_manager_nodes:
-        - name: manager-1
-          ip: 127.0.0.1
+          wazuh_indexer_nodes:
+            - name: indexer-1
+              ip: 127.0.0.1
+          wazuh_manager_nodes:
+            - name: manager-1
+              ip: 127.0.0.1
       when: not existing_ca.stat.exists
 
     - name: Generate self-signed certificates
