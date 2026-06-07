@@ -57,6 +57,7 @@
   ansible.builtin.command: swapoff -a
   become: true
   changed_when: false
+  when: ansible_swaptotal_mb != 0
   ignore_errors: true
 
 - name: Remove swap from fstab

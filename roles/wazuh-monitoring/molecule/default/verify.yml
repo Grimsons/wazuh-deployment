@@ -9,7 +9,7 @@
         path: "/usr/local/bin/{{ item }}"
       register: exporter_scripts
       loop:
-        - wazuh-indexer-exporter.py
+        - opensearch-exporter.py
         - wazuh-manager-exporter.py
 
     - name: Assert exporter scripts are deployed
