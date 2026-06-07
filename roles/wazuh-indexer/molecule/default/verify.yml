@@ -28,7 +28,7 @@
         url: "https://127.0.0.1:9200/_cluster/health"
         method: GET
         user: admin
-        password: "TestPass1234@"
+        password: "{{ wazuh_indexer_admin_password }}"
         validate_certs: false
         return_content: true
       register: cluster_health

@@ -26,9 +26,9 @@ provisioner:
     group_vars:
       all:
         wazuh_version: "4.14.5"
-        wazuh_indexer_admin_password: "TestPass1234@"
-        wazuh_api_password: "TestPass1234@"
-        wazuh_manager_cluster_key: "abc123def456abc123def456abc12345"
+        wazuh_indexer_admin_password: "{{ vault_wazuh_indexer_admin_password }}"
+        wazuh_api_password: "{{ vault_wazuh_api_password }}"
+        wazuh_manager_cluster_key: "{{ vault_wazuh_manager_cluster_key }}"
         wazuh_indexer_nodes:
           - name: indexer-1
             ip: 127.0.0.1

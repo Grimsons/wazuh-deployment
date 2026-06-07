@@ -58,10 +58,10 @@ provisioner:
             ip: manager-1
         wazuh_dashboard_nodes:
           - ip: dashboard-1
-        wazuh_indexer_admin_password: "TestPass1234@"
-        wazuh_api_password: "TestPass1234@"
-        wazuh_agent_enrollment_password: "TestPass1234@"
-        wazuh_manager_cluster_key: "abc123def456abc123def456abc12345"
+        wazuh_indexer_admin_password: "{{ vault_wazuh_indexer_admin_password }}"
+        wazuh_api_password: "{{ vault_wazuh_api_password }}"
+        wazuh_agent_enrollment_password: "{{ vault_wazuh_agent_enrollment_password }}"
+        wazuh_manager_cluster_key: "{{ vault_wazuh_manager_cluster_key }}"
         wazuh_indexer_heap_size: "512m"
         wazuh_indexer_memory_lock: false
         wazuh_indexer_network_host: "0.0.0.0"
