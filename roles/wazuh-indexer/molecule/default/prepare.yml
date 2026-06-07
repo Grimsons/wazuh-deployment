@@ -23,11 +23,6 @@
       register: git_root
       changed_when: false
 
-    - name: Check if certificates already exist
-      ansible.builtin.stat:
-        path: "{{ git_root.stdout }}/files/certs/root-ca.pem"
-      register: existing_ca
-
     - name: Create group_vars for certificate generation
       ansible.builtin.copy:
         dest: "{{ git_root.stdout }}/group_vars/all/main.yml"
@@ -38,13 +33,12 @@
           wazuh_manager_nodes:
             - name: manager-1
               ip: 127.0.0.1
-      when: not existing_ca.stat.exists
 
     - name: Generate self-signed certificates
       ansible.builtin.command:
         cmd: bash generate-certs.sh
         chdir: "{{ git_root.stdout }}"
-        creates: "{{ git_root.stdout }}/files/certs/root-ca.pem"
+      changed_when: false
 
     - name: Verify root CA was created
       ansible.builtin.stat:

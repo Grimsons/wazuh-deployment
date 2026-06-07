@@ -35,6 +35,9 @@ provisioner:
         wazuh_indexer_nodes:
           - name: indexer-1
             ip: 127.0.0.1
+        wazuh_manager_nodes:
+          - name: manager-1
+            ip: 127.0.0.1
         # CI-TEST-ONLY: replace with vault variable for production
         wazuh_indexer_admin_password: "TestPass1234@"
         wazuh_dashboard_port: 443
