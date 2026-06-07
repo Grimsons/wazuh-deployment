@@ -606,7 +606,7 @@ host_key_checking = True
 retry_files_enabled = False
 gathering = smart
 fact_caching = jsonfile
-fact_caching_connection = /tmp/ansible_facts_cache
+fact_caching_connection = ${HOME}/.cache/ansible/facts
 fact_caching_timeout = 3600
 vault_password_file = .vault_password
 

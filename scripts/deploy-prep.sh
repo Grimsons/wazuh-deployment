@@ -313,9 +313,10 @@ prompt_credentials() {
         fi
     fi
 
-    # Export for use in subshells
+    # Export SSH_PASSWORD for sshpass (used in run_ssh via SSHPASS env var).
+    # BECOME_PASSWORD is NOT exported — it is piped directly to sudo -S stdin,
+    # so it never appears in process environment or remote cmdline.
     export SSH_PASSWORD
-    export BECOME_PASSWORD
 }
 
 # Check prerequisites

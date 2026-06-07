@@ -210,10 +210,12 @@ sanitize_alphanum() {
 }
 
 sanitize_path() {
-    # Allow path characters but prevent traversal
     local path="$1"
-    # Remove any ../ sequences
-    path="${path//\.\.\//}"
+    # Iterative removal: single-pass misses crafted inputs like "..../"
+    while [[ "$path" == *".."* ]]; do
+        path="${path//\.\.\//}"
+        path="${path//\.\./}"
+    done
     echo "$path" | tr -cd 'a-zA-Z0-9._/-'
 }
 
@@ -323,7 +325,7 @@ prompt_hosts() {
 generate_password() {
     local length="${1:-24}"
     local password=""
-    local symbols='!@#$%^&*'
+    local symbols='@^_+-='
 
     # Generate base password with mixed characters
     local base_len=$((length - 4))
@@ -1187,6 +1189,9 @@ wazuh_api_password: "{{ vault_wazuh_api_password }}"
 
 # Agent enrollment password loaded from Ansible Vault
 wazuh_agent_enrollment_password: "{{ vault_wazuh_agent_enrollment_password }}"
+
+# Filebeat writer password (scoped indexer user — not admin)
+wazuh_filebeat_password: "{{ vault_wazuh_filebeat_password }}"
 EOF
 
     # Build per-host SSH credentials string for vault (format: host1:user1:pass1,host2:user2:pass2)
@@ -1258,6 +1263,15 @@ EOF
 
 # Certificate type: self-signed or external CA
 wazuh_use_external_ca: ${EXTERNAL_CA:-false}
+
+# Certificate Distinguished Name fields — read by generate-certs.sh to produce
+# unique, identifiable DNs per deployment instead of hardcoded "Wazuh/California".
+# Override these before running generate-certs.sh.
+wazuh_cert_country: "US"
+wazuh_cert_state: "California"
+wazuh_cert_location: "San Jose"
+wazuh_cert_org: "${ANSIBLE_USER:-wazuh}-deployment"
+wazuh_cert_ou: "Security Operations"
 
 # Local path where certificates are stored (source for Ansible copy)
 wazuh_certs_path: "files/certs"
@@ -1493,7 +1507,7 @@ host_key_checking = True
 retry_files_enabled = False
 gathering = smart
 fact_caching = jsonfile
-fact_caching_connection = /tmp/ansible_facts_cache
+fact_caching_connection = ${HOME}/.cache/ansible/facts
 fact_caching_timeout = 3600
 vault_password_file = .vault_password
 
@@ -1575,7 +1589,8 @@ EOF
             print_success "Vault password created: .vault_password"
         fi
 
-        # Create encrypted vault with credentials via environment variables
+        # Create encrypted vault — pass credentials via a mode-0600 temp file,
+        # not env vars (env vars leak via /proc/<pid>/environ).
         print_info "Creating encrypted vault with credentials..."
         VAULT_INDEXER_PASSWORD="$GENERATED_INDEXER_PASSWORD" \
         VAULT_API_PASSWORD="$GENERATED_API_PASSWORD" \

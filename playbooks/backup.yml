@@ -10,6 +10,20 @@
 #   -e "backup_manager=false"          - Skip manager backup
 #   -e "backup_dashboard=false"        - Skip dashboard backup
 
+- name: Preflight — warn if snapshot destination may be unencrypted
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Warn about filesystem backup encryption
+      ansible.builtin.debug:
+        msg: >-
+          SECURITY NOTICE: Backups written to a local filesystem path are stored in
+          plaintext unless the destination is on an encrypted volume (LUKS, dm-crypt,
+          encrypted S3/GCS with SSE, etc.). Ensure your backup_dest is encrypted at
+          rest before storing in production. Set wazuh_backup_encryption_confirmed: true
+          to suppress this warning.
+      when: not (wazuh_backup_encryption_confirmed | default(false) | bool)
+
 - name: Create backup timestamp
   hosts: localhost
   gather_facts: true

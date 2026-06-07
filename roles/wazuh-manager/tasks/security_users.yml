@@ -162,3 +162,18 @@
     - rerun_auth_response is not skipped
     - rerun_auth_response.status | default(0) != 200
   run_once: true
+
+- name: Assert default API credentials have been rotated
+  ansible.builtin.uri:
+    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}/security/user/authenticate"
+    method: POST
+    user: "{{ wazuh_api_user }}"
+    password: "{{ wazuh_api_default_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    status_code: [401, 403]
+  register: default_api_cred_check
+  failed_when: default_api_cred_check.status not in [401, 403]
+  changed_when: false
+  run_once: true
+  no_log: true

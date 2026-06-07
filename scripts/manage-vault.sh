@@ -77,14 +77,55 @@ init_vault() {
     fi
 }
 
-# Create or update vault file with credentials
-# Accepts environment variables for credentials:
+# Create or update vault file with credentials.
+# Preferred: pass --creds-file <path> (mode-0600 key=value file) to avoid
+# leaking secrets via /proc/<pid>/environ.
+# Fallback: reads VAULT_* environment variables when no --creds-file is given.
 #   VAULT_INDEXER_PASSWORD, VAULT_API_PASSWORD, VAULT_ENROLLMENT_PASSWORD
 #   VAULT_DASHBOARD_ADMIN_PASSWORD, VAULT_GRAFANA_API_KEY
 #   VAULT_ANSIBLE_USER, VAULT_CONNECTION_PASSWORD, VAULT_BECOME_PASSWORD
 #   VAULT_HOST_CREDENTIALS (format: "host1:user1:pass1,host2:user2:pass2")
 #   VAULT_CLUSTER_KEY
 create_vault() {
+    local creds_file=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --creds-file)
+                creds_file="$2"
+                shift 2
+                ;;
+            *)
+                print_error "Unknown argument: $1"
+                exit 1
+                ;;
+        esac
+    done
+
+    if [[ -n "$creds_file" ]]; then
+        if [[ ! -f "$creds_file" ]]; then
+            print_error "Creds file not found: $creds_file"
+            exit 1
+        fi
+        # Source the key=value pairs into the environment of this function only
+        local line key value
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            key="${line%%=*}"
+            value="${line#*=}"
+            # Allow only expected VAULT_* keys to prevent arbitrary code injection
+            case "$key" in
+                VAULT_INDEXER_PASSWORD|VAULT_API_PASSWORD|VAULT_ENROLLMENT_PASSWORD|\
+                VAULT_ANSIBLE_USER|VAULT_CONNECTION_PASSWORD|VAULT_BECOME_PASSWORD|\
+                VAULT_HOST_CREDENTIALS|VAULT_CLUSTER_KEY|VAULT_FILEBEAT_PASSWORD)
+                    printf -v "$key" '%s' "$value"
+                    ;;
+                *)
+                    print_error "Unexpected key in creds file: $key"
+                    exit 1
+                    ;;
+            esac
+        done < "$creds_file"
+    fi
     print_header "Creating Encrypted Vault"
 
     if [ ! -f "$VAULT_PASSWORD_FILE" ]; then
@@ -158,19 +199,35 @@ create_vault() {
                 local safe_host="${host//./_}"
                 # Store username for this host
                 if [ -n "$user" ]; then
+                    local escaped_user
+                    escaped_user="$(yaml_escape "$user")" || exit 1
                     host_creds_content+="
 # SSH user for host: ${host}
-vault_ssh_user_${safe_host}: \"${user}\""
+vault_ssh_user_${safe_host}: \"${escaped_user}\""
                 fi
                 # Store password for this host
                 if [ -n "$pass" ]; then
+                    local escaped_pass
+                    escaped_pass="$(yaml_escape "$pass")" || exit 1
                     host_creds_content+="
 # SSH password for host: ${host}
-vault_ssh_pass_${safe_host}: \"${pass}\""
+vault_ssh_pass_${safe_host}: \"${escaped_pass}\""
                 fi
             fi
         done
     fi
+
+    # Escape all operator-supplied values before YAML interpolation
+    local e_ansible_user e_connection_password e_become_password
+    local e_indexer_password e_api_password e_enrollment_password e_cluster_key e_filebeat_password
+    e_ansible_user="$(yaml_escape "$ansible_user")"           || exit 1
+    e_connection_password="$(yaml_escape "$connection_password")" || exit 1
+    e_become_password="$(yaml_escape "$become_password")"     || exit 1
+    e_indexer_password="$(yaml_escape "$indexer_password")"   || exit 1
+    e_api_password="$(yaml_escape "$api_password")"           || exit 1
+    e_enrollment_password="$(yaml_escape "$enrollment_password")" || exit 1
+    e_cluster_key="$(yaml_escape "$cluster_key")"             || exit 1
+    e_filebeat_password="$(yaml_escape "$filebeat_password")" || exit 1
 
     # Create vault content
     local vault_content="---
@@ -179,23 +236,23 @@ vault_ssh_pass_${safe_host}: \"${pass}\""
 # DO NOT COMMIT THIS FILE UNENCRYPTED!
 
 # Ansible SSH user for deployment
-vault_ansible_user: \"${ansible_user}\"
+vault_ansible_user: \"${e_ansible_user}\"
 
 # Ansible connection password (SSH/WinRM) - default for all hosts
-vault_ansible_connection_password: \"${connection_password}\"
+vault_ansible_connection_password: \"${e_connection_password}\"
 
 # Ansible become (sudo) password
-vault_ansible_become_password: \"${become_password}\"
+vault_ansible_become_password: \"${e_become_password}\"
 ${host_creds_content}
 
 # Indexer/Dashboard admin credentials
-vault_wazuh_indexer_admin_password: \"${indexer_password}\"
+vault_wazuh_indexer_admin_password: \"${e_indexer_password}\"
 
 # Wazuh API credentials
-vault_wazuh_api_password: \"${api_password}\"
+vault_wazuh_api_password: \"${e_api_password}\"
 
 # Agent enrollment password
-vault_wazuh_agent_enrollment_password: \"${enrollment_password}\"
+vault_wazuh_agent_enrollment_password: \"${e_enrollment_password}\"
 
 # Manager cluster key (for multi-node deployments)
 vault_wazuh_manager_cluster_key: \"${cluster_key}\"
@@ -339,7 +396,8 @@ case "${1:-}" in
         init_vault
         ;;
     create)
-        create_vault
+        shift
+        create_vault "$@"
         ;;
     view)
         view_vault
