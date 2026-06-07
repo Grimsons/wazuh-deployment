@@ -1,0 +1,78 @@
+---
+- name: Prepare certificates for standalone test
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Ensure openssl is available
+      ansible.builtin.package:
+        name: openssl
+        state: present
+      become: true
+
+    - name: Install yq for YAML parsing
+      ansible.builtin.get_url:
+        url: https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+        dest: /usr/local/bin/yq
+        mode: '0755'
+      become: true
+
+    - name: Get project root from git
+      ansible.builtin.command:
+        cmd: git rev-parse --show-toplevel
+      register: git_root
+      changed_when: false
+
+    - name: Create group_vars for certificate generation
+      ansible.builtin.copy:
+        dest: "{{ git_root.stdout }}/group_vars/all/main.yml"
+        content: |
+          wazuh_indexer_nodes:
+            - name: indexer-1
+              ip: 127.0.0.1
+          wazuh_manager_nodes:
+            - name: manager-1
+              ip: 127.0.0.1
+
+    - name: Generate self-signed certificates
+      ansible.builtin.command:
+        cmd: bash generate-certs.sh
+        chdir: "{{ git_root.stdout }}"
+      changed_when: false
+
+    - name: Verify root CA was created
+      ansible.builtin.stat:
+        path: "{{ git_root.stdout }}/files/certs/root-ca.pem"
+      register: ca_check
+      failed_when: not ca_check.stat.exists
+
+- name: Deploy indexer CA cert to monitoring container
+  hosts: wazuh-monitoring
+  gather_facts: false
+  tasks:
+    - name: Get project root from git
+      ansible.builtin.command:
+        cmd: git rev-parse --show-toplevel
+      register: git_root
+      delegate_to: localhost
+      changed_when: false
+
+    - name: Create indexer certs directory
+      ansible.builtin.file:
+        path: /etc/wazuh-indexer/certs
+        state: directory
+        mode: '0755'
+      become: true
+
+    - name: Copy root CA certificate to monitoring container
+      ansible.builtin.copy:
+        src: "{{ git_root.stdout }}/files/certs/root-ca.pem"
+        dest: /etc/wazuh-indexer/certs/root-ca.pem
+        mode: '0644'
+      become: true
+
+    - name: Verify root CA was deployed
+      ansible.builtin.stat:
+        path: /etc/wazuh-indexer/certs/root-ca.pem
+      register: ca_deploy
+      failed_when: not ca_deploy.stat.exists

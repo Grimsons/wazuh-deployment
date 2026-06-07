@@ -63,6 +63,7 @@ provisioner:
         wazuh_agent_enrollment_password: "TestPass1234@"
         wazuh_manager_cluster_key: "abc123def456abc123def456abc12345"
         wazuh_indexer_heap_size: "512m"
+        wazuh_indexer_memory_lock: false
         wazuh_indexer_network_host: "0.0.0.0"
         wazuh_dashboard_host: "0.0.0.0"
         indexer_node_name: "indexer-1"

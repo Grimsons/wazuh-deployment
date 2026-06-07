@@ -226,31 +226,25 @@ main() {
     echo
 
     # Read indexer nodes from config and generate certs
-    if grep -q "wazuh_indexer_nodes:" "$CONFIG_FILE"; then
+    if yq eval '.wazuh_indexer_nodes' "$CONFIG_FILE" &>/dev/null; then
         print_info "Generating Indexer certificates..."
         local i=1
-        while IFS= read -r line; do
-            if [[ "$line" =~ ip:\ *(.+) ]]; then
-                local ip="${BASH_REMATCH[1]}"
-                ip=$(echo "$ip" | tr -d '"' | tr -d "'")
-                generate_node_cert "indexer-${i}" "$ip" ""
-                ((i++))
-            fi
-        done < <(sed -n '/wazuh_indexer_nodes:/,/^[a-z]/p' "$CONFIG_FILE" | sed '$d')
+        yq eval '.wazuh_indexer_nodes[] | .ip' "$CONFIG_FILE" | while IFS= read -r ip; do
+            ip=$(echo "$ip" | tr -d '"' | tr -d "'")
+            generate_node_cert "indexer-${i}" "$ip" ""
+            ((i++))
+        done
     fi
 
     # Read manager nodes from config and generate certs
-    if grep -q "wazuh_manager_nodes:" "$CONFIG_FILE"; then
+    if yq eval '.wazuh_manager_nodes' "$CONFIG_FILE" &>/dev/null; then
         print_info "Generating Manager certificates..."
         local i=1
-        while IFS= read -r line; do
-            if [[ "$line" =~ ip:\ *(.+) ]]; then
-                local ip="${BASH_REMATCH[1]}"
-                ip=$(echo "$ip" | tr -d '"' | tr -d "'")
-                generate_node_cert "manager-${i}" "$ip" ""
-                ((i++))
-            fi
-        done < <(sed -n '/wazuh_manager_nodes:/,/^[a-z]/p' "$CONFIG_FILE" | sed '$d')
+        yq eval '.wazuh_manager_nodes[] | .ip' "$CONFIG_FILE" | while IFS= read -r ip; do
+            ip=$(echo "$ip" | tr -d '"' | tr -d "'")
+            generate_node_cert "manager-${i}" "$ip" ""
+            ((i++))
+        done
     fi
 
     print_header "Certificate Generation Complete"

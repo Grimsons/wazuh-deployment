@@ -32,7 +32,9 @@ provisioner:
     group_vars:
       all:
         wazuh_version: "4.14.5"
-        wazuh_manager_address: "127.0.0.1"
+        wazuh_manager_nodes:
+          - name: manager-1
+            ip: 127.0.0.1
         # CI-TEST-ONLY: replace with vault variable for production
         wazuh_agent_enrollment_password: "TestPass1234@"
         wazuh_ssl_verify_certificates: false

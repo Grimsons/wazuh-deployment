@@ -46,13 +46,195 @@
       register: ca_check
       failed_when: not ca_check.stat.exists
 
-    - name: Ensure role files directory exists for cert symlink
-      ansible.builtin.file:
-        path: "{{ git_root.stdout }}/roles/wazuh-dashboard/files"
-        state: directory
+- name: Install and configure Wazuh Indexer for Dashboard dependency
+  hosts:
+    - wazuh-dashboard-ubuntu
+    - wazuh-dashboard-rocky9
+  gather_facts: true
+  tasks:
+    - name: Get project root from git
+      ansible.builtin.command:
+        cmd: git rev-parse --show-toplevel
+      register: git_root
+      delegate_to: localhost
+      changed_when: false
 
-    - name: Symlink certs into role files directory for copy module access
+    - name: Configure Wazuh repository (Debian/Ubuntu)
+      when: ansible_os_family == 'Debian'
+      block:
+        - name: Ensure keyrings directory exists
+          ansible.builtin.file:
+            path: /etc/apt/keyrings
+            state: directory
+            mode: '0755'
+          become: true
+
+        - name: Download Wazuh GPG key
+          ansible.builtin.get_url:
+            url: https://packages.wazuh.com/key/GPG-KEY-WAZUH
+            dest: /etc/apt/keyrings/wazuh.gpg
+            mode: '0644'
+          become: true
+
+        - name: Add Wazuh repository
+          ansible.builtin.apt_repository:
+            repo: "deb [signed-by=/etc/apt/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main"
+            state: present
+            filename: wazuh
+            update_cache: true
+          become: true
+
+    - name: Configure Wazuh repository (RHEL/CentOS)
+      when: ansible_os_family == 'RedHat'
+      block:
+        - name: Import Wazuh GPG key
+          ansible.builtin.rpm_key:
+            key: https://packages.wazuh.com/key/GPG-KEY-WAZUH
+            state: present
+          become: true
+
+        - name: Add Wazuh repository
+          ansible.builtin.yum_repository:
+            name: wazuh
+            description: Wazuh repository
+            baseurl: https://packages.wazuh.com/4.x/yum/
+            gpgcheck: true
+            gpgkey: https://packages.wazuh.com/key/GPG-KEY-WAZUH
+            enabled: true
+          become: true
+
+    - name: Set vm.max_map_count for Indexer
+      ansible.posix.sysctl:
+        name: vm.max_map_count
+        value: 262144
+        state: present
+        reload: true
+        sysctl_set: true
+      become: true
+
+    - name: Install Wazuh Indexer (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name: "wazuh-indexer=4.14.5-*"
+        state: present
+        update_cache: true
+      become: true
+      when: ansible_os_family == 'Debian'
+
+    - name: Install Wazuh Indexer (RHEL/CentOS)
+      ansible.builtin.dnf:
+        name: "wazuh-indexer-4.14.5"
+        state: present
+      become: true
+      when: ansible_os_family == 'RedHat'
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+      become: true
+
+    - name: Create indexer certs directory
       ansible.builtin.file:
-        src: "{{ git_root.stdout }}/files/certs"
-        dest: "{{ git_root.stdout }}/roles/wazuh-dashboard/files/certs"
-        state: link
+        path: /etc/wazuh-indexer/certs
+        state: directory
+        owner: wazuh-indexer
+        group: wazuh-indexer
+        mode: '0500'
+      become: true
+
+    - name: Copy indexer certs
+      ansible.builtin.copy:
+        src: "{{ git_root.stdout }}/files/certs/{{ item }}"
+        dest: "/etc/wazuh-indexer/certs/{{ item }}"
+        owner: wazuh-indexer
+        group: wazuh-indexer
+        mode: '0400'
+      become: true
+      loop:
+        - root-ca.pem
+        - root-ca-key.pem
+        - admin.pem
+        - admin-key.pem
+        - indexer-1.pem
+        - indexer-1-key.pem
+
+    - name: Rename indexer-1 certs to generic names
+      ansible.builtin.copy:
+        src: "/etc/wazuh-indexer/certs/{{ item.src }}"
+        dest: "/etc/wazuh-indexer/certs/{{ item.dst }}"
+        remote_src: true
+        owner: wazuh-indexer
+        group: wazuh-indexer
+        mode: '0400'
+      become: true
+      loop:
+        - {src: indexer-1.pem, dst: indexer.pem}
+        - {src: indexer-1-key.pem, dst: indexer-key.pem}
+
+    - name: Deploy minimal opensearch.yml for single-node test
+      ansible.builtin.copy:
+        dest: /etc/wazuh-indexer/opensearch.yml
+        content: |
+          cluster.name: wazuh-cluster
+          node.name: indexer-1
+          network.host: 127.0.0.1
+          http.port: 9200
+          transport.port: 9300
+          path.data: /var/lib/wazuh-indexer
+          path.logs: /var/log/wazuh-indexer
+          bootstrap.memory_lock: false
+          discovery.type: single-node
+          plugins.security.ssl.transport.pemcert_filepath: certs/indexer.pem
+          plugins.security.ssl.transport.pemkey_filepath: certs/indexer-key.pem
+          plugins.security.ssl.transport.pemtrustedcas_filepath: certs/root-ca.pem
+          plugins.security.ssl.transport.enforce_hostname_verification: false
+          plugins.security.ssl.http.enabled: true
+          plugins.security.ssl.http.pemcert_filepath: certs/indexer.pem
+          plugins.security.ssl.http.pemkey_filepath: certs/indexer-key.pem
+          plugins.security.ssl.http.pemtrustedcas_filepath: certs/root-ca.pem
+          plugins.security.nodes_dn:
+            - "CN=indexer-1,OU=Wazuh,O=Wazuh,L=California,ST=California,C=US"
+          plugins.security.authcz.admin_dn:
+            - "CN=admin,OU=Wazuh,O=Wazuh,L=California,ST=California,C=US"
+          plugins.security.allow_unsafe_democertificates: false
+          plugins.security.allow_default_init_securityindex: true
+          plugins.security.audit.type: internal_opensearch
+          plugins.security.enable_snapshot_restore_privilege: true
+          plugins.security.check_snapshot_restore_write_privileges: true
+          plugins.security.restapi.roles_enabled:
+            - all_access
+            - security_rest_api_access
+          plugins.security.system_indices.enabled: true
+          compatibility.override_main_response_version: true
+        owner: wazuh-indexer
+        group: wazuh-indexer
+        mode: '0640'
+      become: true
+
+    - name: Set correct ownership on indexer directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: wazuh-indexer
+        group: wazuh-indexer
+        recurse: true
+      become: true
+      loop:
+        - /var/lib/wazuh-indexer
+        - /var/log/wazuh-indexer
+        - /etc/wazuh-indexer
+
+    - name: Enable and start Wazuh Indexer service
+      ansible.builtin.systemd:
+        name: wazuh-indexer
+        state: started
+        enabled: true
+        daemon_reload: true
+      become: true
+
+    - name: Wait for indexer to be ready
+      ansible.builtin.wait_for:
+        port: 9200
+        host: 127.0.0.1
+        delay: 10
+        timeout: 120
+      become: true

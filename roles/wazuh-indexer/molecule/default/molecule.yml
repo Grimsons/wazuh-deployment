@@ -40,6 +40,7 @@ provisioner:
         wazuh_ssl_verify_certificates: false
         wazuh_configure_firewall: false
         wazuh_indexer_heap_size: "512m"
+        wazuh_indexer_memory_lock: false
         indexer_node_name: "indexer-1"
 
 verifier:
