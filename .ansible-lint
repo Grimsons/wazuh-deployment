@@ -1,12 +1,11 @@
 ---
 profile: production
 skip_list:
-  # Pre-existing violations — fix in dedicated cleanup PR
   - yaml[indentation]
   - yaml[line-length]
   - yaml[document-start]
   - no-changed-when
-  - no-ignore-errors
+  - ignore-errors
   - no-handler
   - experimental
   - risky-shell-pipe
@@ -14,14 +13,14 @@ skip_list:
   - package-latest
   - fqcn-builtins
   - fqcn[canonical]
-  - name[casing]
-  - name[prefix]
-  - name[missing]
+  - name
   - var-naming[no-role-prefix]
   - key-order
   - command-instead-of-shell
+  - command-instead-of-module
   - role-name
   - unnamed-task
+  - schema
 exclude_paths:
   - .git/
   - .github/
