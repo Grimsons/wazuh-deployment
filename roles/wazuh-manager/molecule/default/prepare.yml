@@ -1,0 +1,64 @@
+---
+- name: Prepare certificates for standalone test
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Ensure openssl is available
+      ansible.builtin.package:
+        name: openssl
+        state: present
+      become: true
+
+    - name: Install yq for YAML parsing
+      ansible.builtin.get_url:
+        url: https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+        dest: /usr/local/bin/yq
+        mode: '0755'
+      become: true
+
+    - name: Get project root from git
+      ansible.builtin.command:
+        cmd: git rev-parse --show-toplevel
+      register: git_root
+      changed_when: false
+
+    - name: Check if certificates already exist
+      ansible.builtin.stat:
+        path: "{{ git_root.stdout }}/files/certs/root-ca.pem"
+      register: existing_ca
+
+    - name: Create group_vars for certificate generation
+      ansible.builtin.copy:
+        dest: "{{ git_root.stdout }}/group_vars/all/main.yml"
+        content: |
+          wazuh_indexer_nodes:
+            - name: indexer-1
+              ip: 127.0.0.1
+          wazuh_manager_nodes:
+            - name: manager-1
+              ip: 127.0.0.1
+      when: not existing_ca.stat.exists
+
+    - name: Generate self-signed certificates
+      ansible.builtin.command:
+        cmd: bash generate-certs.sh
+        chdir: "{{ git_root.stdout }}"
+        creates: "{{ git_root.stdout }}/files/certs/root-ca.pem"
+
+    - name: Verify root CA was created
+      ansible.builtin.stat:
+        path: "{{ git_root.stdout }}/files/certs/root-ca.pem"
+      register: ca_check
+      failed_when: not ca_check.stat.exists
+
+    - name: Ensure role files directory exists for cert symlink
+      ansible.builtin.file:
+        path: "{{ git_root.stdout }}/roles/wazuh-manager/files"
+        state: directory
+
+    - name: Symlink certs into role files directory for copy module access
+      ansible.builtin.file:
+        src: "{{ git_root.stdout }}/files/certs"
+        dest: "{{ git_root.stdout }}/roles/wazuh-manager/files/certs"
+        state: link

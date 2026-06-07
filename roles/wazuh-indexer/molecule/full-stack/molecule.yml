@@ -70,6 +70,7 @@ provisioner:
         wazuh_ssl_verify_certificates: false
         wazuh_configure_firewall: false
         wazuh_manager_cluster_enabled: false
+        wazuh_indexer_startup_timeout: 600
 
 verifier:
   name: ansible

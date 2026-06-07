@@ -25,7 +25,7 @@
 - name: Install required packages (RHEL/CentOS)
   ansible.builtin.dnf:
     name:
-      - curl
+      - curl-minimal
       - gnupg2
       - libcap
     state: present

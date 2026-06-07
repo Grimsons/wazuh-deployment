@@ -7,6 +7,13 @@
 # 2. External prometheus-opensearch-exporter for richer metrics
 
 - block:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+      become: true
+      when: ansible_os_family == 'Debian'
+
     - name: Ensure Python dependencies for metrics scripts
       ansible.builtin.package:
         name:

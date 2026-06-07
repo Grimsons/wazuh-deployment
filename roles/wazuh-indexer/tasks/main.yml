@@ -54,6 +54,44 @@
     delay: "{{ wazuh_indexer_health_check_delay }}"
     timeout: "{{ wazuh_indexer_startup_timeout }}"
   become: true
+  register: indexer_start_wait
+  ignore_errors: true
+
+- name: Collect diagnostic info if indexer failed to start
+  when: indexer_start_wait is failed
+  block:
+    - name: Get indexer service status
+      ansible.builtin.systemd:
+        name: "{{ wazuh_indexer_service_name }}"
+      become: true
+      register: diag_service
+      failed_when: false
+
+    - name: Get OpenSearch journal logs
+      ansible.builtin.command:
+        cmd: journalctl -u "{{ wazuh_indexer_service_name }}" --no-pager -n 100
+      become: true
+      register: diag_journal
+      failed_when: false
+
+    - name: Get OpenSearch log file contents
+      ansible.builtin.command:
+        cmd: cat {{ wazuh_indexer_log_path }}/wazuh-indexer.log 2>/dev/null || cat {{ wazuh_indexer_log_path }}/opensearch.log 2>/dev/null || echo "No log file found"
+      become: true
+      register: diag_log
+      failed_when: false
+
+    - name: Dump diagnostic info
+      ansible.builtin.debug:
+        msg: |
+          === Indexer Service Status ===
+          {{ diag_service.status | default('N/A') }}
+
+          === Journal Logs (last 100 lines) ===
+          {{ diag_journal.stdout | default('N/A') }}
+
+          === OpenSearch Log ===
+          {{ diag_log.stdout | default('N/A') }}
 
 - name: Verify Wazuh Indexer service is running
   ansible.builtin.systemd:
