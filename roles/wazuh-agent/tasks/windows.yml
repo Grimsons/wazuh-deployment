@@ -57,7 +57,7 @@
     inherit: none
     propagation: none
   loop:
-    - { user: "SYSTEM",         rights: "FullControl" }
+    - { user: "SYSTEM", rights: "FullControl" }
     - { user: "Administrators", rights: "FullControl" }
   no_log: true
   become: true

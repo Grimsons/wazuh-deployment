@@ -7,4 +7,3 @@
     state: restarted
     no_block: true
   become: true
-

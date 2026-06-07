@@ -13,3 +13,4 @@ rules:
     max-spaces-inside: 1
   brackets:
     max-spaces-inside: 1
+  new-lines: disable
