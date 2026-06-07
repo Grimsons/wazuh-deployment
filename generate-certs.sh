@@ -121,8 +121,8 @@ generate_root_ca() {
 generate_admin_cert() {
     print_info "Generating Admin certificate (ECDSA P-256, ${LEAF_DAYS}-day validity)..."
 
-    openssl ecparam -genkey -name prime256v1 -noout 2>/dev/null | \
-        openssl ec -out "${CERTS_DIR}/admin-key.pem" 2>/dev/null
+    openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 2>/dev/null | \
+        openssl pkey -out "${CERTS_DIR}/admin-key.pem" 2>/dev/null
     chmod 400 "${CERTS_DIR}/admin-key.pem"
 
     openssl req -new -sha256 \
@@ -173,8 +173,8 @@ IP.2 = 127.0.0.1
 ${san_entries}
 EOF
 
-    openssl ecparam -genkey -name prime256v1 -noout 2>/dev/null | \
-        openssl ec -out "${CERTS_DIR}/${node_name}-key.pem" 2>/dev/null
+    openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 2>/dev/null | \
+        openssl pkey -out "${CERTS_DIR}/${node_name}-key.pem" 2>/dev/null
     chmod 400 "${CERTS_DIR}/${node_name}-key.pem"
 
     openssl req -new -sha256 \
