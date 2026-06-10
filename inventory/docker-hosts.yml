@@ -1,0 +1,34 @@
+---
+all:
+  vars:
+    ansible_user: wazuh-deploy
+    ansible_ssh_private_key_file: "{{ playbook_dir }}/keys/wazuh_ansible_key"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null"
+    wazuh_configure_firewall: false
+    wazuh_ssl_verify_certificates: false
+    wazuh_lockdown_deploy_user: false
+    wazuh_indexer_network_host: "0.0.0.0"
+    wazuh_dashboard_host: "0.0.0.0"
+    wazuh_indexer_heap_size: "512m"
+    wazuh_indexer_memory_lock: false
+  children:
+    wazuh_indexers:
+      hosts:
+        indexer-1:
+          ansible_host: 127.0.0.1
+          ansible_port: 2201
+    wazuh_managers:
+      hosts:
+        manager-1:
+          ansible_host: 127.0.0.1
+          ansible_port: 2202
+    wazuh_dashboards:
+      hosts:
+        dashboard-1:
+          ansible_host: 127.0.0.1
+          ansible_port: 2203
+    wazuh_agents:
+      hosts:
+        agent-1:
+          ansible_host: 127.0.0.1
+          ansible_port: 2204

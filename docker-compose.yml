@@ -1,0 +1,60 @@
+name: wazuh-test
+
+services:
+  indexer-1:
+    image: geerlingguy/docker-ubuntu2404-ansible:latest
+    hostname: indexer-1
+    container_name: indexer-1
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    command: /lib/systemd/systemd
+    networks:
+      - wazuh-net
+    ports:
+      - "2201:22"
+      - "9200:9200"
+
+  manager-1:
+    image: geerlingguy/docker-rockylinux9-ansible:latest
+    hostname: manager-1
+    container_name: manager-1
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    command: /usr/lib/systemd/systemd
+    networks:
+      - wazuh-net
+    ports:
+      - "2202:22"
+
+  dashboard-1:
+    image: geerlingguy/docker-ubuntu2404-ansible:latest
+    hostname: dashboard-1
+    container_name: dashboard-1
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    command: /lib/systemd/systemd
+    networks:
+      - wazuh-net
+    ports:
+      - "2203:22"
+      - "443:443"
+
+  agent-1:
+    image: geerlingguy/docker-rockylinux9-ansible:latest
+    hostname: agent-1
+    container_name: agent-1
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    command: /usr/lib/systemd/systemd
+    networks:
+      - wazuh-net
+    ports:
+      - "2204:22"
+
+networks:
+  wazuh-net:
+    driver: bridge
