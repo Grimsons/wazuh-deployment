@@ -38,6 +38,7 @@ provisioner:
         wazuh_manager_nodes:
           - name: manager-1
             ip: 127.0.0.1
+        wazuh_node_ip: "127.0.0.1"
         wazuh_indexer_admin_password: "{{ vault_wazuh_indexer_admin_password }}"
         wazuh_api_password: "{{ vault_wazuh_api_password }}"
         wazuh_manager_cluster_key: "{{ vault_wazuh_manager_cluster_key }}"
