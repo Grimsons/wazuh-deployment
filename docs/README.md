@@ -5,12 +5,14 @@ An Ansible-based deployment toolkit for the Wazuh SIEM/XDR platform. This projec
 Key features:
 
 - **Interactive setup** via CLI wizard or TUI (with [gum](https://github.com/charmbracelet/gum))
+- **Docker test environment** for local development and testing
 - **Automated certificate generation** and credential management (Ansible Vault)
 - **Bootstrap workflow** that provisions a dedicated deployment user with SSH key auth
 - **Post-deployment lockdown** of the deployment user for security
 - **SOCFortress community detection rules** (1000+ rules with MITRE ATT&CK mapping)
 - **Operational playbooks** for backups, upgrades, health checks, certificate rotation, and more
 - **Makefile** shortcuts for all common operations
+- **Pre-commit hooks** to prevent committing unencrypted vault files
 
 ## Documentation
 

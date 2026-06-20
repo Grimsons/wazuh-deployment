@@ -356,36 +356,36 @@ Multi-node cluster for production environments (500+ agents).
 │                                   │                                          │
 │                    Signs all component certificates                          │
 │                                   │                                          │
-│           ┌────────────────────────┼────────────────────────┐                │
-│           │                        │                        │                │
-│           ▼                        ▼                        ▼                │
-│    ┌───────────────┐      ┌───────────────┐      ┌───────────────┐           │
-│    │  ADMIN CERT   │      │ INDEXER CERT  │      │ MANAGER CERT  │           │
-│    │               │      │               │      │               │           │
-│    │ admin.pem     │      │ indexer.pem   │      │ manager.pem   │           │
-│    │ admin-key.pem │      │ indexer-key   │      │ manager-key   │           │
-│    │               │      │               │      │               │           │
-│    │ Used for:     │      │ Used for:     │      │ Used for:     │           │
-│    │ - securityadm │      │ - HTTPS API   │      │ - API TLS     │           │
-│    │ - Index mgmt  │      │ - Node-to-node│      │ - Filebeat    │           │
-│    └───────────────┘      └───────────────┘      └───────────────┘           │
+│           ┌────────────────────────┼────────────────────────────────┐        │
+│           │                        │                                │        │
+│           ▼                        ▼                                ▼        │
+│    ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐      │
+│    │   ADMIN CERT     │    │  INDEXER CERT    │    │  MANAGER CERT    │      │
+│    │                  │    │                  │    │                  │      │
+│    │  admin.pem       │    │  indexer-N.pem   │    │  manager-N.pem   │      │
+│    │  admin-key.pem   │    │  indexer-N-key   │    │  manager-N-key   │      │
+│    │                  │    │                  │    │                  │      │
+│    │  Used for:       │    │  Used for:       │    │  Used for:       │      │
+│    │  - securityadm   │    │  - HTTPS API     │    │  - API TLS       │      │
+│    │  - Index mgmt    │    │  - Node-to-node  │    │  - Filebeat      │      │
+│    └──────────────────┘    └──────────────────┘    └──────────────────┘      │
 │                                                                              │
-│                           ┌───────────────┐                                  │
-│                           │DASHBOARD CERT │                                  │
-│                           │               │                                  │
-│                           │ dashboard.pem │                                  │
-│                           │ dashboard-key │                                  │
-│                           │               │                                  │
-│                           │ Used for:     │                                  │
-│                           │ - HTTPS UI    │                                  │
-│                           └───────────────┘                                  │
+│                          ┌──────────────────┐                                │
+│                          │ DASHBOARD CERT   │                                │
+│                          │                  │                                │
+│                          │ dashboard-1.pem  │                                │
+│                          │ dashboard-1-key  │                                │
+│                          │                  │                                │
+│                          │ Used for:        │                                │
+│                          │ - HTTPS UI       │                                │
+│                          └──────────────────┘                                │
 │                                                                              │
 │  Certificate Locations:                                                      │
 │  ├── files/certs/           (Ansible control node)                           │
 │  ├── /etc/wazuh-indexer/certs/                                               │
 │  ├── /etc/wazuh-dashboard/certs/                                             │
 │  ├── /etc/filebeat/certs/                                                    │
-│  └── /var/ossec/etc/sslmanager.cert (Manager)                                │
+│  └── /var/ossec/etc/ (manager)                                               │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```

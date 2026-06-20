@@ -4,6 +4,45 @@ All notable changes to this fork will be documented in this file.
 
 For upstream wazuh-ansible changes, see the [wazuh-ansible releases](https://github.com/wazuh/wazuh-ansible/releases).
 
+## [1.2.0] - Docker Environment, Certificate Fixes, and Keystore Management
+
+### Added
+
+- **Docker Test Environment** — Full Docker-based local development environment:
+  - `docker-compose.yml`: systemd containers for indexer, manager, dashboard, agent
+  - `docker-bootstrap.yml`: bootstrap playbook for Docker container SSH setup
+  - `inventory/docker-hosts.yml`: pre-configured inventory for Docker containers
+  - Docker profile in `setup-tui.sh` and `lib/profiles.sh`
+  - `make setup-docker`, `make check-docker`, `make docker-setup` targets
+- **Keystore Credential Management** — New `roles/wazuh-manager/tasks/keystore.yml`:
+  - Idempotent storage of indexer passwords in Wazuh keystore
+  - Conditional `wazuh-manager` restart when credentials change
+  - Stale hash cleanup on package reinstall
+- **Pre-Commit Hook** — `.githooks/pre-commit` that rejects commits with unencrypted `vault.yml`
+- **`make setup-hooks`** — Configures `.githooks/` as the git hooks path (auto-run by `make check`)
+- **Implementation Plan** — `docs/implementation-plan-5.0.md`: phased Wazuh 5.0 greenfield support plan
+
+### Changed
+
+- **Certificate Naming** — Dashboard certificate CN changed from `dashboard` to `dashboard-1`:
+  - `setup.sh`, `setup-tui.sh`, `generate-certs.sh`, `scripts/migrate-from-main.sh`
+  - `dashboard_node_name` variable added to inventory generation (indexed loop)
+  - All dashboard cert references use `{{ dashboard_node_name | default("dashboard-1") }}`
+- **Vault Password File** — Makefile now passes `--vault-password-file .vault_pass.sh` explicitly on all `ansible-playbook` calls (20 targets), because `ansible.cfg` is gitignored and generated per-environment
+- **Container Networking** — `wazuh_is_container` flag enables `wazuh_indexer_network_host: 0.0.0.0`, `wazuh_dashboard_host: 0.0.0.0` bind for Docker containers
+- **Binary Prefix** — `wazuh_manager_binary_prefix: "wazuh-"` default in `roles/wazuh-manager/defaults/main.yml`
+- **Config File Selection** — `wazuh_manager_config_file` now selects `ossec.conf` for 4.x, `wazuh-manager.conf` for 5.x via `wazuh_is_5x` flag
+- **Certificate Paths** — Source cert path in `site.yml` pre_tasks made absolute (`{{ playbook_dir }}/files/certs`); CN validation added after cert copy to all three `certificates.yml` files
+- **Agent Role** — Expanded `linux.yml` with additional syscollector and enrollment hardening; updated `ossec.conf.j2` template
+
+### Fixed
+
+- **Root CA Mismatch** — Fixed inconsistency where manager's root CA differed from indexer/dashboard (prevented Filebeat → Indexer TLS)
+- **Keystore Prompts** — Guarded unguarded prompts in Backup and Log Cleanup sections of `setup-tui.sh`
+- **Skip-if-Set Logic** — `prompt_with_default()` and `prompt_yes_no()` now skip already-configured values in setup scripts
+- **Config Path Guard** — Fixed `default(omit)` filter for `wazuh_manager_config_file` to prevent undefined variable errors
+- **`.gitignore` Additions** — Added `.vault_pass.sh`, `.ansible/`, `.opencode/`, `**/files/certs/*.pem` to prevent accidental commits
+
 ## [1.1.0] - Security Review, Community Rules, and Hardening
 
 ### Added

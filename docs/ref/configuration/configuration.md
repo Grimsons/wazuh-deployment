@@ -20,9 +20,6 @@ Edit this file directly to change deployment configuration:
 ```bash
 # Edit configuration
 vi group_vars/all/main.yml
-
-# Or use make
-make vault-edit  # for vault only
 ```
 
 ### group_vars/all/vault.yml
@@ -35,25 +32,35 @@ An Ansible Vault-encrypted file containing all sensitive credentials:
 - Agent enrollment passwords
 - Cluster keys
 
-This file is encrypted at rest using the password stored in `.vault_password`. Manage it with:
+This file is encrypted at rest. The vault password is provided by `.vault_pass.sh`, an executable script that outputs the decryption key. Manage credentials with:
 
 ```bash
 # View credentials
 ./scripts/manage-vault.sh view
+make vault-view
 
-# Edit credentials
+# Edit credentials (decrypts, opens $EDITOR, re-encrypts)
 ./scripts/manage-vault.sh edit
+make vault-edit
 
 # Rotate all passwords
 ./scripts/manage-vault.sh rotate
+make vault-rotate
 
 # Change the vault encryption password
 ./scripts/manage-vault.sh rekey
+make vault-rekey
 ```
 
 ## How Vault Password Is Loaded
 
-The generated `ansible.cfg` includes `vault_password_file = .vault_password`, so you do not need to pass `--vault-password-file` on every command. Ansible reads the vault password automatically.
+The Makefile passes `--vault-password-file .vault_pass.sh` on all `ansible-playbook` calls automatically. For manual playbook runs, include the same flag:
+
+```bash
+ansible-playbook site.yml --vault-password-file .vault_pass.sh
+```
+
+The generated `ansible.cfg` (when present) also sets `vault_password_file = .vault_pass.sh` for convenience, but since this file is per-environment and gitignored, using `make` targets is the recommended approach.
 
 ## Other Configuration Files
 
