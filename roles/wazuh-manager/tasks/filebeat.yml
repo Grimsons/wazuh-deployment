@@ -180,6 +180,7 @@
   become: true
   no_log: true
   notify: restart filebeat
+  register: filebeat_config_deployed
 
 # Filebeat 7.10.2 has two Go runtime issues on modern Linux:
 #
@@ -220,6 +221,8 @@
     group: root
     mode: '0644'
   become: true
+  notify: restart filebeat
+  register: filebeat_systemd_unit_deployed
 
 - name: Remove legacy systemd drop-in directory for Filebeat
   ansible.builtin.file:
@@ -300,6 +303,9 @@
         name: filebeat
         state: restarted
       become: true
+      when: >-
+        (filebeat_config_deployed is defined and filebeat_config_deployed is changed)
+        or (filebeat_systemd_unit_deployed is defined and filebeat_systemd_unit_deployed is changed)
 
     - name: Verify Filebeat service is running
       ansible.builtin.systemd:

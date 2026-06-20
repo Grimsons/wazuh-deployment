@@ -51,7 +51,7 @@
     - "{{ wazuh_indexer_config_path }}"
     - "{{ wazuh_indexer_data_path }}"
     - "{{ wazuh_indexer_log_path }}"
-    - "{{ wazuh_indexer_certs_path }}"
+  register: indexer_directories
 
 - name: Disable swap (required for Indexer performance)
   ansible.builtin.command: swapoff -a

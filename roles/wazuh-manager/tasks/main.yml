@@ -133,3 +133,4 @@
       ═══════════════════════════════════════════════════════════════
   when: manager_node_type | default('master') == 'master'
   run_once: true
+  changed_when: false

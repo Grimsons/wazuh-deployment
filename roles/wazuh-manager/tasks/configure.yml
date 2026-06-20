@@ -23,6 +23,7 @@
   become: true
   when: wazuh_internal_options_enabled | default(true)
   notify: restart wazuh-manager
+  changed_when: false
 
 - name: Validate manager configuration before restart
   block:
@@ -68,13 +69,13 @@
     mode: '0750'
   become: true
 
-- name: Set correct permissions on manager writable directories
+- name: Ensure manager writable directories exist
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
     owner: "{{ wazuh_manager_owner }}"
     group: "{{ wazuh_manager_group }}"
-    recurse: true
+    mode: '0750'
   loop:
     - "{{ wazuh_manager_install_path }}/etc"
     - "{{ wazuh_manager_install_path }}/logs"
@@ -83,3 +84,15 @@
     - "{{ wazuh_manager_install_path }}/tmp"
     - "{{ wazuh_manager_install_path }}/stats"
   become: true
+  register: manager_writable_directories
+
+- name: Recursively fix manager writable directory ownership
+  ansible.builtin.file:
+    path: "{{ item.item }}"
+    state: directory
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
+    recurse: true
+  loop: "{{ manager_writable_directories.results }}"
+  become: true
+  when: item.changed

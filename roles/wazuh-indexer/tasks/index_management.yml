@@ -651,7 +651,7 @@
       Content-Type: "application/json"
   no_log: true
   register: alerts_template_result
-  changed_when: alerts_template_result.status == 200
+  changed_when: false
   when: wazuh_rollover_enabled | default(true)
 
 - name: Create wazuh-archives index template with rollover alias
@@ -864,7 +864,7 @@
       Content-Type: "application/json"
   no_log: true
   register: archives_template_result
-  changed_when: archives_template_result.status == 200
+  changed_when: false
   when: wazuh_rollover_enabled | default(true)
 
 - name: Create wazuh-monitoring index template with rollover alias
@@ -891,7 +891,7 @@
       Content-Type: "application/json"
   no_log: true
   register: monitoring_template_result
-  changed_when: monitoring_template_result.status == 200
+  changed_when: false
   when: wazuh_rollover_enabled | default(true)
 
 - name: Create wazuh-statistics index template with rollover alias
@@ -918,7 +918,7 @@
       Content-Type: "application/json"
   no_log: true
   register: statistics_template_result
-  changed_when: statistics_template_result.status == 200
+  changed_when: false
   when: wazuh_rollover_enabled | default(true)
 
 # ═══════════════════════════════════════════════════════════════
@@ -1367,7 +1367,7 @@
       Content-Type: "application/json"
   no_log: true
   register: ism_settings_result
-  changed_when: ism_settings_result.status == 200
+  changed_when: false
   when: wazuh_retention_enabled | default(true)
 
 # ═══════════════════════════════════════════════════════════════

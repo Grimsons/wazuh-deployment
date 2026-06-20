@@ -137,3 +137,4 @@
       URL: https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}
       ═══════════════════════════════════════════════════════════════
   run_once: true
+  changed_when: false

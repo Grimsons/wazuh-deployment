@@ -22,6 +22,7 @@
       ansible.builtin.apt:
         deb: /tmp/wazuh-packages/wazuh-manager.deb
       notify: restart wazuh-manager
+      register: wazuh_manager_install_deb
 
 - name: Install Wazuh Manager via apt repository (production)
   ansible.builtin.apt:
@@ -33,6 +34,7 @@
     - ansible_os_family == 'Debian'
     - not (wazuh_direct_download | default(false))
   notify: restart wazuh-manager
+  register: wazuh_manager_install_apt
 
 - name: Download and install Wazuh Manager via .rpm (pre-release)
   when:
@@ -57,6 +59,7 @@
         state: present
         disable_gpg_check: true
       notify: restart wazuh-manager
+      register: wazuh_manager_install_rpm
 
 - name: Install Wazuh Manager via dnf repository (production)
   ansible.builtin.dnf:
@@ -67,6 +70,7 @@
     - ansible_os_family == 'RedHat'
     - not (wazuh_direct_download | default(false))
   notify: restart wazuh-manager
+  register: wazuh_manager_install_dnf
 
 - name: Reload systemd daemon
   ansible.builtin.systemd:
@@ -81,7 +85,13 @@
     path: "{{ item }}"
     state: absent
   become: true
-  when: wazuh_indexer_connection_enabled | default(true)
+  when:
+    - wazuh_indexer_connection_enabled | default(true)
+    - >-
+      (wazuh_manager_install_deb is defined and wazuh_manager_install_deb is changed)
+      or (wazuh_manager_install_apt is defined and wazuh_manager_install_apt is changed)
+      or (wazuh_manager_install_rpm is defined and wazuh_manager_install_rpm is changed)
+      or (wazuh_manager_install_dnf is defined and wazuh_manager_install_dnf is changed)
   loop:
     - "{{ wazuh_manager_install_path }}/etc/.keystore_username_hash"
     - "{{ wazuh_manager_install_path }}/etc/.keystore_password_hash"

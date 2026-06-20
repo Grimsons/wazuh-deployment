@@ -40,4 +40,4 @@
   become: true
   loop:
     - "{{ wazuh_dashboard_config_path }}"
-    - "{{ wazuh_dashboard_certs_path }}"
+  register: dashboard_directories

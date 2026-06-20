@@ -20,6 +20,11 @@
     group: wazuh-indexer
     recurse: true
   become: true
+  when: >-
+    indexer_directories.results
+    | selectattr('item', 'equalto', wazuh_indexer_data_path)
+    | map(attribute='changed')
+    | first | default(false)
 
 - name: Set correct ownership on log directory
   ansible.builtin.file:
@@ -29,6 +34,11 @@
     group: wazuh-indexer
     recurse: true
   become: true
+  when: >-
+    indexer_directories.results
+    | selectattr('item', 'equalto', wazuh_indexer_log_path)
+    | map(attribute='changed')
+    | first | default(false)
 
 - name: Set correct ownership on config directory
   ansible.builtin.file:
@@ -38,3 +48,8 @@
     group: wazuh-indexer
     recurse: true
   become: true
+  when: >-
+    indexer_directories.results
+    | selectattr('item', 'equalto', wazuh_indexer_config_path)
+    | map(attribute='changed')
+    | first | default(false)
