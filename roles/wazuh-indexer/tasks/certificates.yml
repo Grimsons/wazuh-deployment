@@ -65,7 +65,7 @@
 - name: Verify indexer certificate has correct common name
   ansible.builtin.shell: |
     set -o pipefail
-    ACTUAL=$(openssl x509 -in {{ wazuh_indexer_certs_path }}/indexer.pem -subject -noout 2>/dev/null | sed 's/.*CN=//')
+    ACTUAL=$(openssl x509 -in {{ wazuh_indexer_certs_path }}/indexer.pem -subject -noout -nameopt RFC2253 2>/dev/null | sed 's/^subject=CN=//;s/,.*//')
     EXPECTED="{{ indexer_node_name | default('indexer-1') }}"
     if [ "$ACTUAL" != "$EXPECTED" ]; then
       echo "FAIL: Indexer cert CN='$ACTUAL', expected '$EXPECTED'"

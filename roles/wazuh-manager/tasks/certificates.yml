@@ -45,7 +45,7 @@
   ansible.builtin.shell: |
     set -o pipefail
     CERT_FILE="{{ wazuh_manager_install_path }}/etc/certs/{{ wazuh_manager_cert_name }}.pem"
-    ACTUAL=$(openssl x509 -in "$CERT_FILE" -subject -noout 2>/dev/null | sed 's/.*CN=//')
+    ACTUAL=$(openssl x509 -in "$CERT_FILE" -subject -noout -nameopt RFC2253 2>/dev/null | sed 's/^subject=CN=//;s/,.*//')
     EXPECTED="{{ manager_node_name | default('manager-1') }}"
     if [ "$ACTUAL" != "$EXPECTED" ]; then
       echo "FAIL: Manager cert CN='$ACTUAL', expected '$EXPECTED'"

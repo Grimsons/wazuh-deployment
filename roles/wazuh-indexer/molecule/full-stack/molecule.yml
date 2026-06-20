@@ -78,6 +78,7 @@ provisioner:
         wazuh_cert_location: "San Jose"
         wazuh_cert_org: "Wazuh Deployment"
         wazuh_cert_ou: "Security Operations"
+        wazuh_node_ip: "127.0.0.1"
 
 verifier:
   name: ansible

@@ -46,7 +46,7 @@
     set -o pipefail
     CERT_NAME="{{ dashboard_node_name | default('dashboard-1') }}"
     CERT_FILE="{{ wazuh_dashboard_certs_path }}/${CERT_NAME}.pem"
-    ACTUAL=$(openssl x509 -in "$CERT_FILE" -subject -noout 2>/dev/null | sed 's/.*CN=//')
+    ACTUAL=$(openssl x509 -in "$CERT_FILE" -subject -noout -nameopt RFC2253 2>/dev/null | sed 's/^subject=CN=//;s/,.*//')
     if [ "$ACTUAL" != "$CERT_NAME" ]; then
       echo "FAIL: Dashboard cert CN='$ACTUAL', expected '$CERT_NAME'"
       echo "Re-copy certs from control machine: ansible-playbook site.yml --tags dashboard"
