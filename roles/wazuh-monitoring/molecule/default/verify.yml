@@ -4,37 +4,57 @@
   become: true
   gather_facts: false
   tasks:
-    - name: Check Python exporter scripts exist
+    - name: Check OpenSearch exporter script exists
       ansible.builtin.stat:
-        path: "/opt/wazuh-exporter/{{ item }}"
-      register: exporter_scripts
-      loop:
-        - opensearch-exporter.py
-        - wazuh-manager-exporter.py
+        path: "/opt/wazuh-exporter/opensearch-exporter.py"
+      register: opensearch_exporter_script
+      when: wazuh_indexer_exporter_enabled | default(true)
 
-    - name: Assert exporter scripts are deployed
+    - name: Assert OpenSearch exporter script is deployed
       ansible.builtin.assert:
         that:
-          - item.stat.exists
-        fail_msg: "Exporter script not found: {{ item.item }}"
-      loop: "{{ exporter_scripts.results }}"
-      when: wazuh_monitoring_enabled | default(true)
+          - opensearch_exporter_script.stat.exists
+        fail_msg: "OpenSearch exporter script not found"
+      when: wazuh_indexer_exporter_enabled | default(true)
 
-    - name: Check systemd service units exist
+    - name: Check Wazuh Manager exporter script exists
       ansible.builtin.stat:
-        path: "/etc/systemd/system/{{ item }}"
-      register: service_units
-      loop:
-        - opensearch-exporter.service
-        - wazuh-manager-exporter.service
+        path: "/opt/wazuh-exporter/wazuh-manager-exporter.py"
+      register: manager_exporter_script
+      when: wazuh_manager_exporter_enabled | default(true)
 
-    - name: Assert systemd service units exist
+    - name: Assert Wazuh Manager exporter script is deployed
       ansible.builtin.assert:
         that:
-          - item.stat.exists
-        fail_msg: "Service unit not found: {{ item.item }}"
-      loop: "{{ service_units.results }}"
-      when: wazuh_monitoring_enabled | default(true)
+          - manager_exporter_script.stat.exists
+        fail_msg: "Wazuh Manager exporter script not found"
+      when: wazuh_manager_exporter_enabled | default(true)
+
+    - name: Check OpenSearch exporter systemd service unit exists
+      ansible.builtin.stat:
+        path: "/etc/systemd/system/wazuh-opensearch-exporter.service"
+      register: opensearch_service_unit
+      when: wazuh_indexer_exporter_enabled | default(true)
+
+    - name: Assert OpenSearch exporter systemd service unit exists
+      ansible.builtin.assert:
+        that:
+          - opensearch_service_unit.stat.exists
+        fail_msg: "OpenSearch exporter service unit not found"
+      when: wazuh_indexer_exporter_enabled | default(true)
+
+    - name: Check Wazuh Manager exporter systemd service unit exists
+      ansible.builtin.stat:
+        path: "/etc/systemd/system/wazuh-manager-exporter.service"
+      register: manager_service_unit
+      when: wazuh_manager_exporter_enabled | default(true)
+
+    - name: Assert Wazuh Manager exporter systemd service unit exists
+      ansible.builtin.assert:
+        that:
+          - manager_service_unit.stat.exists
+        fail_msg: "Wazuh Manager exporter service unit not found"
+      when: wazuh_manager_exporter_enabled | default(true)
 
     - name: Check Grafana dashboard not deployed (disabled)
       ansible.builtin.stat:

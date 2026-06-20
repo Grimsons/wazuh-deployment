@@ -43,10 +43,15 @@
     dest: "/tmp/filebeat-oss-{{ wazuh_filebeat_version | default('7.10.2') }}-amd64.deb"
     checksum: "{{ wazuh_filebeat_deb_sha256 }}"
     mode: '0644'
+    timeout: 60
   when:
     - ansible_os_family == 'Debian'
     - filebeat_installed_rc | int != 0
   become: true
+  register: filebeat_deb_download
+  retries: 3
+  delay: 5
+  until: filebeat_deb_download is succeeded
 
 - name: Install Filebeat OSS (Debian)
   ansible.builtin.apt:
@@ -63,10 +68,15 @@
     dest: "/tmp/filebeat-oss-{{ wazuh_filebeat_version | default('7.10.2') }}-x86_64.rpm"
     checksum: "{{ wazuh_filebeat_rpm_sha256 }}"
     mode: '0644'
+    timeout: 60
   when:
     - ansible_os_family == 'RedHat'
     - filebeat_installed_rc | int != 0
   become: true
+  register: filebeat_rpm_download
+  retries: 3
+  delay: 5
+  until: filebeat_rpm_download is succeeded
 
 - name: Install Filebeat OSS (RedHat)
   ansible.builtin.yum:

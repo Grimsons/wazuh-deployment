@@ -42,6 +42,8 @@ provisioner:
         wazuh_dashboard_port: 443
         wazuh_ssl_verify_certificates: false
         wazuh_configure_firewall: false
+        wazuh_dashboard_skip_readiness_check: true
+        wazuh_dashboard_skip_index_patterns: true
         dashboard_node_name: "dashboard-1"
         wazuh_node_ip: "127.0.0.1"
         wazuh_cert_country: "US"

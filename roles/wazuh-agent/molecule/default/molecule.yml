@@ -37,6 +37,7 @@ provisioner:
             ip: 127.0.0.1
         wazuh_agent_enrollment_password: "{{ vault_wazuh_agent_enrollment_password }}"
         wazuh_ssl_verify_certificates: false
+        wazuh_agent_auditd_enabled: false
 
 verifier:
   name: ansible

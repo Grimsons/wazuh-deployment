@@ -41,6 +41,7 @@ provisioner:
         wazuh_indexer_admin_password: "{{ vault_wazuh_indexer_admin_password }}"
         wazuh_api_password: "{{ vault_wazuh_api_password }}"
         wazuh_manager_cluster_key: "{{ vault_wazuh_manager_cluster_key }}"
+        wazuh_agent_enrollment_password: "{{ vault_wazuh_agent_enrollment_password }}"
         wazuh_ssl_verify_certificates: false
         wazuh_configure_firewall: false
 
