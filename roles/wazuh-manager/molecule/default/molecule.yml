@@ -45,6 +45,7 @@ provisioner:
         wazuh_agent_enrollment_password: "{{ vault_wazuh_agent_enrollment_password }}"
         wazuh_ssl_verify_certificates: false
         wazuh_configure_firewall: false
+        wazuh_filebeat_enabled: false
 
 verifier:
   name: ansible
