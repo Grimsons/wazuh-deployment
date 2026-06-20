@@ -45,6 +45,19 @@
     label: "{{ item.name }}"
   run_once: true
 
+# Ensure group directories exist before deploying files
+- name: Ensure group directories exist
+  ansible.builtin.file:
+    path: "{{ wazuh_manager_install_path }}/etc/shared/{{ item.name }}"
+    state: directory
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
+    mode: '0770'
+  loop: "{{ wazuh_agent_groups }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become: true
+
 # Deploy group-specific agent.conf
 - name: Create agent.conf for groups
   ansible.builtin.template:
@@ -59,19 +72,6 @@
   become: true
   when: item.config is defined
   notify: restart wazuh-manager
-
-# Deploy merged.mg for groups (optional - for merged configurations)
-- name: Ensure group directories exist
-  ansible.builtin.file:
-    path: "{{ wazuh_manager_install_path }}/etc/shared/{{ item.name }}"
-    state: directory
-    owner: "{{ wazuh_manager_owner }}"
-    group: "{{ wazuh_manager_group }}"
-    mode: '0770'
-  loop: "{{ wazuh_agent_groups }}"
-  loop_control:
-    label: "{{ item.name }}"
-  become: true
 
 # Deploy custom files to group directories
 - name: Deploy custom files to agent groups
