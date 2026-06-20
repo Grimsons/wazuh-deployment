@@ -5,7 +5,7 @@
   tasks:
     - name: Check that SSH key exists (from setup.sh)
       ansible.builtin.stat:
-        path: "{{ playbook_dir }}/keys/wazuh_ansible_key.pub"
+        path: /tmp/opencode/wazuh_ansible_key.pub
       delegate_to: localhost
       run_once: true
       register: ssh_key_stat
@@ -13,14 +13,14 @@
     - name: Fail if SSH key not found
       ansible.builtin.fail:
         msg: |
-          SSH key not found at keys/wazuh_ansible_key.pub.
+          SSH key not found at /tmp/opencode/wazuh_ansible_key.pub.
           Run setup.sh first to generate configuration and SSH keys:
             ./setup.sh
       when: not ssh_key_stat.stat.exists
 
     - name: Read SSH public key
       ansible.builtin.slurp:
-        src: "{{ playbook_dir }}/keys/wazuh_ansible_key.pub"
+        src: /tmp/opencode/wazuh_ansible_key.pub
       register: ssh_pub_key
       delegate_to: localhost
       run_once: true
@@ -28,6 +28,22 @@
     - name: Set SSH key fact
       ansible.builtin.set_fact:
         wazuh_pubkey: "{{ ssh_pub_key.content | b64decode | trim }}"
+
+    - name: Install SSH server if missing
+      ansible.builtin.shell: |
+        docker exec {{ inventory_hostname }} bash -c '
+          if ! command -v sshd &>/dev/null && ! systemctl list-unit-files ssh.service &>/dev/null; then
+            if command -v apt-get &>/dev/null; then
+              apt-get update -qq && apt-get install -y -qq openssh-server
+            elif command -v dnf &>/dev/null; then
+              dnf install -y openssh-server
+            elif command -v yum &>/dev/null; then
+              yum install -y openssh-server
+            fi
+          fi
+        '
+      changed_when: false
+      delegate_to: localhost
 
     - name: Ensure SSH is running inside container
       ansible.builtin.shell: |
@@ -79,7 +95,7 @@
 
     - name: Verify SSH connectivity
       ansible.builtin.shell: |
-        ssh -i {{ playbook_dir }}/keys/wazuh_ansible_key \
+        ssh -i /tmp/opencode/wazuh_ansible_key \
           -o StrictHostKeyChecking=accept-new \
           -o UserKnownHostsFile=/dev/null \
           -o BatchMode=yes \

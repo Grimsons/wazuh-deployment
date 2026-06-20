@@ -200,7 +200,8 @@ generate_dashboard_cert() {
     print_info "Generating Dashboard certificate..."
     # Use localhost as default SAN - override with actual dashboard IP from inventory
     local dashboard_ip="${DASHBOARD_IP:-127.0.0.1}"
-    generate_node_cert "dashboard" "$dashboard_ip" ""
+    local dashboard_name="${DASHBOARD_NAME:-dashboard-1}"
+    generate_node_cert "$dashboard_name" "$dashboard_ip" ""
 }
 
 # Main function

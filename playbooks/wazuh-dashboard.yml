@@ -24,7 +24,7 @@
   post_tasks:
     - name: Verify Wazuh Dashboard is running
       ansible.builtin.uri:
-        url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/app/login"
+        url: "https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/app/login"
         validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 302]
       register: dashboard_health_check
@@ -33,5 +33,5 @@
       ansible.builtin.debug:
         msg: |
           Wazuh Dashboard is accessible!
-          URL: https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}
+          URL: https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}
           Username: {{ wazuh_dashboard_admin_user | default('admin') }}

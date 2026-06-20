@@ -5,10 +5,21 @@
 wazuh_agent_package_name: "wazuh-agent"
 wazuh_agent_service_name: "wazuh-agent"
 
-# Repository settings
-wazuh_repo_gpg_key: "https://packages.wazuh.com/key/GPG-KEY-WAZUH"
-wazuh_repo_url_apt: "https://packages.wazuh.com/4.x/apt/"
-wazuh_repo_url_yum: "https://packages.wazuh.com/4.x/yum/"
+# Repository settings (version-aware)
+# Production releases (e.g. 4.14.5) use packages.wazuh.com
+# Pre-release versions (e.g. 5.0.0-beta2) use packages-staging.xdrsiem.wazuh.info
+wazuh_repo_gpg_key: >-
+  {{ 'https://packages-staging.xdrsiem.wazuh.info/key/GPG-KEY-WAZUH'
+     if (wazuh_version is search('-'))
+     else 'https://packages.wazuh.com/key/GPG-KEY-WAZUH' }}
+wazuh_repo_url_apt: >-
+  {{ 'https://packages-staging.xdrsiem.wazuh.info/pre-release/' + (wazuh_version.split('.')[0] + '.x') + '/apt/'
+     if (wazuh_version is search('-'))
+     else 'https://packages.wazuh.com/' + (wazuh_version.split('.')[0] + '.x') + '/apt/' }}
+wazuh_repo_url_yum: >-
+  {{ 'https://packages-staging.xdrsiem.wazuh.info/pre-release/' + (wazuh_version.split('.')[0] + '.x') + '/yum/'
+     if (wazuh_version is search('-'))
+     else 'https://packages.wazuh.com/' + (wazuh_version.split('.')[0] + '.x') + '/yum/' }}
 
 # Agent configuration
 wazuh_agent_config_path: /var/ossec/etc/ossec.conf

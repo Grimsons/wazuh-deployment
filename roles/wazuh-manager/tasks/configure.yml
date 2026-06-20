@@ -1,12 +1,12 @@
 ---
 # Wazuh Manager - Configuration
 
-- name: Deploy ossec.conf from template
+- name: Deploy manager config from template
   ansible.builtin.template:
     src: ossec.conf.j2
-    dest: /var/ossec/etc/ossec.conf
-    owner: wazuh
-    group: wazuh
+    dest: "{{ wazuh_manager_config_file }}"
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
     mode: '0640'
     backup: true
   become: true
@@ -16,9 +16,9 @@
 - name: Deploy local_internal_options.conf for performance tuning
   ansible.builtin.template:
     src: local_internal_options.conf.j2
-    dest: /var/ossec/etc/local_internal_options.conf
+    dest: "{{ wazuh_manager_install_path }}/etc/local_internal_options.conf"
     owner: root
-    group: wazuh
+    group: "{{ wazuh_manager_group }}"
     mode: '0640'
   become: true
   when: wazuh_internal_options_enabled | default(true)
@@ -27,7 +27,7 @@
 - name: Validate manager configuration before restart
   block:
     - name: Run Wazuh configuration test
-      ansible.builtin.command: /var/ossec/bin/wazuh-analysisd -t
+      ansible.builtin.command: "{{ wazuh_manager_install_path }}/bin/{{ wazuh_manager_binary_prefix }}analysisd -t"
       become: true
       register: config_validation
       changed_when: false
@@ -50,84 +50,36 @@
         msg: "Aborting: Wazuh manager configuration is invalid. Fix the errors shown above."
   when: manager_config_deployed.changed
 
-- name: Configure Wazuh keystore for indexer username
-  ansible.builtin.shell: |
-    set -o pipefail
-    HASH_FILE=/var/ossec/etc/.keystore_username_hash
-    NEW_HASH=$(printf '%s' {{ wazuh_indexer_admin_user | default("admin") | quote }} | sha256sum | cut -d' ' -f1)
-    OLD_HASH=$(cat "$HASH_FILE" 2>/dev/null || echo "")
-    if [ "$NEW_HASH" != "$OLD_HASH" ]; then
-      printf '%s' {{ wazuh_indexer_admin_user | default("admin") | quote }} | /var/ossec/bin/wazuh-keystore -f indexer -k username
-      echo "$NEW_HASH" > "$HASH_FILE"
-      chmod 600 "$HASH_FILE"
-      chown wazuh:wazuh "$HASH_FILE"
-      echo "changed"
-    else
-      echo "ok"
-    fi
-  args:
-    executable: /bin/bash
-  become: true
-  register: keystore_username_result
-  changed_when: "'changed' in keystore_username_result.stdout"
-  no_log: true
-  when: wazuh_indexer_connection_enabled | default(true)
-
-- name: Configure Wazuh keystore for indexer password
-  ansible.builtin.shell: |
-    set -o pipefail
-    HASH_FILE=/var/ossec/etc/.keystore_password_hash
-    NEW_HASH=$(printf '%s' {{ wazuh_indexer_admin_password | quote }} | sha256sum | cut -d' ' -f1)
-    OLD_HASH=$(cat "$HASH_FILE" 2>/dev/null || echo "")
-    if [ "$NEW_HASH" != "$OLD_HASH" ]; then
-      printf '%s' {{ wazuh_indexer_admin_password | quote }} | /var/ossec/bin/wazuh-keystore -f indexer -k password
-      echo "$NEW_HASH" > "$HASH_FILE"
-      chmod 600 "$HASH_FILE"
-      chown wazuh:wazuh "$HASH_FILE"
-      echo "changed"
-    else
-      echo "ok"
-    fi
-  args:
-    executable: /bin/bash
-  become: true
-  register: keystore_password_result
-  changed_when: "'changed' in keystore_password_result.stdout"
-  no_log: true
-  when:
-    - wazuh_indexer_connection_enabled | default(true)
-    - wazuh_indexer_admin_password is defined
-
 - name: Configure local rules directory
   ansible.builtin.file:
-    path: /var/ossec/etc/rules
+    path: "{{ wazuh_manager_install_path }}/etc/rules"
     state: directory
-    owner: wazuh
-    group: wazuh
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
     mode: '0750'
   become: true
 
 - name: Configure local decoders directory
   ansible.builtin.file:
-    path: /var/ossec/etc/decoders
+    path: "{{ wazuh_manager_install_path }}/etc/decoders"
     state: directory
-    owner: wazuh
-    group: wazuh
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
     mode: '0750'
   become: true
 
-- name: Set correct permissions on /var/ossec writable directories
+- name: Set correct permissions on manager writable directories
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
-    owner: wazuh
-    group: wazuh
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
     recurse: true
   loop:
-    - /var/ossec/etc
-    - /var/ossec/logs
-    - /var/ossec/queue
-    - /var/ossec/var
-    - /var/ossec/tmp
-    - /var/ossec/stats
+    - "{{ wazuh_manager_install_path }}/etc"
+    - "{{ wazuh_manager_install_path }}/logs"
+    - "{{ wazuh_manager_install_path }}/queue"
+    - "{{ wazuh_manager_install_path }}/var"
+    - "{{ wazuh_manager_install_path }}/tmp"
+    - "{{ wazuh_manager_install_path }}/stats"
   become: true

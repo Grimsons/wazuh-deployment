@@ -6,7 +6,9 @@
     update_cache: true
     cache_valid_time: 3600
   become: true
-  when: ansible_os_family == 'Debian'
+  when:
+    - ansible_os_family == 'Debian'
+    - not (wazuh_direct_download | default(false))
 
 - name: Ensure keyrings directory exists (Debian/Ubuntu)
   ansible.builtin.file:
@@ -14,7 +16,9 @@
     state: directory
     mode: '0755'
   become: true
-  when: ansible_os_family == 'Debian'
+  when:
+    - ansible_os_family == 'Debian'
+    - not (wazuh_direct_download | default(false))
 
 - name: Download Wazuh GPG key (Debian/Ubuntu)
   ansible.builtin.get_url:
@@ -22,7 +26,9 @@
     dest: /etc/apt/keyrings/wazuh.gpg
     mode: '0644'
   become: true
-  when: ansible_os_family == 'Debian'
+  when:
+    - ansible_os_family == 'Debian'
+    - not (wazuh_direct_download | default(false))
 
 - name: Dearmor Wazuh GPG key if needed (Debian/Ubuntu)
   ansible.builtin.shell: |
@@ -38,14 +44,18 @@
   become: true
   register: dearmor_result
   changed_when: "'dearmored' in dearmor_result.stdout"
-  when: ansible_os_family == 'Debian'
+  when:
+    - ansible_os_family == 'Debian'
+    - not (wazuh_direct_download | default(false))
 
 - name: Remove legacy apt-key entry if present (Debian/Ubuntu)
   ansible.builtin.apt_key:
     url: "{{ wazuh_repo_gpg_key }}"
     state: absent
   become: true
-  when: ansible_os_family == 'Debian'
+  when:
+    - ansible_os_family == 'Debian'
+    - not (wazuh_direct_download | default(false))
   ignore_errors: true
 
 - name: Add Wazuh repository with signed-by (Debian/Ubuntu)
@@ -55,7 +65,9 @@
     filename: wazuh
     update_cache: true
   become: true
-  when: ansible_os_family == 'Debian'
+  when:
+    - ansible_os_family == 'Debian'
+    - not (wazuh_direct_download | default(false))
 
 - name: Import Wazuh GPG key (RHEL/CentOS)
   ansible.builtin.rpm_key:
@@ -79,7 +91,31 @@
   ansible.builtin.set_fact:
     wazuh_manager_address: "{{ wazuh_agent_registration_address | default(wazuh_manager_nodes[0].ip, true) }}"
 
-- name: Install Wazuh Agent (Debian/Ubuntu)
+- name: Download and install Wazuh Agent via .deb (pre-release)
+  when:
+    - ansible_os_family == 'Debian'
+    - wazuh_direct_download | default(false)
+  become: true
+  block:
+    - name: Create temp directory for packages
+      ansible.builtin.file:
+        path: /tmp/wazuh-packages
+        state: directory
+        mode: '0755'
+
+    - name: Download Wazuh Agent .deb package
+      ansible.builtin.get_url:
+        url: "{{ wazuh_repo_url_apt }}pool/main/w/wazuh-agent/wazuh-agent_{{ wazuh_version }}_amd64.deb"
+        dest: /tmp/wazuh-packages/wazuh-agent.deb
+
+    - name: Install .deb package
+      ansible.builtin.apt:
+        deb: /tmp/wazuh-packages/wazuh-agent.deb
+      environment:
+        WAZUH_MANAGER: "{{ wazuh_manager_address }}"
+      notify: restart wazuh-agent
+
+- name: Install Wazuh Agent via apt repository (production)
   ansible.builtin.apt:
     name: "wazuh-agent={{ wazuh_version }}-*"
     state: present
@@ -88,17 +124,47 @@
   become: true
   environment:
     WAZUH_MANAGER: "{{ wazuh_manager_address }}"
-  when: ansible_os_family == 'Debian'
+  when:
+    - ansible_os_family == 'Debian'
+    - not (wazuh_direct_download | default(false))
   notify: restart wazuh-agent
 
-- name: Install Wazuh Agent (RHEL/CentOS)
+- name: Download and install Wazuh Agent via .rpm (pre-release)
+  when:
+    - ansible_os_family == 'RedHat'
+    - wazuh_direct_download | default(false)
+  become: true
+  block:
+    - name: Create temp directory for packages
+      ansible.builtin.file:
+        path: /tmp/wazuh-packages
+        state: directory
+        mode: '0755'
+
+    - name: Download Wazuh Agent .rpm package
+      ansible.builtin.get_url:
+        url: "{{ wazuh_repo_url_yum }}wazuh-agent-{{ wazuh_version }}.x86_64.rpm"
+        dest: /tmp/wazuh-packages/wazuh-agent.rpm
+
+    - name: Install .rpm package
+      ansible.builtin.dnf:
+        name: /tmp/wazuh-packages/wazuh-agent.rpm
+        state: present
+        disable_gpg_check: true
+      environment:
+        WAZUH_MANAGER: "{{ wazuh_manager_address }}"
+      notify: restart wazuh-agent
+
+- name: Install Wazuh Agent via dnf repository (production)
   ansible.builtin.dnf:
     name: "wazuh-agent-{{ wazuh_version }}"
     state: present
   become: true
   environment:
     WAZUH_MANAGER: "{{ wazuh_manager_address }}"
-  when: ansible_os_family == 'RedHat'
+  when:
+    - ansible_os_family == 'RedHat'
+    - not (wazuh_direct_download | default(false))
   notify: restart wazuh-agent
 
 # ─────────────────────────────────────────────────────────────

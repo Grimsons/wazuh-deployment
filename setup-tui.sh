@@ -287,6 +287,7 @@ select_profile() {
         --selected "production" \
         "minimal     │ Single-node for testing (localhost)" \
         "production  │ Multi-node HA with all features [recommended]" \
+        "docker      │ Docker container environment" \
         "custom      │ Full interactive configuration")
 
     # Extract profile name
@@ -680,8 +681,11 @@ EOF
       hosts:
 EOF
 
-    for node in "${DASHBOARD_NODES_ARRAY[@]}"; do
+    for i in "${!DASHBOARD_NODES_ARRAY[@]}"; do
+        node="${DASHBOARD_NODES_ARRAY[$i]}"
+        node_name="dashboard-$((i+1))"
         echo "        ${node}:" >> "$SCRIPT_DIR/inventory/hosts.yml"
+        echo "          dashboard_node_name: ${node_name}" >> "$SCRIPT_DIR/inventory/hosts.yml"
     done
 
     if [[ "$DEPLOY_AGENTS" == "true" ]] && [[ -n "${AGENT_NODES:-}" ]]; then
@@ -970,6 +974,21 @@ wazuh_bootstrap_user: "${INITIAL_SSH_USER:-root}"
 # Post-Deployment Security
 # ═══════════════════════════════════════════════════════════════
 wazuh_lockdown_deploy_user: true
+
+# ═══════════════════════════════════════════════════════════════
+# Version-Derived Variables (evaluated from wazuh_version above)
+# ═══════════════════════════════════════════════════════════════
+wazuh_is_5x: "{{ wazuh_version.split('.')[0] == '5' }}"
+wazuh_is_prerelease: "{{ '-' in wazuh_version }}"
+wazuh_direct_download: "{{ wazuh_is_prerelease }}"
+wazuh_manager_install_path: "{{ '/var/wazuh-manager' if wazuh_is_5x else '/var/ossec' }}"
+wazuh_manager_config_file: "{{ wazuh_manager_install_path }}/etc/{{ 'wazuh-manager.conf' if wazuh_is_5x else 'ossec.conf' }}"
+wazuh_manager_certs_path: "{{ wazuh_manager_install_path }}/etc/certs"
+wazuh_manager_log_path: "{{ wazuh_manager_install_path }}/logs"
+wazuh_manager_owner: "{{ 'wazuh-manager' if wazuh_is_5x else 'wazuh' }}"
+wazuh_manager_group: "{{ 'wazuh-manager' if wazuh_is_5x else 'wazuh' }}"
+wazuh_use_filebeat: "{{ false if wazuh_is_5x else true }}"
+wazuh_manager_cert_name: "{{ manager_node_name | default('server') }}"
 EOF
 
     success "Created: group_vars/all/main.yml"
@@ -1146,13 +1165,14 @@ main() {
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
                 echo "Options:"
-                echo "  --profile, -p PROFILE   Set deployment profile (minimal|production|custom)"
+                echo "  --profile, -p PROFILE   Set deployment profile (minimal|production|docker|custom)"
                 echo "  --check, -c             Validate gum installation and exit"
                 echo "  --help, -h              Show this help message"
                 echo ""
                 echo "Examples:"
                 echo "  $0                      # Interactive TUI mode"
                 echo "  $0 --profile minimal    # Quick setup with minimal profile"
+                echo "  $0 --profile docker     # Setup for Docker containers"
                 echo "  $0 --check              # Verify gum is properly installed"
                 exit 0
                 ;;

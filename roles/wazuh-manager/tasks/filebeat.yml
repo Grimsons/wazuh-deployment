@@ -72,6 +72,7 @@
   ansible.builtin.yum:
     name: "/tmp/filebeat-oss-{{ wazuh_filebeat_version | default('7.10.2') }}-x86_64.rpm"
     state: present
+    disable_gpg_check: true
   when:
     - ansible_os_family == 'RedHat'
     - filebeat_installed_rc | int != 0
@@ -123,7 +124,7 @@
 
 - name: Copy root CA certificate for Filebeat
   ansible.builtin.copy:
-    src: /var/ossec/etc/certs/root-ca.pem
+    src: "{{ wazuh_manager_certs_path }}/root-ca.pem"
     dest: /etc/filebeat/certs/root-ca.pem
     remote_src: true
     owner: root
@@ -133,7 +134,7 @@
 
 - name: Copy server certificate for Filebeat
   ansible.builtin.copy:
-    src: /var/ossec/etc/certs/server.pem
+    src: "{{ wazuh_manager_certs_path }}/{{ wazuh_manager_cert_name }}.pem"
     dest: /etc/filebeat/certs/filebeat.pem
     remote_src: true
     owner: root
@@ -143,7 +144,7 @@
 
 - name: Copy server key for Filebeat
   ansible.builtin.copy:
-    src: /var/ossec/etc/certs/server-key.pem
+    src: "{{ wazuh_manager_certs_path }}/{{ wazuh_manager_cert_name }}-key.pem"
     dest: /etc/filebeat/certs/filebeat-key.pem
     remote_src: true
     owner: root
@@ -162,9 +163,9 @@
 
 - name: Verify Filebeat key matches certificate
   ansible.builtin.shell: |
-    CERT_MOD=$(openssl x509 -noout -modulus -in /etc/filebeat/certs/filebeat.pem 2>&1 | openssl md5)
-    KEY_MOD=$(openssl rsa -noout -modulus -in /etc/filebeat/certs/filebeat-key.pem 2>&1 | openssl md5)
-    if [ "$CERT_MOD" = "$KEY_MOD" ]; then echo "MATCH: cert and key modulus match"; else echo "MISMATCH: cert=$CERT_MOD key=$KEY_MOD"; exit 1; fi
+    CERT_PUB=$(openssl x509 -pubkey -noout -in /etc/filebeat/certs/filebeat.pem 2>&1 | openssl md5)
+    KEY_PUB=$(openssl pkey -pubout -in /etc/filebeat/certs/filebeat-key.pem 2>&1 | openssl md5)
+    if [ "$CERT_PUB" = "$KEY_PUB" ]; then echo "MATCH: cert and key modulus match"; else echo "MISMATCH: cert=$CERT_PUB key=$KEY_PUB"; exit 1; fi
   become: true
   register: filebeat_key_match
   changed_when: false

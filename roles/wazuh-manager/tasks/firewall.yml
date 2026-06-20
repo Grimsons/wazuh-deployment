@@ -17,7 +17,7 @@
 - name: Get default network interface info
   ansible.builtin.set_fact:
     default_interface: "{{ ansible_default_ipv4.interface | default('eth0') }}"
-    default_ip: "{{ ansible_default_ipv4.address | default('0.0.0.0') }}"
+    default_ip: "{{ wazuh_node_ip | default('0.0.0.0') }}"
     default_netmask: "{{ ansible_default_ipv4.netmask | default('255.255.255.0') }}"
     default_network: "{{ ansible_default_ipv4.network | default('0.0.0.0') }}"
 

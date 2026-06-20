@@ -15,6 +15,7 @@
 
 - name: Configure Wazuh repository
   ansible.builtin.include_tasks: repository.yml
+  when: not wazuh_direct_download | default(false)
 
 - name: Install Wazuh Dashboard
   ansible.builtin.include_tasks: install.yml
@@ -49,7 +50,7 @@
 - name: Wait for Wazuh Dashboard to be listening
   ansible.builtin.wait_for:
     port: "{{ wazuh_dashboard_port }}"
-    host: "{{ ansible_default_ipv4.address }}"
+    host: "{{ wazuh_node_ip }}"
     delay: "{{ wazuh_dashboard_health_check_delay }}"
     timeout: "{{ wazuh_dashboard_startup_timeout }}"
   become: true
@@ -65,7 +66,7 @@
 
 - name: Wait for Wazuh Dashboard to be ready
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/api/status"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/api/status"
     user: "{{ wazuh_indexer_admin_user | default('admin') }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
@@ -133,6 +134,6 @@
     msg: |
       ═══════════════════════════════════════════════════════════════
       Wazuh Dashboard is ready!
-      URL: https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}
+      URL: https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}
       ═══════════════════════════════════════════════════════════════
   run_once: true

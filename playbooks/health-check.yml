@@ -107,10 +107,12 @@
         name: filebeat
       register: filebeat_service
       failed_when: false
+      when: wazuh_use_filebeat
 
     - name: Record Filebeat service status
       ansible.builtin.set_fact:
         filebeat_service_status: "{{ 'HEALTHY' if filebeat_service.status.ActiveState | default('inactive') == 'active' else 'UNHEALTHY' }}"
+      when: wazuh_use_filebeat
 
     - name: Check Wazuh API health
       ansible.builtin.uri:
@@ -129,33 +131,33 @@
 
     - name: Get connected agents count
       ansible.builtin.shell: |
-        /var/ossec/bin/agent_control -l 2>/dev/null | grep -c "Active" || echo "0"
+        {{ wazuh_manager_install_path }}/bin/agent_control -l 2>/dev/null | grep -c "Active" || echo "0"
       register: active_agents
       changed_when: false
       failed_when: false
 
     - name: Get total agents count
       ansible.builtin.shell: |
-        /var/ossec/bin/agent_control -l 2>/dev/null | grep -c "ID:" || echo "0"
+        {{ wazuh_manager_install_path }}/bin/agent_control -l 2>/dev/null | grep -c "ID:" || echo "0"
       register: total_agents
       changed_when: false
       failed_when: false
 
     - name: Check manager logs for recent errors
       ansible.builtin.shell: |
-        tail -100 /var/ossec/logs/ossec.log 2>/dev/null | grep -c "ERROR" || echo "0"
+        tail -100 {{ wazuh_manager_log_path }}/ossec.log 2>/dev/null | grep -c "ERROR" || echo "0"
       register: recent_errors
       changed_when: false
       failed_when: false
 
     - name: Check disk space for manager
-      ansible.builtin.shell: df -h /var/ossec | tail -1 | awk '{print $5}' | tr -d '%'
+      ansible.builtin.shell: df -h {{ wazuh_manager_install_path }} | tail -1 | awk '{print $5}' | tr -d '%'
       register: disk_usage
       changed_when: false
 
     - name: Get queue status
       ansible.builtin.shell: |
-        ls -1 /var/ossec/queue/alerts/ar 2>/dev/null | wc -l || echo "0"
+        ls -1 {{ wazuh_manager_install_path }}/queue/alerts/ar 2>/dev/null | wc -l || echo "0"
       register: queue_count
       changed_when: false
       failed_when: false
@@ -167,7 +169,7 @@
           MANAGER HEALTH - {{ inventory_hostname }}
           ═══════════════════════════════════════════════════════════════
           Service Status:   {{ manager_service_status }}
-          Filebeat Status:  {{ filebeat_service_status }}
+          Filebeat Status:  {{ filebeat_service_status | default('N/A (5.x)') }}
           API Status:       {{ api_status }}
           Active Agents:    {{ active_agents.stdout }} / {{ total_agents.stdout }}
           Recent Errors:    {{ recent_errors.stdout }} (last 100 log lines)
@@ -177,7 +179,7 @@
 
     - name: List agent details
       ansible.builtin.shell: |
-        /var/ossec/bin/agent_control -l 2>/dev/null | head -20
+        {{ wazuh_manager_install_path }}/bin/agent_control -l 2>/dev/null | head -20
       register: agent_list
       changed_when: false
       failed_when: false
@@ -244,7 +246,7 @@
           HTTP Status:      {{ dashboard_http_status }} ({{ dashboard_http.status | default('N/A') }})
           Recent Errors:    {{ dashboard_errors.stdout }} (last 100 log lines)
           Disk Usage:       {{ disk_usage.stdout }}%
-          URL:              https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}
+          URL:              https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}
           ═══════════════════════════════════════════════════════════════
 
 - name: "End-to-End Data Flow Validation"
@@ -259,7 +261,7 @@
     # true pipeline health indicator (requires prior real events to have flowed through).
     - name: "E2E: Test rule engine responsiveness (logtest dry-run)"
       ansible.builtin.shell: |
-        /var/ossec/bin/wazuh-logtest-legacy <<< '{"timestamp":"{{ ansible_date_time.iso8601 | default("now") }}","rule":{"level":3,"description":"E2E health check test alert","id":"100099"},"agent":{"id":"000","name":"e2e-test"},"manager":{"name":"{{ inventory_hostname }}"},"full_log":"E2E-HEALTH-CHECK-{{ ansible_date_time.epoch | default("0") }}"}'
+        {{ wazuh_manager_install_path }}/bin/wazuh-logtest-legacy <<< '{"timestamp":"{{ ansible_date_time.iso8601 | default("now") }}","rule":{"level":3,"description":"E2E health check test alert","id":"100099"},"agent":{"id":"{{ "000" if not wazuh_is_5x else "001" }}","name":"e2e-test"},"manager":{"name":"{{ inventory_hostname }}"},"full_log":"E2E-HEALTH-CHECK-{{ ansible_date_time.epoch | default("0") }}"}'
       register: test_alert_inject
       changed_when: false
       failed_when: false
@@ -286,11 +288,13 @@
       register: filebeat_test
       changed_when: false
       failed_when: false
-      when: check_e2e | default(false) | bool
+      when:
+        - check_e2e | default(false) | bool
+        - wazuh_use_filebeat
 
     - name: "E2E: Check manager event queue"
       ansible.builtin.shell: |
-        /var/ossec/bin/wazuh-control info 2>/dev/null | grep -E "events_dropped|events_received" || echo "Queue stats not available"
+        {{ wazuh_manager_install_path }}/bin/{{ wazuh_manager_binary_prefix | default('wazuh-') }}control info 2>/dev/null | grep -E "events_dropped|events_received" || echo "Queue stats not available"
       register: queue_stats
       changed_when: false
       failed_when: false
@@ -303,7 +307,7 @@
           END-TO-END DATA FLOW - {{ inventory_hostname }}
           ═══════════════════════════════════════════════════════════════
           Alert count in indexer: {{ alert_count.json.count | default('N/A') }}
-          Filebeat output test:  {{ 'OK' if filebeat_test.rc | default(1) == 0 else 'ISSUE' }}
+          Filebeat output test:  {{ 'OK' if (filebeat_test.rc | default(1) == 0 and wazuh_use_filebeat) else ('N/A (5.x)' if not wazuh_use_filebeat else 'ISSUE') }}
           {{ filebeat_test.stdout | default('') }}
           Queue stats: {{ queue_stats.stdout | default('N/A') }}
           ═══════════════════════════════════════════════════════════════

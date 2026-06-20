@@ -5,10 +5,18 @@
 
 - name: Generate random API password
   ansible.builtin.shell: |
-    source {{ playbook_dir | quote }}/../lib/generators.sh && generate_yaml_safe_password 24
+    pass=$(LC_ALL=C tr -dc 'A-Za-z0-9@^_+=-' < /dev/urandom | head -c 20)
+    pass="${pass}$(LC_ALL=C tr -dc 'A-Z' < /dev/urandom | head -c 1)"
+    pass="${pass}$(LC_ALL=C tr -dc 'a-z' < /dev/urandom | head -c 1)"
+    pass="${pass}$(LC_ALL=C tr -dc '0-9' < /dev/urandom | head -c 1)"
+    symbols='@^_+-='
+    sym_idx=$(head -c 4 /dev/urandom | od -An -tu4 | tr -d ' ')
+    pass="${pass}${symbols:$((sym_idx % 6)):1}"
+    echo "$pass" | fold -w1 | shuf --random-source=/dev/urandom | tr -d '\n'
   args:
     executable: /bin/bash
   delegate_to: localhost
+  become: false
   register: _api_pw_shell
   changed_when: false
   run_once: true
@@ -43,7 +51,7 @@
 
 - name: Authenticate with default credentials
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}/security/user/authenticate"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_manager_api_port }}/security/user/authenticate"
     method: POST
     user: "{{ wazuh_api_user }}"
     password: "{{ wazuh_api_default_password }}"
@@ -73,7 +81,7 @@
 
 - name: Get current user ID
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}/security/users"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_manager_api_port }}/security/users"
     method: GET
     headers:
       Authorization: "Bearer {{ wazuh_jwt_token }}"
@@ -91,7 +99,7 @@
 
 - name: Update API user password
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}/security/users/{{ wazuh_user_id }}"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_manager_api_port }}/security/users/{{ wazuh_user_id }}"
     method: PUT
     headers:
       Authorization: "Bearer {{ wazuh_jwt_token }}"
@@ -132,7 +140,7 @@
 # On re-runs, verify the vault password works against the API
 - name: Authenticate with configured password (re-run)
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}/security/user/authenticate"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_manager_api_port }}/security/user/authenticate"
     method: POST
     user: "{{ wazuh_api_user }}"
     password: "{{ wazuh_api_password }}"
@@ -165,7 +173,7 @@
 
 - name: Assert default API credentials have been rotated
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}/security/user/authenticate"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_manager_api_port }}/security/user/authenticate"
     method: POST
     user: "{{ wazuh_api_user }}"
     password: "{{ wazuh_api_default_password }}"

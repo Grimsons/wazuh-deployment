@@ -65,11 +65,11 @@
         that:
           - target_version is defined
           - target_version | length > 0
-          - target_version is regex('^[0-9]+\.[0-9]+\.[0-9]+$')
+          - target_version is regex('^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$')
         fail_msg: |
           ERROR: Invalid or missing target version!
 
-          Specify version with: -e "target_version=4.15.0"
+          Specify version with: -e "target_version=5.0.0-beta2"
            Or set wazuh_version in group_vars/all/main.yml
 
           Current value: {{ target_version | default('not set') }}

@@ -4,7 +4,7 @@
 
 - name: Wait for dashboard API to be fully available
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/api/status"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/api/status"
     method: GET
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
@@ -32,7 +32,7 @@
 
 - name: Check existing index patterns
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/api/saved_objects/_find?type=index-pattern&per_page=100"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/api/saved_objects/_find?type=index-pattern&per_page=100"
     method: GET
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
@@ -50,7 +50,7 @@
 
 - name: Get field list for each index pattern
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/api/index_patterns/_fields_for_wildcard?pattern={{ item.title }}&meta_fields=_source&meta_fields=_id&meta_fields=_type&meta_fields=_index&meta_fields=_score"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/api/index_patterns/_fields_for_wildcard?pattern={{ item.title }}&meta_fields=_source&meta_fields=_id&meta_fields=_type&meta_fields=_index&meta_fields=_score"
     method: GET
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
@@ -68,7 +68,7 @@
 
 - name: Create or update index patterns with field mappings
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/api/saved_objects/index-pattern/{{ item.0.id }}?overwrite=true"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/api/saved_objects/index-pattern/{{ item.0.id }}?overwrite=true"
     method: POST
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
@@ -94,7 +94,7 @@
 
 - name: Set default index pattern to wazuh-alerts-*
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/api/opensearch-dashboards/settings/defaultIndex"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/api/opensearch-dashboards/settings/defaultIndex"
     method: POST
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"

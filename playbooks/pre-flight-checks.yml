@@ -173,6 +173,24 @@
   gather_facts: true
   tags: [always]
 
+- name: Pre-Flight Checks - Container Detection
+  hosts: all
+  gather_facts: false
+  tags: [always]
+  tasks:
+    - name: Detect containerized environment
+      ansible.builtin.set_fact:
+        wazuh_is_container: >-
+          {{ ansible_virtualization_type in ['docker', 'podman', 'containerd']
+             and ansible_virtualization_role == 'guest' }}
+        wazuh_node_ip: >-
+          {% if ansible_virtualization_type in ['docker', 'podman', 'containerd']
+             and ansible_virtualization_role == 'guest' -%}
+          127.0.0.1
+          {%- else -%}
+          {{ ansible_default_ipv4.address | default('127.0.0.1') }}
+          {%- endif %}
+
 - name: Pre-Flight Checks - System Resources
   hosts: all
   gather_facts: false
@@ -456,7 +474,7 @@
       ignore_errors: true
       when:
         - inventory_hostname in groups.get('wazuh_indexers', [])
-        - item.ip != ansible_default_ipv4.address | default('')
+        - item.ip != wazuh_node_ip | default('')
 
     - name: Report network segmentation results
       ansible.builtin.debug:
@@ -493,13 +511,14 @@
       register: dns_elastic
       changed_when: false
       failed_when: false
+      when: wazuh_use_filebeat
 
     - name: Report DNS resolution status
       ansible.builtin.debug:
         msg: |
           DNS Resolution from {{ inventory_hostname }}:
           packages.wazuh.com: {{ 'OK' if dns_wazuh.rc == 0 else 'FAILED' }}
-          artifacts.elastic.co: {{ 'OK' if dns_elastic.rc == 0 else 'FAILED' }}
+          artifacts.elastic.co: {{ 'OK' if dns_elastic.rc == 0 else ('N/A (5.x)' if not wazuh_use_filebeat else 'FAILED') }}
 
     - name: Assert DNS resolution works
       ansible.builtin.assert:
@@ -653,7 +672,7 @@
 
     - name: Get installed Wazuh version (Manager)
       ansible.builtin.shell: |
-        /var/ossec/bin/wazuh-control info 2>/dev/null | grep "WAZUH_VERSION" | cut -d'"' -f2 || echo "Not installed"
+        {{ wazuh_manager_install_path }}/bin/{{ wazuh_manager_binary_prefix | default('wazuh-') }}control info 2>/dev/null | grep "WAZUH_VERSION" | cut -d'"' -f2 || echo "Not installed"
       register: installed_manager_version
       changed_when: false
       failed_when: false

@@ -26,7 +26,7 @@
   post_tasks:
     - name: Verify Wazuh Indexer is running
       ansible.builtin.uri:
-        url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_cluster/health"
+        url: "https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port }}/_cluster/health"
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true

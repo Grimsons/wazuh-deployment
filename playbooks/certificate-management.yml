@@ -347,7 +347,7 @@
     - name: Wait for indexer to be ready
       ansible.builtin.wait_for:
         port: "{{ wazuh_indexer_http_port | default(9200) }}"
-        host: "{{ ansible_default_ipv4.address }}"
+        host: "{{ wazuh_node_ip }}"
         delay: 10
         timeout: 120
 
@@ -374,7 +374,7 @@
     - name: Wait for manager to be ready
       ansible.builtin.wait_for:
         port: 1514
-        host: "{{ ansible_default_ipv4.address }}"
+        host: "{{ wazuh_node_ip }}"
         delay: 10
         timeout: 120
 
@@ -401,7 +401,7 @@
     - name: Wait for dashboard to be ready
       ansible.builtin.wait_for:
         port: "{{ wazuh_dashboard_port | default(443) }}"
-        host: "{{ ansible_default_ipv4.address }}"
+        host: "{{ wazuh_node_ip }}"
         delay: 10
         timeout: 120
 

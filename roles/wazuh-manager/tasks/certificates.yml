@@ -3,19 +3,19 @@
 
 - name: Create certificates directory
   ansible.builtin.file:
-    path: /var/ossec/etc/certs
+    path: "{{ wazuh_manager_install_path }}/etc/certs"
     state: directory
-    owner: wazuh
-    group: wazuh
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
     mode: '0750'
   become: true
 
 - name: Copy root CA certificate
   ansible.builtin.copy:
     src: "{{ wazuh_certs_path | default('files/certs') }}/root-ca.pem"
-    dest: /var/ossec/etc/certs/root-ca.pem
-    owner: wazuh
-    group: wazuh
+    dest: "{{ wazuh_manager_install_path }}/etc/certs/root-ca.pem"
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
     mode: '0400'
   become: true
   notify: restart wazuh-manager
@@ -23,9 +23,9 @@
 - name: Copy manager certificate
   ansible.builtin.copy:
     src: "{{ wazuh_certs_path | default('files/certs') }}/{{ manager_node_name | default('manager-1') }}.pem"
-    dest: /var/ossec/etc/certs/server.pem
-    owner: wazuh
-    group: wazuh
+    dest: "{{ wazuh_manager_install_path }}/etc/certs/{{ wazuh_manager_cert_name }}.pem"
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
     mode: '0400'
   become: true
   notify: restart wazuh-manager
@@ -33,10 +33,26 @@
 - name: Copy manager private key
   ansible.builtin.copy:
     src: "{{ wazuh_certs_path | default('files/certs') }}/{{ manager_node_name | default('manager-1') }}-key.pem"
-    dest: /var/ossec/etc/certs/server-key.pem
-    owner: wazuh
-    group: wazuh
+    dest: "{{ wazuh_manager_install_path }}/etc/certs/{{ wazuh_manager_cert_name }}-key.pem"
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
     mode: '0400'
   become: true
   no_log: true
   notify: restart wazuh-manager
+
+- name: Verify manager certificate has correct common name
+  ansible.builtin.shell: |
+    set -o pipefail
+    CERT_FILE="{{ wazuh_manager_install_path }}/etc/certs/{{ wazuh_manager_cert_name }}.pem"
+    ACTUAL=$(openssl x509 -in "$CERT_FILE" -subject -noout 2>/dev/null | sed 's/.*CN=//')
+    EXPECTED="{{ manager_node_name | default('manager-1') }}"
+    if [ "$ACTUAL" != "$EXPECTED" ]; then
+      echo "FAIL: Manager cert CN='$ACTUAL', expected '$EXPECTED'"
+      echo "Re-copy certs from control machine: ansible-playbook site.yml --tags manager,certs"
+      exit 1
+    fi
+    echo "PASS: Manager cert CN='$ACTUAL'"
+  register: mgr_cert_check
+  changed_when: false
+  become: true

@@ -38,16 +38,16 @@
   become: true
   ignore_errors: true
 
-- name: Ensure /var/ossec directory exists
+- name: Ensure Wazuh manager directory exists
   ansible.builtin.file:
-    path: /var/ossec
+    path: "{{ wazuh_manager_install_path }}"
     state: directory
     mode: '0750'
   become: true
 
 - name: Ensure certificates directory exists
   ansible.builtin.file:
-    path: /var/ossec/etc/certs
+    path: "{{ wazuh_manager_install_path }}/etc/certs"
     state: directory
     mode: '0750'
   become: true

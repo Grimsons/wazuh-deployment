@@ -15,7 +15,7 @@ hosts:
       run_as: {{ wazuh_dashboard_api_run_as | default(false) | lower }}
 {% if wazuh_manager_nodes | length > 1 %}
 {% for node in wazuh_manager_nodes[1:] %}
-  - "{{ node.name }}":
+  - {{ node.name }}:
       url: "https://{{ node.ip }}"
       port: {{ wazuh_manager_api_port }}
       username: "{{ wazuh_api_user }}"

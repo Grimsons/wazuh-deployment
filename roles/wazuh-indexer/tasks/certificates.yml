@@ -61,3 +61,17 @@
   become: true
   no_log: true
   notify: restart wazuh-indexer
+
+- name: Verify indexer certificate has correct common name
+  ansible.builtin.shell: |
+    set -o pipefail
+    ACTUAL=$(openssl x509 -in {{ wazuh_indexer_certs_path }}/indexer.pem -subject -noout 2>/dev/null | sed 's/.*CN=//')
+    EXPECTED="{{ indexer_node_name | default('indexer-1') }}"
+    if [ "$ACTUAL" != "$EXPECTED" ]; then
+      echo "FAIL: Indexer cert CN='$ACTUAL', expected '$EXPECTED'"
+      exit 1
+    fi
+    echo "PASS: Indexer cert CN='$ACTUAL'"
+  register: idx_cert_check
+  changed_when: false
+  become: true

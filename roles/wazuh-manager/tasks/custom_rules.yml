@@ -5,28 +5,28 @@
 # Create directories for custom content
 - name: Ensure custom rules directory exists
   ansible.builtin.file:
-    path: /var/ossec/etc/rules
+    path: "{{ wazuh_manager_install_path }}/etc/rules"
     state: directory
-    owner: wazuh
-    group: wazuh
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
     mode: '0750'
   become: true
 
 - name: Ensure custom decoders directory exists
   ansible.builtin.file:
-    path: /var/ossec/etc/decoders
+    path: "{{ wazuh_manager_install_path }}/etc/decoders"
     state: directory
-    owner: wazuh
-    group: wazuh
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
     mode: '0750'
   become: true
 
 - name: Ensure lists directory exists
   ansible.builtin.file:
-    path: /var/ossec/etc/lists
+    path: "{{ wazuh_manager_install_path }}/etc/lists"
     state: directory
-    owner: wazuh
-    group: wazuh
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
     mode: '0750'
   become: true
 
@@ -54,9 +54,9 @@
 - name: Deploy custom rules
   ansible.builtin.copy:
     src: "{{ item.path }}"
-    dest: "/var/ossec/etc/rules/{{ item.path | basename }}"
-    owner: wazuh
-    group: wazuh
+    dest: "{{ wazuh_manager_install_path }}/etc/rules/{{ item.path | basename }}"
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
     mode: '0640'
   loop: "{{ custom_rules_files.files | default([]) }}"
   become: true
@@ -89,9 +89,9 @@
 - name: Deploy custom decoders
   ansible.builtin.copy:
     src: "{{ item.path }}"
-    dest: "/var/ossec/etc/decoders/{{ item.path | basename }}"
-    owner: wazuh
-    group: wazuh
+    dest: "{{ wazuh_manager_install_path }}/etc/decoders/{{ item.path | basename }}"
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
     mode: '0640'
   loop: "{{ custom_decoder_files.files | default([]) }}"
   become: true
@@ -127,10 +127,10 @@
 
 - name: Ensure CDB list subdirectories exist
   ansible.builtin.file:
-    path: "/var/ossec/etc/lists/{{ item.path | relpath(playbook_dir + '/files/cdb_lists') | dirname }}"
+    path: "{{ wazuh_manager_install_path }}/etc/lists/{{ item.path | relpath(playbook_dir + '/files/cdb_lists') | dirname }}"
     state: directory
-    owner: wazuh
-    group: wazuh
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
     mode: '0750'
   loop: "{{ cdb_list_files.files | default([]) }}"
   loop_control:
@@ -144,9 +144,9 @@
 - name: Deploy CDB lists
   ansible.builtin.copy:
     src: "{{ item.path }}"
-    dest: "/var/ossec/etc/lists/{{ item.path | relpath(playbook_dir + '/files/cdb_lists') }}"
-    owner: wazuh
-    group: wazuh
+    dest: "{{ wazuh_manager_install_path }}/etc/lists/{{ item.path | relpath(playbook_dir + '/files/cdb_lists') }}"
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
     mode: '0640'
   loop: "{{ cdb_list_files.files | default([]) }}"
   loop_control:
@@ -194,9 +194,9 @@
         </rule>
       {% endfor %}
       </group>
-    dest: /var/ossec/etc/rules/local_rules.xml
-    owner: wazuh
-    group: wazuh
+    dest: "{{ wazuh_manager_install_path }}/etc/rules/local_rules.xml"
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
     mode: '0640'
   become: true
   notify: restart wazuh-manager
@@ -204,7 +204,7 @@
 
 # Validate configuration after deploying custom content
 - name: Validate Wazuh configuration (rules, decoders, CDB lists)
-  ansible.builtin.command: /var/ossec/bin/wazuh-analysisd -t
+  ansible.builtin.command: "{{ wazuh_manager_install_path }}/bin/{{ wazuh_manager_binary_prefix }}analysisd -t"
   become: true
   register: config_test
   changed_when: false

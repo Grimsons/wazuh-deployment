@@ -175,6 +175,32 @@
           ══════════════════════════════════════════════
       run_once: true
 
+    - name: Set wazuh_node_ip for containerized/docker environments
+      ansible.builtin.set_fact:
+        wazuh_node_ip: >-
+          {% if ansible_virtualization_type in ['docker', 'podman', 'containerd']
+             and ansible_virtualization_role == 'guest' -%}
+          127.0.0.1
+          {%- else -%}
+          {{ ansible_default_ipv4.address | default('127.0.0.1') }}
+          {%- endif %}
+
+    - name: Set wazuh_is_container flag for container environments
+      ansible.builtin.set_fact:
+        wazuh_is_container: >-
+          {{ ansible_virtualization_type in ['docker', 'podman', 'containerd']
+             and ansible_virtualization_role == 'guest' }}
+
+    - name: Override indexer network host for container environments
+      ansible.builtin.set_fact:
+        wazuh_indexer_network_host: "0.0.0.0"
+        wazuh_dashboard_host: "0.0.0.0"
+      when: wazuh_is_container | default(false)
+
+    - name: Use absolute certs path to avoid relative-path resolution issues
+      ansible.builtin.set_fact:
+        wazuh_certs_path: "{{ playbook_dir }}/files/certs"
+
     - name: Verify connectivity to all hosts
       ansible.builtin.ping:
 
@@ -271,7 +297,7 @@
 
     # File descriptor limit on indexer nodes — OpenSearch requires >= 65535
     - name: Check file descriptor limit on indexer nodes
-      ansible.builtin.shell: ulimit -n
+      ansible.builtin.shell: grep 'Max open files' /proc/1/limits 2>/dev/null | awk '{print $4}'
       register: fd_limit
       changed_when: false
       failed_when: false
@@ -280,11 +306,11 @@
     - name: Validate file descriptor limit for OpenSearch (>= 65535)
       ansible.builtin.assert:
         that:
-          - fd_limit.stdout | int >= 65535
+          - fd_limit.stdout | default('0') | int >= 65535
         fail_msg: >-
-          File descriptor limit on {{ inventory_hostname }} is {{ fd_limit.stdout }} (requires >= 65535).
-          OpenSearch will fail to start. Fix with: sysctl -w fs.file-max=65535
-          and add '* - nofile 65535' to /etc/security/limits.conf
+          File descriptor limit on {{ inventory_hostname }} is {{ fd_limit.stdout | default('unknown') }} (requires >= 65535).
+          OpenSearch will fail to start. Fix with: docker run --ulimit nofile=65535:65535
+          or set LimitNOFILE=65535 in the service override.
         success_msg: "File descriptor limit OK: {{ fd_limit.stdout }}"
       when:
         - inventory_hostname in groups['wazuh_indexers']
@@ -345,7 +371,7 @@
   tasks:
     - name: Check indexer cluster health
       ansible.builtin.uri:
-        url: "https://{{ wazuh_indexer_nodes[0].ip }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health"
+        url: "https://{{ hostvars[inventory_hostname]['wazuh_node_ip'] | default('127.0.0.1') }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health"
         method: GET
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"

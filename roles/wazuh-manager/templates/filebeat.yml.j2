@@ -53,3 +53,10 @@ logging.files:
   name: filebeat
   keepfiles: 7
   permissions: 0640
+
+{% if wazuh_is_container | default(false) %}
+# Disable seccomp filter in container environments
+# Filebeat's built-in seccomp filter conflicts with Go runtime pthread_create
+seccomp:
+  enabled: false
+{% endif %}

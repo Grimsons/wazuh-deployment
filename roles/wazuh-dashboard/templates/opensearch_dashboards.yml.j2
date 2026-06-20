@@ -8,8 +8,8 @@ server.name: "wazuh-dashboard"
 
 # SSL/TLS settings
 server.ssl.enabled: {{ wazuh_dashboard_ssl_enabled | lower }}
-server.ssl.certificate: "{{ wazuh_dashboard_certs_path }}/dashboard.pem"
-server.ssl.key: "{{ wazuh_dashboard_certs_path }}/dashboard-key.pem"
+server.ssl.certificate: "{{ wazuh_dashboard_certs_path }}/{{ dashboard_node_name | default('dashboard-1') }}.pem"
+server.ssl.key: "{{ wazuh_dashboard_certs_path }}/{{ dashboard_node_name | default('dashboard-1') }}-key.pem"
 server.ssl.supportedProtocols:
   - TLSv1.2
   - TLSv1.3
@@ -49,9 +49,9 @@ server.customResponseHeaders:
 {% endif %}
 
 # UI settings
-# Note: defaultRoute to /app/wazuh can cause "Application Not Found" errors
-# Users should navigate to Wazuh from the menu instead
-# uiSettings.overrides.defaultRoute: /app/wazuh
+# The home app is deprecated/unavailable in OSD 3.x; using it as defaultRoute
+# shows "Application Not Found". Use /app/dashboards instead.
+uiSettings.overrides.defaultRoute: /app/dashboards
 
 # Logging
 logging.dest: /var/log/wazuh-dashboard/opensearch-dashboards.log

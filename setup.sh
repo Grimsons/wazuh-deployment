@@ -140,11 +140,11 @@ done
 # Validate profile if specified
 if [[ -n "$SELECTED_PROFILE" ]]; then
     case "$SELECTED_PROFILE" in
-        minimal|production|custom)
+        minimal|production|custom|docker)
             ;;
         *)
             echo -e "${RED}Error: Invalid profile '$SELECTED_PROFILE'${NC}"
-            echo "Valid profiles: minimal, production, custom"
+            echo "Valid profiles: minimal, production, custom, docker"
             exit 1
             ;;
     esac
@@ -254,6 +254,15 @@ prompt_with_default() {
     local is_password="${4:-false}"
     local value=""
 
+    # Skip prompt if variable already has a value (set by profile or env)
+    # including empty string (must handle indirect reference for bash compat)
+    if [[ -n "${!var_name+defined}" ]]; then
+        if [ "$is_password" != "true" ]; then
+            print_info "$prompt: ${!var_name:-}"
+        fi
+        return 0
+    fi
+
     if [ "$is_password" = "true" ]; then
         # For passwords, -s hides input, no -e needed since no editing visible
         read -rsp "$(echo -e "${CYAN}$prompt ${NC}[${YELLOW}hidden${NC}]: ")" value
@@ -276,6 +285,13 @@ prompt_yes_no() {
     local default="$2"
     local var_name="$3"
     local value=""
+
+    # Skip prompt if variable already has a value (set by profile or env)
+    # including empty string (must handle indirect reference for bash compat)
+    if [[ -n "${!var_name+defined}" ]]; then
+        print_info "$prompt: ${!var_name}"
+        return 0
+    fi
 
     while true; do
         read -erp "$(echo -e "${CYAN}$prompt ${NC}[${YELLOW}$default${NC}]: ")" value
@@ -386,12 +402,14 @@ main() {
             echo -e "${CYAN}Select Deployment Profile:${NC}"
             echo -e "  ${YELLOW}1)${NC} minimal     - Single-node for testing"
             echo -e "  ${YELLOW}2)${NC} production  - Multi-node HA setup ${GREEN}[default]${NC}"
-            echo -e "  ${YELLOW}3)${NC} custom      - Full interactive"
+            echo -e "  ${YELLOW}3)${NC} docker      - Docker container environment"
+            echo -e "  ${YELLOW}4)${NC} custom      - Full interactive"
             echo
             read -erp "$(echo -e "${CYAN}Select profile ${NC}[${YELLOW}2${NC}]: ")" profile_choice
             case "${profile_choice:-2}" in
                 1) SELECTED_PROFILE="minimal" ;;
-                3) SELECTED_PROFILE="custom" ;;
+                3) SELECTED_PROFILE="docker" ;;
+                4) SELECTED_PROFILE="custom" ;;
                 *) SELECTED_PROFILE="production" ;;
             esac
         fi
@@ -421,6 +439,12 @@ main() {
             print_info "Using PRODUCTION profile - multi-node HA setup"
             if [[ "$MODULAR_MODE" == "true" ]]; then
                 apply_profile_production
+            fi
+            ;;
+        docker)
+            print_info "Using DOCKER profile - containerized deployment"
+            if [[ "$MODULAR_MODE" == "true" ]]; then
+                apply_profile_docker
             fi
             ;;
         custom)
@@ -503,7 +527,11 @@ main() {
     print_info "The Wazuh Manager analyzes data received from agents."
     echo
 
-    prompt_hosts "Enter Wazuh Manager node(s)" "MANAGER_NODES"
+    if [[ -z "${MANAGER_NODES:-}" ]]; then
+        prompt_hosts "Enter Wazuh Manager node(s)" "MANAGER_NODES"
+    else
+        print_info "Manager nodes: $MANAGER_NODES"
+    fi
 
     if [ -z "$MANAGER_NODES" ]; then
         print_error "At least one Manager node is required!"
@@ -513,8 +541,17 @@ main() {
     IFS=' ' read -r -a MANAGER_NODES_ARRAY <<< "$MANAGER_NODES"
     MANAGER_COUNT=${#MANAGER_NODES_ARRAY[@]}
 
-    prompt_with_default "Manager API port" "$DEFAULT_MANAGER_API_PORT" "MANAGER_API_PORT"
-    prompt_with_default "Agent registration port" "$DEFAULT_AGENT_PORT" "AGENT_PORT"
+    if [[ -z "${MANAGER_API_PORT:-}" ]]; then
+        prompt_with_default "Manager API port" "$DEFAULT_MANAGER_API_PORT" "MANAGER_API_PORT"
+    else
+        print_info "Manager API port: $MANAGER_API_PORT"
+    fi
+
+    if [[ -z "${AGENT_PORT:-}" ]]; then
+        prompt_with_default "Agent registration port" "$DEFAULT_AGENT_PORT" "AGENT_PORT"
+    else
+        print_info "Agent registration port: $AGENT_PORT"
+    fi
 
     if [ $MANAGER_COUNT -gt 1 ]; then
         print_info "Multiple managers detected. Configuring cluster..."
@@ -545,7 +582,11 @@ main() {
     print_info "The Wazuh Dashboard provides a web interface for data visualization."
     echo
 
-    prompt_hosts "Enter Wazuh Dashboard node(s)" "DASHBOARD_NODES"
+    if [[ -z "${DASHBOARD_NODES:-}" ]]; then
+        prompt_hosts "Enter Wazuh Dashboard node(s)" "DASHBOARD_NODES"
+    else
+        print_info "Dashboard nodes: $DASHBOARD_NODES"
+    fi
 
     if [ -z "$DASHBOARD_NODES" ]; then
         print_error "At least one Dashboard node is required!"
@@ -554,7 +595,11 @@ main() {
 
     IFS=' ' read -r -a DASHBOARD_NODES_ARRAY <<< "$DASHBOARD_NODES"
 
-    prompt_with_default "Dashboard HTTPS port" "$DEFAULT_DASHBOARD_PORT" "DASHBOARD_PORT"
+    if [[ -z "${DASHBOARD_PORT:-}" ]]; then
+        prompt_with_default "Dashboard HTTPS port" "$DEFAULT_DASHBOARD_PORT" "DASHBOARD_PORT"
+    else
+        print_info "Dashboard port: $DASHBOARD_PORT"
+    fi
 
     # ═══════════════════════════════════════════════════════════════
     # WAZUH AGENTS CONFIGURATION
@@ -564,11 +609,19 @@ main() {
     print_info "Wazuh Agents collect and forward security data from monitored systems."
     echo
 
-    prompt_yes_no "Do you want to deploy agents now?" "yes" "DEPLOY_AGENTS"
+    if [[ -z "${DEPLOY_AGENTS:-}" ]]; then
+        prompt_yes_no "Do you want to deploy agents now?" "yes" "DEPLOY_AGENTS"
+    else
+        print_info "Deploy agents: $DEPLOY_AGENTS"
+    fi
 
     AGENT_NODES_ARRAY=()
     if [ "$DEPLOY_AGENTS" = "true" ]; then
-        prompt_hosts "Enter Agent host(s)" "AGENT_NODES"
+        if [[ -z "${AGENT_NODES:-}" ]]; then
+            prompt_hosts "Enter Agent host(s)" "AGENT_NODES"
+        else
+            print_info "Agent nodes: $AGENT_NODES"
+        fi
         # Use read -a to safely split into array without glob expansion
         IFS=' ' read -r -a AGENT_NODES_ARRAY <<< "$AGENT_NODES"
     fi
@@ -582,7 +635,11 @@ main() {
     print_info "Credentials will be encrypted in Ansible Vault and displayed at the end."
     echo
 
-    prompt_yes_no "Provide custom passwords instead of auto-generating?" "no" "CUSTOM_PASSWORDS"
+    if [[ -z "${CUSTOM_PASSWORDS:-}" ]]; then
+        prompt_yes_no "Provide custom passwords instead of auto-generating?" "no" "CUSTOM_PASSWORDS"
+    else
+        print_info "Custom passwords: $CUSTOM_PASSWORDS"
+    fi
 
     if [ "$CUSTOM_PASSWORDS" = "true" ]; then
         prompt_with_default "Wazuh API admin username" "wazuh" "API_USER"
@@ -622,7 +679,11 @@ main() {
     print_info "You can use self-signed certificates or your own CA certificates."
     echo
 
-    prompt_yes_no "Use self-signed certificates? (No = provide your own)" "yes" "USE_SELF_SIGNED_CERTS"
+    if [[ -z "${USE_SELF_SIGNED_CERTS:-}" ]]; then
+        prompt_yes_no "Use self-signed certificates? (No = provide your own)" "yes" "USE_SELF_SIGNED_CERTS"
+    else
+        print_info "Self-signed certificates: $USE_SELF_SIGNED_CERTS"
+    fi
 
     if [ "$USE_SELF_SIGNED_CERTS" = "true" ]; then
         GENERATE_CERTS="true"
@@ -638,7 +699,7 @@ main() {
         print_info "  - admin.pem, admin-key.pem (Admin certificate)"
         print_info "  - indexer-N.pem, indexer-N-key.pem (Indexer nodes)"
         print_info "  - manager-N.pem, manager-N-key.pem (Manager nodes)"
-        print_info "  - dashboard.pem, dashboard-key.pem (Dashboard)"
+        print_info "  - dashboard-1.pem, dashboard-1-key.pem (Dashboard)"
         echo
         print_warning "Ensure your certificates include proper SANs for all hostnames/IPs"
     fi
@@ -668,7 +729,11 @@ main() {
         [ $found -eq 0 ] && ALL_INFRA_HOSTS+=("$h")
     done
 
-    prompt_yes_no "Generate new SSH key pair for Ansible?" "yes" "GENERATE_SSH_KEY"
+    if [[ -z "${GENERATE_SSH_KEY:-}" ]]; then
+        prompt_yes_no "Generate new SSH key pair for Ansible?" "yes" "GENERATE_SSH_KEY"
+    else
+        print_info "Generate SSH key: $GENERATE_SSH_KEY"
+    fi
 
     if [ "$GENERATE_SSH_KEY" = "true" ]; then
         ANSIBLE_SSH_KEY="${SCRIPT_DIR}/keys/wazuh_ansible_key"
@@ -687,7 +752,11 @@ main() {
     # Per-host SSH credentials
     echo
     print_info "You can configure SSH credentials per host, or use the same for all."
-    prompt_yes_no "Do all hosts use the same initial SSH user/password?" "yes" "SAME_SSH_CREDS"
+    if [[ -z "${SAME_SSH_CREDS:-}" ]]; then
+        prompt_yes_no "Do all hosts use the same initial SSH user/password?" "yes" "SAME_SSH_CREDS"
+    else
+        print_info "Same SSH credentials: $SAME_SSH_CREDS"
+    fi
 
     # Declare associative arrays for per-host credentials
     declare -gA HOST_SSH_USER
@@ -754,13 +823,27 @@ main() {
     print_info "Configure which Wazuh security modules to enable."
     echo
 
-    prompt_yes_no "Enable Vulnerability Detection?" "yes" "ENABLE_VULN_DETECTION"
-    prompt_yes_no "Enable File Integrity Monitoring (FIM)?" "yes" "ENABLE_FIM"
-    prompt_yes_no "Enable Rootkit Detection?" "yes" "ENABLE_ROOTKIT"
-    prompt_yes_no "Enable Security Configuration Assessment (SCA)?" "yes" "ENABLE_SCA"
-    prompt_yes_no "Enable System Inventory (Syscollector)?" "yes" "ENABLE_SYSCOLLECTOR"
-    prompt_yes_no "Enable Log Collection?" "yes" "ENABLE_LOG_COLLECTION"
-    prompt_yes_no "Enable Active Response?" "yes" "ENABLE_ACTIVE_RESPONSE"
+    if [[ -z "${ENABLE_VULN_DETECTION:-}" ]]; then
+        prompt_yes_no "Enable Vulnerability Detection?" "yes" "ENABLE_VULN_DETECTION"
+    fi
+    if [[ -z "${ENABLE_FIM:-}" ]]; then
+        prompt_yes_no "Enable File Integrity Monitoring (FIM)?" "yes" "ENABLE_FIM"
+    fi
+    if [[ -z "${ENABLE_ROOTKIT:-}" ]]; then
+        prompt_yes_no "Enable Rootkit Detection?" "yes" "ENABLE_ROOTKIT"
+    fi
+    if [[ -z "${ENABLE_SCA:-}" ]]; then
+        prompt_yes_no "Enable Security Configuration Assessment (SCA)?" "yes" "ENABLE_SCA"
+    fi
+    if [[ -z "${ENABLE_SYSCOLLECTOR:-}" ]]; then
+        prompt_yes_no "Enable System Inventory (Syscollector)?" "yes" "ENABLE_SYSCOLLECTOR"
+    fi
+    if [[ -z "${ENABLE_LOG_COLLECTION:-}" ]]; then
+        prompt_yes_no "Enable Log Collection?" "yes" "ENABLE_LOG_COLLECTION"
+    fi
+    if [[ -z "${ENABLE_ACTIVE_RESPONSE:-}" ]]; then
+        prompt_yes_no "Enable Active Response?" "yes" "ENABLE_ACTIVE_RESPONSE"
+    fi
 
     # ═══════════════════════════════════════════════════════════════
     # EMAIL ALERTS CONFIGURATION
@@ -840,57 +923,71 @@ main() {
     echo
 
     # Backup schedule
-    echo -e "${CYAN}Backup schedule options:${NC}"
-    echo "  1) Daily (recommended for production)"
-    echo "  2) Weekly"
-    echo "  3) Disabled (manual backups only)"
-    echo
-    read -erp "$(echo -e "${YELLOW}Select backup schedule [1]: ${NC}")" BACKUP_SCHEDULE_CHOICE
-    BACKUP_SCHEDULE_CHOICE=${BACKUP_SCHEDULE_CHOICE:-1}
+    if [[ -z "${BACKUP_SCHEDULE:-}" ]]; then
+        echo -e "${CYAN}Backup schedule options:${NC}"
+        echo "  1) Daily (recommended for production)"
+        echo "  2) Weekly"
+        echo "  3) Disabled (manual backups only)"
+        echo
+        read -erp "$(echo -e "${YELLOW}Select backup schedule [1]: ${NC}")" BACKUP_SCHEDULE_CHOICE
+        BACKUP_SCHEDULE_CHOICE=${BACKUP_SCHEDULE_CHOICE:-1}
 
-    case $BACKUP_SCHEDULE_CHOICE in
-        1)
-            BACKUP_SCHEDULE="daily"
-            prompt_with_default "Backup hour (0-23)" "2" "BACKUP_HOUR"
-            ;;
-        2)
-            BACKUP_SCHEDULE="weekly"
-            prompt_with_default "Backup hour (0-23)" "2" "BACKUP_HOUR"
-            echo -e "${CYAN}Day options: 0=Sunday, 1=Monday, ..., 6=Saturday${NC}"
-            prompt_with_default "Backup day of week (0-6)" "0" "BACKUP_DAY"
-            ;;
-        3)
-            BACKUP_SCHEDULE="disabled"
-            ;;
-        *)
-            BACKUP_SCHEDULE="daily"
-            BACKUP_HOUR="2"
-            ;;
-    esac
+        case $BACKUP_SCHEDULE_CHOICE in
+            1)
+                BACKUP_SCHEDULE="daily"
+                prompt_with_default "Backup hour (0-23)" "2" "BACKUP_HOUR"
+                ;;
+            2)
+                BACKUP_SCHEDULE="weekly"
+                prompt_with_default "Backup hour (0-23)" "2" "BACKUP_HOUR"
+                echo -e "${CYAN}Day options: 0=Sunday, 1=Monday, ..., 6=Saturday${NC}"
+                prompt_with_default "Backup day of week (0-6)" "0" "BACKUP_DAY"
+                ;;
+            3)
+                BACKUP_SCHEDULE="disabled"
+                ;;
+            *)
+                BACKUP_SCHEDULE="daily"
+                BACKUP_HOUR="2"
+                ;;
+        esac
+    else
+        print_info "Backup schedule: $BACKUP_SCHEDULE"
+    fi
 
     if [ "$BACKUP_SCHEDULE" != "disabled" ]; then
-        prompt_with_default "Number of backups to keep" "7" "BACKUP_RETENTION"
+        if [[ -z "${BACKUP_RETENTION:-}" ]]; then
+            prompt_with_default "Number of backups to keep" "7" "BACKUP_RETENTION"
+        fi
     fi
 
     echo
 
     # Log cleanup
-    prompt_yes_no "Enable automatic log cleanup on manager?" "yes" "ENABLE_LOG_CLEANUP"
+    if [[ -z "${ENABLE_LOG_CLEANUP:-}" ]]; then
+        prompt_yes_no "Enable automatic log cleanup on manager?" "yes" "ENABLE_LOG_CLEANUP"
+    fi
 
     if [ "$ENABLE_LOG_CLEANUP" = "true" ]; then
-        prompt_with_default "Days of logs to keep" "30" "LOG_RETENTION_DAYS"
-        echo -e "${CYAN}Log cleanup schedule:${NC}"
-        echo "  1) Daily (recommended)"
-        echo "  2) Weekly"
-        echo
-        read -erp "$(echo -e "${YELLOW}Select log cleanup schedule [1]: ${NC}")" LOG_CLEANUP_SCHEDULE_CHOICE
-        LOG_CLEANUP_SCHEDULE_CHOICE=${LOG_CLEANUP_SCHEDULE_CHOICE:-1}
+        if [[ -z "${LOG_RETENTION_DAYS:-}" ]]; then
+            prompt_with_default "Days of logs to keep" "30" "LOG_RETENTION_DAYS"
+        fi
+        if [[ -z "${LOG_CLEANUP_SCHEDULE:-}" ]]; then
+            echo -e "${CYAN}Log cleanup schedule:${NC}"
+            echo "  1) Daily (recommended)"
+            echo "  2) Weekly"
+            echo
+            read -erp "$(echo -e "${YELLOW}Select log cleanup schedule [1]: ${NC}")" LOG_CLEANUP_SCHEDULE_CHOICE
+            LOG_CLEANUP_SCHEDULE_CHOICE=${LOG_CLEANUP_SCHEDULE_CHOICE:-1}
 
-        case $LOG_CLEANUP_SCHEDULE_CHOICE in
-            1) LOG_CLEANUP_SCHEDULE="daily" ;;
-            2) LOG_CLEANUP_SCHEDULE="weekly" ;;
-            *) LOG_CLEANUP_SCHEDULE="daily" ;;
-        esac
+            case $LOG_CLEANUP_SCHEDULE_CHOICE in
+                1) LOG_CLEANUP_SCHEDULE="daily" ;;
+                2) LOG_CLEANUP_SCHEDULE="weekly" ;;
+                *) LOG_CLEANUP_SCHEDULE="daily" ;;
+            esac
+        else
+            print_info "Log cleanup schedule: $LOG_CLEANUP_SCHEDULE"
+        fi
     fi
 
     # ═══════════════════════════════════════════════════════════════
@@ -959,8 +1056,11 @@ EOF
 EOF
 
     # Add dashboard hosts (simplified)
-    for node in "${DASHBOARD_NODES_ARRAY[@]}"; do
+    for i in "${!DASHBOARD_NODES_ARRAY[@]}"; do
+        node="${DASHBOARD_NODES_ARRAY[$i]}"
+        node_name="dashboard-$((i+1))"
         echo "        ${node}:" >> "$SCRIPT_DIR/inventory/hosts.yml"
+        echo "          dashboard_node_name: ${node_name}" >> "$SCRIPT_DIR/inventory/hosts.yml"
     done
 
     if [ "$DEPLOY_AGENTS" = "true" ] && [ -n "$AGENT_NODES" ]; then
@@ -1404,8 +1504,6 @@ wazuh_configure_selinux: true
 
 # Package repository settings
 wazuh_repo_gpg_key: "https://packages.wazuh.com/key/GPG-KEY-WAZUH"
-wazuh_repo_url_apt: "https://packages.wazuh.com/4.x/apt/"
-wazuh_repo_url_yum: "https://packages.wazuh.com/4.x/yum/"
 
 # ═══════════════════════════════════════════════════════════════
 # Backup & Maintenance
@@ -1492,6 +1590,21 @@ wazuh_log_rotation_enabled: true
 wazuh_log_rotation_keep_days: 30
 wazuh_log_rotation_max_size: "100M"
 wazuh_log_rotation_compress: true
+
+# ═══════════════════════════════════════════════════════════════
+# Version-Derived Variables (evaluated from wazuh_version above)
+# ═══════════════════════════════════════════════════════════════
+wazuh_is_5x: "{{ wazuh_version.split('.')[0] == '5' }}"
+wazuh_is_prerelease: "{{ '-' in wazuh_version }}"
+wazuh_direct_download: "{{ wazuh_is_prerelease }}"
+wazuh_manager_install_path: "{{ '/var/wazuh-manager' if wazuh_is_5x else '/var/ossec' }}"
+wazuh_manager_config_file: "{{ wazuh_manager_install_path }}/etc/{{ 'wazuh-manager.conf' if wazuh_is_5x else 'ossec.conf' }}"
+wazuh_manager_certs_path: "{{ wazuh_manager_install_path }}/etc/certs"
+wazuh_manager_log_path: "{{ wazuh_manager_install_path }}/logs"
+wazuh_manager_owner: "{{ 'wazuh-manager' if wazuh_is_5x else 'wazuh' }}"
+wazuh_manager_group: "{{ 'wazuh-manager' if wazuh_is_5x else 'wazuh' }}"
+wazuh_use_filebeat: "{{ false if wazuh_is_5x else true }}"
+wazuh_manager_cert_name: "{{ manager_node_name | default('server') }}"
 EOF
 
     print_success "Group variables created: group_vars/all/main.yml"

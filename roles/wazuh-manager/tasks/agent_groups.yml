@@ -49,9 +49,9 @@
 - name: Create agent.conf for groups
   ansible.builtin.template:
     src: agent_group_conf.j2
-    dest: "/var/ossec/etc/shared/{{ item.name }}/agent.conf"
-    owner: wazuh
-    group: wazuh
+    dest: "{{ wazuh_manager_install_path }}/etc/shared/{{ item.name }}/agent.conf"
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
     mode: '0640'
   loop: "{{ wazuh_agent_groups }}"
   loop_control:
@@ -63,10 +63,10 @@
 # Deploy merged.mg for groups (optional - for merged configurations)
 - name: Ensure group directories exist
   ansible.builtin.file:
-    path: "/var/ossec/etc/shared/{{ item.name }}"
+    path: "{{ wazuh_manager_install_path }}/etc/shared/{{ item.name }}"
     state: directory
-    owner: wazuh
-    group: wazuh
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
     mode: '0770'
   loop: "{{ wazuh_agent_groups }}"
   loop_control:
@@ -77,9 +77,9 @@
 - name: Deploy custom files to agent groups
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/files/agent_groups/{{ item.0.name }}/{{ item.1 }}"
-    dest: "/var/ossec/etc/shared/{{ item.0.name }}/{{ item.1 }}"
-    owner: wazuh
-    group: wazuh
+    dest: "{{ wazuh_manager_install_path }}/etc/shared/{{ item.0.name }}/{{ item.1 }}"
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
     mode: '0640'
   loop: "{{ wazuh_agent_groups | subelements('files', skip_missing=True) }}"
   loop_control:

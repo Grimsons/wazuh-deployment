@@ -123,5 +123,7 @@ plugins.security.system_indices.indices:
   - .opendistro-asynchronous-search-response*
   - .replication-metadata-store
 
-# Compatibility mode
+# Compatibility mode (removed in 5.x/OpenSearch 3.x)
+{% if not (wazuh_is_5x | default(false)) %}
 compatibility.override_main_response_version: true
+{% endif %}

@@ -33,6 +33,8 @@ files/certs/*.crt
 files/certs/*.csr
 files/certs/*.srl
 files/certs/backup/
+**/files/certs/*.pem
+**/files/certs/*-key.pem
 /certs/
 *.crt
 *.csr
@@ -42,10 +44,12 @@ files/certs/backup/
 *.retry
 .ansible_facts_cache/
 /tmp/ansible_facts_cache/
+.ansible/
 
 # Ansible vault password file
 .vault_pass
 .vault_password
+.vault_pass.sh
 vault_password_file
 
 # IDE and Editor files
@@ -79,10 +83,11 @@ venv/
 .env
 .venv/
 
-# Claude Code working files
+# Claude Code / opencode working files
 CLAUDE.md
 improvements.md
 .claude/
+.opencode/
 
 # OS metadata files
 Thumbs.db

@@ -1,24 +1,87 @@
 ---
 # Wazuh Manager - Installation
 
-- name: Install Wazuh Manager (Debian/Ubuntu)
+- name: Download and install Wazuh Manager via .deb (pre-release)
+  when:
+    - ansible_os_family == 'Debian'
+    - wazuh_direct_download | default(false)
+  become: true
+  block:
+    - name: Create temp directory for packages
+      ansible.builtin.file:
+        path: /tmp/wazuh-packages
+        state: directory
+        mode: '0755'
+
+    - name: Download Wazuh Manager .deb package
+      ansible.builtin.get_url:
+        url: "{{ wazuh_repo_url_apt }}pool/main/w/wazuh-manager/wazuh-manager_{{ wazuh_version }}_amd64.deb"
+        dest: /tmp/wazuh-packages/wazuh-manager.deb
+
+    - name: Install .deb package
+      ansible.builtin.apt:
+        deb: /tmp/wazuh-packages/wazuh-manager.deb
+      notify: restart wazuh-manager
+
+- name: Install Wazuh Manager via apt repository (production)
   ansible.builtin.apt:
     name: "wazuh-manager={{ wazuh_version }}-*"
     state: present
     update_cache: true
   become: true
-  when: ansible_os_family == 'Debian'
+  when:
+    - ansible_os_family == 'Debian'
+    - not (wazuh_direct_download | default(false))
   notify: restart wazuh-manager
 
-- name: Install Wazuh Manager (RHEL/CentOS)
+- name: Download and install Wazuh Manager via .rpm (pre-release)
+  when:
+    - ansible_os_family == 'RedHat'
+    - wazuh_direct_download | default(false)
+  become: true
+  block:
+    - name: Create temp directory for packages
+      ansible.builtin.file:
+        path: /tmp/wazuh-packages
+        state: directory
+        mode: '0755'
+
+    - name: Download Wazuh Manager .rpm package
+      ansible.builtin.get_url:
+        url: "{{ wazuh_repo_url_yum }}wazuh-manager-{{ wazuh_version }}.x86_64.rpm"
+        dest: /tmp/wazuh-packages/wazuh-manager.rpm
+
+    - name: Install .rpm package
+      ansible.builtin.dnf:
+        name: /tmp/wazuh-packages/wazuh-manager.rpm
+        state: present
+        disable_gpg_check: true
+      notify: restart wazuh-manager
+
+- name: Install Wazuh Manager via dnf repository (production)
   ansible.builtin.dnf:
     name: "wazuh-manager-{{ wazuh_version }}"
     state: present
   become: true
-  when: ansible_os_family == 'RedHat'
+  when:
+    - ansible_os_family == 'RedHat'
+    - not (wazuh_direct_download | default(false))
   notify: restart wazuh-manager
 
 - name: Reload systemd daemon
   ansible.builtin.systemd:
     daemon_reload: true
   become: true
+
+# Remove stale keystore hash files on fresh install.
+# The wazuh-keystore RocksDB may be cleared by package reinstall,
+# but the hash files persist, preventing credential re-write.
+- name: Remove stale keystore hash files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  become: true
+  when: wazuh_indexer_connection_enabled | default(true)
+  loop:
+    - "{{ wazuh_manager_install_path }}/etc/.keystore_username_hash"
+    - "{{ wazuh_manager_install_path }}/etc/.keystore_password_hash"

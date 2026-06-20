@@ -21,17 +21,12 @@
   no_log: true
 
 - name: Hash the admin password using OpenSearch security tools
-  ansible.builtin.shell: |
-    set -euo pipefail
-    export JAVA_HOME=/usr/share/wazuh-indexer/jdk
-    _tmp=$(mktemp /dev/shm/.hash_XXXXXX 2>/dev/null || mktemp)
-    chmod 600 "$_tmp"
-    printf '%s' {{ wazuh_admin_password | quote }} > "$_tmp"
-    # hash.sh only accepts -p; temp file limits window vs inline expansion
-    _hash=$(/usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p "$(cat "$_tmp")")
-    shred -u "$_tmp" 2>/dev/null || rm -f "$_tmp"
-    echo "$_hash"
   become: true
+  ansible.builtin.shell: |
+    OPENSEARCH_JAVA_HOME=/usr/share/wazuh-indexer/jdk \
+      /usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p '{{ wazuh_admin_password }}'
+  args:
+    executable: /bin/bash
   register: password_hash
   changed_when: false
   no_log: true

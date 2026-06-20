@@ -12,7 +12,9 @@ https:
   cert: "server.crt"
   use_ca: {{ wazuh_manager_api_use_ca | default(false) | lower }}
   ca: "ca.crt"
+{% if not (wazuh_is_5x | default(false)) %}
   ssl_protocol: "{{ wazuh_manager_api_ssl_protocol | default('TLSv1.2') }}"
+{% endif %}
   ssl_ciphers: "{{ wazuh_manager_api_ssl_ciphers | default('') }}"
 
 # Logging
@@ -40,15 +42,17 @@ upload_configuration:
   remote_commands:
     localfile:
       allow: {{ wazuh_manager_api_allow_remote_localfile | default(false) | lower }}
-      exceptions: "{{ wazuh_manager_api_remote_localfile_exceptions | default([]) | to_json }}"
+      exceptions: {{ wazuh_manager_api_remote_localfile_exceptions | default([]) | to_json }}
     wodle_command:
       allow: {{ wazuh_manager_api_allow_remote_wodle | default(false) | lower }}
-      exceptions: "{{ wazuh_manager_api_remote_wodle_exceptions | default([]) | to_json }}"
+      exceptions: {{ wazuh_manager_api_remote_wodle_exceptions | default([]) | to_json }}
 
 # Cache settings for performance
 cache:
   enabled: {{ wazuh_manager_api_cache_enabled | default(true) | lower }}
   time: {{ wazuh_manager_api_cache_time | default(0.75) }}
 
+{% if not (wazuh_is_5x | default(false)) %}
 # Experimental features
 experimental_features: {{ wazuh_manager_api_experimental | default(false) | lower }}
+{% endif %}

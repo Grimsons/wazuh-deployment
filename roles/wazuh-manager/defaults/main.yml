@@ -5,10 +5,25 @@
 wazuh_manager_package_name: "wazuh-manager"
 wazuh_manager_service_name: "wazuh-manager"
 
-# Repository settings
-wazuh_repo_gpg_key: "https://packages.wazuh.com/key/GPG-KEY-WAZUH"
-wazuh_repo_url_apt: "https://packages.wazuh.com/4.x/apt/"
-wazuh_repo_url_yum: "https://packages.wazuh.com/4.x/yum/"
+# Binary prefix for Wazuh binaries (e.g. "wazuh-"). All Wazuh 4.x and 5.x
+# manager binaries use this prefix (wazuh-analysisd, wazuh-keystore, etc.)
+wazuh_manager_binary_prefix: "wazuh-"
+
+# Repository settings (version-aware)
+# Production releases (e.g. 4.14.5) use packages.wazuh.com
+# Pre-release versions (e.g. 5.0.0-beta2) use packages-staging.xdrsiem.wazuh.info
+wazuh_repo_gpg_key: >-
+  {{ 'https://packages-staging.xdrsiem.wazuh.info/key/GPG-KEY-WAZUH'
+     if (wazuh_version is search('-'))
+     else 'https://packages.wazuh.com/key/GPG-KEY-WAZUH' }}
+wazuh_repo_url_apt: >-
+  {{ 'https://packages-staging.xdrsiem.wazuh.info/pre-release/' + (wazuh_version.split('.')[0] + '.x') + '/apt/'
+     if (wazuh_version is search('-'))
+     else 'https://packages.wazuh.com/' + (wazuh_version.split('.')[0] + '.x') + '/apt/' }}
+wazuh_repo_url_yum: >-
+  {{ 'https://packages-staging.xdrsiem.wazuh.info/pre-release/' + (wazuh_version.split('.')[0] + '.x') + '/yum/'
+     if (wazuh_version is search('-'))
+     else 'https://packages.wazuh.com/' + (wazuh_version.split('.')[0] + '.x') + '/yum/' }}
 
 # Manager configuration
 wazuh_manager_config_path: /var/ossec/etc/ossec.conf
@@ -483,13 +498,13 @@ wazuh_filebeat_archives_enabled: false
 wazuh_filebeat_version: "7.10.2"
 # SHA256 checksums for Filebeat 7.10.2 artifacts — update when bumping wazuh_filebeat_version
 # Obtain from: https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-oss-<version>-amd64.deb.sha512
-wazuh_filebeat_deb_sha256: "sha256:16ddde6abe04e70dfda6e02c9e0fc5babb1ff72e6cd96cd05ea9ea97da672012"
-wazuh_filebeat_rpm_sha256: "sha256:8a49ee76a70f9f88e3a5a8bdf50df12e10f35e7a13f35ed26bb5598286d7a26c"
+wazuh_filebeat_deb_sha256: "sha256:f759a13e5407bba184d9f0235ab88409a0d77d821e64adb3dcc0ba8e397f0201"
+wazuh_filebeat_rpm_sha256: "sha256:1c1840616195f2e880bfd2d8e517a1a34f30c5f2a8632f9b8f37f59a17b23bc9"
 # VERIFY before use: fetch from https://packages.wazuh.com/4.x/filebeat/ and run sha256sum
-wazuh_filebeat_module_sha256: "sha256:f5cdad5d3559c0b2be34f73f7f6c5fc8f25e6a1a4d2a9d8e64e0c8a3b6c7f8d2"
+wazuh_filebeat_module_sha256: "sha256:b0683f1d5d7c5d076ea3a565b0aa7ca92e6483f8a14e8b96799e6ee632da2284"
 # VERIFY before use: download wazuh-template.json for the pinned wazuh_version and run sha256sum
 # Update this value whenever wazuh_version changes
-wazuh_filebeat_template_sha256: "sha256:PLACEHOLDER_VERIFY_BEFORE_USE"
+wazuh_filebeat_template_sha256: "sha256:c6e30822c67c10f7e777cb51926e261d8b2c3a941c4ffcf83325f700c1c8802f"
 
 # ═══════════════════════════════════════════════════════════════
 # Default Agent Groups

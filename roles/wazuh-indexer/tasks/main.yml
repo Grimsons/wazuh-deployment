@@ -15,6 +15,7 @@
 
 - name: Configure Wazuh repository
   ansible.builtin.include_tasks: repository.yml
+  when: not wazuh_direct_download | default(false)
 
 - name: Install Wazuh Indexer
   ansible.builtin.include_tasks: install.yml
@@ -50,7 +51,7 @@
 - name: Wait for Wazuh Indexer to be listening
   ansible.builtin.wait_for:
     port: "{{ wazuh_indexer_http_port }}"
-    host: "{{ ansible_default_ipv4.address }}"
+    host: "{{ wazuh_node_ip | default('127.0.0.1') }}"
     delay: "{{ wazuh_indexer_health_check_delay }}"
     timeout: "{{ wazuh_indexer_startup_timeout }}"
   become: true
@@ -117,7 +118,7 @@
 - name: Wait for Indexer to be ready after restart
   ansible.builtin.wait_for:
     port: "{{ wazuh_indexer_http_port }}"
-    host: "{{ ansible_default_ipv4.address }}"
+    host: "{{ wazuh_node_ip | default('127.0.0.1') }}"
     delay: "{{ wazuh_indexer_health_check_delay }}"
     timeout: "{{ wazuh_indexer_startup_timeout }}"
   become: true
@@ -129,7 +130,7 @@
 # Detect fresh install vs re-run by trying vault password against the indexer
 - name: Check Wazuh Indexer with vault credentials
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_cluster/health"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port }}/_cluster/health"
     user: "admin"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
@@ -153,7 +154,7 @@
 # Wait for security to be ready with default credentials (fresh install only)
 - name: Wait for Wazuh Indexer security to be ready (fresh install)
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_cluster/health"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port }}/_cluster/health"
     user: "admin"
     password: "{{ wazuh_indexer_default_password }}"
     force_basic_auth: true
@@ -185,7 +186,7 @@
 # Final health check with new password
 - name: Wait for Wazuh Indexer to be ready with credentials
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_cluster/health"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port }}/_cluster/health"
     user: "admin"
     password: "{{ wazuh_admin_password }}"
     force_basic_auth: true

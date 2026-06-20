@@ -7,10 +7,10 @@
 
 - name: Ensure SCA policy directory exists
   ansible.builtin.file:
-    path: /var/ossec/ruleset/sca
+    path: "{{ wazuh_manager_install_path }}/ruleset/sca"
     state: directory
     owner: root
-    group: wazuh
+    group: "{{ wazuh_manager_group }}"
     mode: '0750'
   become: true
 
@@ -25,9 +25,9 @@
 - name: Deploy custom SCA policies
   ansible.builtin.copy:
     src: "{{ item.path }}"
-    dest: "/var/ossec/ruleset/sca/{{ item.path | basename }}"
+    dest: "{{ wazuh_manager_install_path }}/ruleset/sca/{{ item.path | basename }}"
     owner: root
-    group: wazuh
+    group: "{{ wazuh_manager_group }}"
     mode: '0640'
   become: true
   loop: "{{ custom_sca_policies.files }}"
@@ -38,7 +38,7 @@
 
 - name: Verify built-in CIS Linux benchmark policies are present
   ansible.builtin.stat:
-    path: "/var/ossec/ruleset/sca/{{ item }}"
+    path: "{{ wazuh_manager_install_path }}/ruleset/sca/{{ item }}"
   register: builtin_sca_check
   become: true
   loop: "{{ wazuh_sca_builtin_policies }}"

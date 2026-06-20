@@ -1,0 +1,16 @@
+#!/bin/bash
+# Pre-commit hook: enforce vault.yml encryption
+# Configured via: git config core.hooksPath .githooks
+set -euo pipefail
+
+VAULT="group_vars/all/vault.yml"
+
+# No vault file = nothing to check
+[ -f "$VAULT" ] || exit 0
+
+# Check first line for Ansible vault magic header
+head -1 "$VAULT" | grep -q '^\$ANSIBLE_VAULT' && exit 0
+
+echo "ERROR: $VAULT is NOT encrypted!" >&2
+echo "Run: ansible-vault encrypt $VAULT --vault-password-file .vault_pass.sh" >&2
+exit 1

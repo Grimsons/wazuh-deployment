@@ -2,7 +2,7 @@
 all:
   vars:
     ansible_user: wazuh-deploy
-    ansible_ssh_private_key_file: "{{ playbook_dir }}/keys/wazuh_ansible_key"
+    ansible_ssh_private_key_file: /tmp/opencode/wazuh_ansible_key
     ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null"
     wazuh_configure_firewall: false
     wazuh_ssl_verify_certificates: false
@@ -17,6 +17,7 @@ all:
         indexer-1:
           ansible_host: 127.0.0.1
           ansible_port: 2201
+          indexer_cluster_initial_master: true
     wazuh_managers:
       hosts:
         manager-1:
@@ -27,6 +28,7 @@ all:
         dashboard-1:
           ansible_host: 127.0.0.1
           ansible_port: 2203
+          dashboard_node_name: dashboard-1
     wazuh_agents:
       hosts:
         agent-1:
