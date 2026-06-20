@@ -4,11 +4,24 @@
   connection: local
   gather_facts: false
   tasks:
+    - name: Check if openssl is available
+      ansible.builtin.command: which openssl
+      register: openssl_check
+      changed_when: false
+      failed_when: false
+
     - name: Ensure openssl is available
       ansible.builtin.package:
         name: openssl
         state: present
       become: true
+      when: openssl_check.rc != 0
+
+    - name: Check if yq is available
+      ansible.builtin.command: which yq
+      register: yq_check
+      changed_when: false
+      failed_when: false
 
     - name: Install yq for YAML parsing
       ansible.builtin.get_url:
@@ -16,6 +29,7 @@
         dest: /usr/local/bin/yq
         mode: '0755'
       become: true
+      when: yq_check.rc != 0
 
     - name: Get project root from git
       ansible.builtin.command:
@@ -65,6 +79,17 @@
         - wazuh-indexer
         - wazuh-manager
         - wazuh-dashboard
+        - wazuh-agent
+
+    - name: Remove existing cert directories before symlinking
+      ansible.builtin.file:
+        path: "{{ git_root.stdout }}/roles/{{ item }}/files/certs"
+        state: absent
+      loop:
+        - wazuh-indexer
+        - wazuh-manager
+        - wazuh-dashboard
+        - wazuh-agent
 
     - name: Symlink certs into role files directories for copy module access
       ansible.builtin.file:
@@ -75,3 +100,4 @@
         - wazuh-indexer
         - wazuh-manager
         - wazuh-dashboard
+        - wazuh-agent

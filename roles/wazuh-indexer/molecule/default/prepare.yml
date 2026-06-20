@@ -4,19 +4,6 @@
   connection: local
   gather_facts: false
   tasks:
-    - name: Ensure openssl is available
-      ansible.builtin.package:
-        name: openssl
-        state: present
-      become: true
-
-    - name: Install yq for YAML parsing
-      ansible.builtin.get_url:
-        url: https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-        dest: /usr/local/bin/yq
-        mode: '0755'
-      become: true
-
     - name: Get project root from git
       ansible.builtin.command:
         cmd: git rev-parse --show-toplevel
@@ -38,6 +25,11 @@
           wazuh_cert_location: "San Jose"
           wazuh_cert_org: "Wazuh Deployment"
           wazuh_cert_ou: "Security Operations"
+
+    - name: Clean stale certificates from previous runs
+      ansible.builtin.file:
+        path: "{{ git_root.stdout }}/files/certs"
+        state: absent
 
     - name: Generate self-signed certificates
       ansible.builtin.command:

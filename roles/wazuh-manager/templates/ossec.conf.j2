@@ -69,7 +69,7 @@
 {% endif %}
     <hosts>
 {% for node in wazuh_indexer_nodes %}
-      <host>https://{{ node.ip }}:{{ wazuh_indexer_http_port }}</host>
+      <host>https://{{ node.ip }}:{{ wazuh_indexer_http_port | default(9200) }}</host>
 {% endfor %}
     </hosts>
     <ssl>

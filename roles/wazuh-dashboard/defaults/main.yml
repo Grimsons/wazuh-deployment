@@ -9,6 +9,8 @@
 wazuh_api_user: "wazuh-wui"
 wazuh_api_password: "{{ vault_wazuh_api_password | default('ChangeMe') }}"
 wazuh_manager_api_port: 55000
+wazuh_indexer_admin_user: "admin"
+wazuh_indexer_http_port: 9200
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Package Settings

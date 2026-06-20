@@ -26,8 +26,24 @@ wazuh_repo_url_yum: >-
      else 'https://packages.wazuh.com/' + (wazuh_version.split('.')[0] + '.x') + '/yum/' }}
 
 # Manager configuration
+wazuh_manager_install_path: "/var/ossec"
+wazuh_manager_config_file: "{{ wazuh_manager_install_path }}/etc/ossec.conf"
 wazuh_manager_config_path: /var/ossec/etc/ossec.conf
+wazuh_manager_certs_path: "{{ wazuh_manager_install_path }}/etc/certs"
 wazuh_manager_log_path: /var/ossec/logs
+wazuh_manager_owner: "wazuh"
+wazuh_manager_group: "wazuh"
+wazuh_manager_cert_name: "{{ manager_node_name | default('server') }}"
+
+# Indexer connection (shared with indexer role)
+wazuh_indexer_http_port: 9200
+wazuh_indexer_admin_user: "admin"
+
+# API credentials
+wazuh_api_user: "wazuh"
+
+# Filebeat management (4.x uses Filebeat, 5.x does not)
+wazuh_use_filebeat: true
 
 # Agent communication port (shared across roles, default: 1514)
 wazuh_manager_agent_port: 1514
