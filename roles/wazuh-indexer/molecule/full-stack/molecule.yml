@@ -73,6 +73,11 @@ provisioner:
         wazuh_manager_cluster_enabled: false
         wazuh_indexer_startup_timeout: 600
         indexer_cluster_initial_master: true
+        wazuh_cert_country: "US"
+        wazuh_cert_state: "California"
+        wazuh_cert_location: "San Jose"
+        wazuh_cert_org: "Wazuh Deployment"
+        wazuh_cert_ou: "Security Operations"
 
 verifier:
   name: ansible

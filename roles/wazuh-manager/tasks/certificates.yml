@@ -53,6 +53,8 @@
       exit 1
     fi
     echo "PASS: Manager cert CN='$ACTUAL'"
+  args:
+    executable: /bin/bash
   register: mgr_cert_check
   changed_when: false
   become: true

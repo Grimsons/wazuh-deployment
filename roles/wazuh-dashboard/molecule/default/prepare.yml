@@ -33,6 +33,11 @@
           wazuh_manager_nodes:
             - name: manager-1
               ip: 127.0.0.1
+          wazuh_cert_country: "US"
+          wazuh_cert_state: "California"
+          wazuh_cert_location: "San Jose"
+          wazuh_cert_org: "Wazuh Deployment"
+          wazuh_cert_ou: "Security Operations"
 
     - name: Generate self-signed certificates
       ansible.builtin.command:
@@ -224,9 +229,9 @@
           plugins.security.ssl.http.pemkey_filepath: certs/indexer-key.pem
           plugins.security.ssl.http.pemtrustedcas_filepath: certs/root-ca.pem
           plugins.security.nodes_dn:
-            - "CN=indexer-1,OU=Wazuh,O=Wazuh,L=California,ST=California,C=US"
+            - "CN=indexer-1,OU=Security Operations,O=Wazuh Deployment,L=San Jose,ST=California,C=US"
           plugins.security.authcz.admin_dn:
-            - "CN=admin,OU=Wazuh,O=Wazuh,L=California,ST=California,C=US"
+            - "CN=admin,OU=Security Operations,O=Wazuh Deployment,L=San Jose,ST=California,C=US"
           plugins.security.allow_unsafe_democertificates: false
           plugins.security.allow_default_init_securityindex: true
           plugins.security.audit.type: internal_opensearch

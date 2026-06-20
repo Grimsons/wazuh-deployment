@@ -72,6 +72,8 @@
       exit 1
     fi
     echo "PASS: Indexer cert CN='$ACTUAL'"
+  args:
+    executable: /bin/bash
   register: idx_cert_check
   changed_when: false
   become: true

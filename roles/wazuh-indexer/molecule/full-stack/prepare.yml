@@ -38,6 +38,11 @@
           wazuh_manager_nodes:
             - name: manager-1
               ip: 127.0.0.1
+          wazuh_cert_country: "US"
+          wazuh_cert_state: "California"
+          wazuh_cert_location: "San Jose"
+          wazuh_cert_org: "Wazuh Deployment"
+          wazuh_cert_ou: "Security Operations"
       when: not existing_ca.stat.exists
 
     - name: Generate self-signed certificates

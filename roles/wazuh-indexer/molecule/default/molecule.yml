@@ -42,6 +42,11 @@ provisioner:
         wazuh_indexer_memory_lock: false
         indexer_node_name: "indexer-1"
         indexer_cluster_initial_master: true
+        wazuh_cert_country: "US"
+        wazuh_cert_state: "California"
+        wazuh_cert_location: "San Jose"
+        wazuh_cert_org: "Wazuh Deployment"
+        wazuh_cert_ou: "Security Operations"
 
 verifier:
   name: ansible
