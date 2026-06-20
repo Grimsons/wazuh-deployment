@@ -46,6 +46,17 @@
       register: ca_check
       failed_when: not ca_check.stat.exists
 
+    - name: Ensure role files directory exists for cert symlink
+      ansible.builtin.file:
+        path: "{{ git_root.stdout }}/roles/wazuh-dashboard/files"
+        state: directory
+
+    - name: Symlink certs into role files directory for copy module access
+      ansible.builtin.file:
+        src: "{{ git_root.stdout }}/files/certs"
+        dest: "{{ git_root.stdout }}/roles/wazuh-dashboard/files/certs"
+        state: link
+
 - name: Install and configure Wazuh Indexer for Dashboard dependency
   hosts:
     - wazuh-dashboard-ubuntu

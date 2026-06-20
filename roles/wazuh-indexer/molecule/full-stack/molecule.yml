@@ -72,6 +72,7 @@ provisioner:
         wazuh_configure_firewall: false
         wazuh_manager_cluster_enabled: false
         wazuh_indexer_startup_timeout: 600
+        indexer_cluster_initial_master: true
 
 verifier:
   name: ansible
