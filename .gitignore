@@ -49,6 +49,7 @@ files/certs/backup/
 # Ansible vault password file
 .vault_pass
 .vault_password
+.vault_password_molecule
 .vault_pass.sh
 vault_password_file
 
