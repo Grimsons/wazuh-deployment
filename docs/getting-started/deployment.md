@@ -83,13 +83,9 @@ Both setup methods generate:
 - `inventory/bootstrap.yml` - Bootstrap inventory (connects as root)
 - `group_vars/all/main.yml` - Configuration variables
 - `group_vars/all/vault.yml` - Encrypted credentials (Ansible Vault)
-- `.vault_pass.sh` - Vault decryption script (keep secure!)
-- `ansible.cfg` - Ansible settings (includes vault_password_file path)
-- `keys/wazuh_ansible_key` - SSH keypair for deployment
-- `client-prep/` - Host preparation package
-- `wazuh-client-prep.sh` - Self-extracting installer
+- `~/.config/wazuh-deployment/.vault_password` - Vault decryption key (keep secure!)
 
-> **Note:** `.vault_pass.sh` is an executable script that outputs the vault password. The Makefile passes it via `--vault-password-file .vault_pass.sh` on all playbook calls. For manual `ansible-playbook` runs, include the same flag.
+> **Note:** The vault password is stored outside the repo under `~/.config/wazuh-deployment/.vault_password` (mode `600`). The Makefile passes `--vault-password-file ~/.config/wazuh-deployment/.vault_password` on all playbook calls. For manual `ansible-playbook` runs, include the same flag.
 
 ### 2. Deploy (First Time - Bootstrap + Full Deploy)
 
@@ -104,15 +100,15 @@ For first-time deployments, use the **bootstrap** workflow. This:
 make deploy-bootstrap
 
 # Or manually (password auth):
-ansible-playbook site.yml --tags bootstrap,all --ask-pass --vault-password-file .vault_pass.sh
+ansible-playbook site.yml --tags bootstrap,all --ask-pass --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 # Or manually (SSH key):
-ansible-playbook site.yml --tags bootstrap,all --vault-password-file .vault_pass.sh
+ansible-playbook site.yml --tags bootstrap,all --vault-password-file ~/.config/wazuh-deployment/.vault_password
 ```
 
 The bootstrap play runs first, then continues with the full deployment using the newly created `wazuh-deploy` user.
 
-> **Note:** Always pass `--vault-password-file .vault_pass.sh` when running `ansible-playbook` manually. The Makefile handles this automatically.
+> **Note:** Always pass `--vault-password-file ~/.config/wazuh-deployment/.vault_password` when running `ansible-playbook` manually. The Makefile handles this automatically.
 
 ### 3. Deploy (Subsequent Runs)
 
@@ -123,7 +119,7 @@ After the initial bootstrap, subsequent deployments use `wazuh-deploy` automatic
 make deploy
 
 # Or manually:
-ansible-playbook site.yml --vault-password-file .vault_pass.sh
+ansible-playbook site.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password
 ```
 
 No bootstrap needed -- just run the deploy.
@@ -452,7 +448,7 @@ If MITRE technique aggregations fail in the dashboard:
 
 ## Security Considerations
 
-1. Back up `.vault_pass.sh` securely -- required to decrypt credentials
+1. Back up `~/.config/wazuh-deployment/.vault_password` securely -- required to decrypt credentials
 2. Use external CA certificates for production environments
 3. Restrict network access to management ports
 4. Enable firewall rules (`wazuh_configure_firewall: true`)

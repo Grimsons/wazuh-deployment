@@ -33,7 +33,7 @@ This guide provides best practices and operational procedures for managing your 
 
 - [ ] Run `./setup.sh` (or `./setup-tui.sh` for the TUI version) and complete the interactive wizard
 - [ ] Note the admin credentials displayed at the end
-- [ ] Verify `.vault_pass.sh` file was created
+- [ ] Verify `~/.config/wazuh-deployment/.vault_password` was created
 - [ ] Configure git hooks: `make setup-hooks`
 
 ### Bootstrap & Deployment
@@ -41,14 +41,14 @@ This guide provides best practices and operational procedures for managing your 
 ```bash
 # 1. First-time deployment (bootstrap + deploy in one step)
 make deploy-bootstrap
-# Manual: ansible-playbook site.yml --tags bootstrap,all --ask-pass --vault-password-file .vault_pass.sh
+# Manual: ansible-playbook site.yml --tags bootstrap,all --ask-pass --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 # 2. Bootstrap only (if using separate bootstrap playbook)
 ansible-playbook playbooks/bootstrap-hosts.yml -i inventory/bootstrap.yml --ask-pass
 
 # 3. Subsequent deployments (uses SSH key auth from bootstrap)
 make deploy
-# Manual: ansible-playbook site.yml --vault-password-file .vault_pass.sh
+# Manual: ansible-playbook site.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password
 ```
 
 The bootstrap step creates the `wazuh-deploy` user on all hosts with:
@@ -59,7 +59,7 @@ After bootstrap, all operations use the main inventory (`hosts.yml`) with SSH ke
 
 ### After Deployment
 
-- [ ] **CRITICAL**: Back up `.vault_pass.sh` to secure offline storage
+- [ ] **CRITICAL**: Back up `~/.config/wazuh-deployment/.vault_password` to secure offline storage
 - [ ] Back up `group_vars/all/vault.yml` (encrypted credentials)
 - [ ] Test dashboard login at `https://<dashboard-ip>:443`
 - [ ] Verify all services running: `make health`
@@ -114,7 +114,7 @@ Change the vault encryption password periodically:
 
 | Practice | Recommendation |
 |----------|----------------|
-| Vault password backup | Store `.vault_pass.sh` in password manager AND offline (USB/printed) |
+| Vault password backup | Store `~/.config/wazuh-deployment/.vault_password` in password manager AND offline (USB/printed) |
 | Credential rotation | Every 90 days or after personnel changes |
 | Vault rekey | Every 6 months |
 | Access control | Limit who can access the deployment host |
@@ -580,7 +580,7 @@ make vault-rotate
 make certs-check
 
 # OS security updates
-ansible-playbook playbooks/system-update.yml -e "security_only=true" --vault-password-file .vault_pass.sh
+ansible-playbook playbooks/system-update.yml -e "security_only=true" --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 # Wazuh upgrade (dry run)
 make upgrade-check

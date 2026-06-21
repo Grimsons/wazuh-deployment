@@ -10,7 +10,7 @@ All credentials are encrypted using Ansible Vault by default:
 
 | File | Purpose |
 |------|---------|
-| `.vault_pass.sh` | Vault decryption script (KEEP SECURE!) |
+| `~/.config/wazuh-deployment/.vault_password` | Vault decryption key (KEEP SECURE!) |
 | `group_vars/all/vault.yml` | Encrypted credentials storage |
 
 Credentials are shown once on stdout at the end of `setup.sh` (not logged to any file) and stored encrypted in the Ansible Vault.
@@ -41,7 +41,7 @@ All passwords are automatically generated with the following characteristics:
 
 ### Best Practices
 
-1. **Back up `.vault_pass.sh`**: Store this file securely offline - you cannot decrypt credentials without it
+1. **Back up `~/.config/wazuh-deployment/.vault_password`**: Store this file securely offline - you cannot decrypt credentials without it
 2. **Access control**: Restrict access to deployment host and vault password
 3. **Rotation**: Rotate credentials periodically using `make vault-rotate` or `./scripts/manage-vault.sh rotate`
 4. **Rekey periodically**: Change the vault encryption password with `make vault-rekey` or `./scripts/manage-vault.sh rekey`
@@ -328,7 +328,7 @@ All rules are deployed to the Manager at `/var/ossec/etc/rules/` and `/var/ossec
 ### Pre-Deployment
 
 - [ ] Secure control node with encryption and access controls
-- [ ] Back up `.vault_pass.sh` file securely (offline storage recommended)
+- [ ] Back up `~/.config/wazuh-deployment/.vault_password` file securely (offline storage recommended)
 - [ ] Generate certificates (done automatically by setup.sh)
 - [ ] Review `group_vars/all/main.yml` security settings
 - [ ] Plan network segmentation
@@ -342,7 +342,7 @@ All rules are deployed to the Manager at `/var/ossec/etc/rules/` and `/var/ossec
 - [ ] Verify dashboard access with correct credentials
 - [ ] Check audit logging is active
 - [ ] Test backup and restore procedures
-- [ ] Back up `.vault_pass.sh` file securely
+- [ ] Back up `~/.config/wazuh-deployment/.vault_password` file securely
 
 ### Ongoing
 

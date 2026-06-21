@@ -103,8 +103,8 @@ check: setup-hooks ## Validate prerequisites and configuration
 	else \
 		echo "$(YELLOW)⚠$(RESET) Inventory not found - run 'make setup' first"; \
 	fi
-	@if [ -f .vault_password ]; then \
-		echo "$(GREEN)✓$(RESET) Vault password: .vault_password"; \
+	@if [ -f ~/.config/wazuh-deployment/.vault_password ]; then \
+		echo "$(GREEN)✓$(RESET) Vault password: ~/.config/wazuh-deployment/.vault_password"; \
 	else \
 		echo "$(YELLOW)⚠$(RESET) Vault password not found"; \
 	fi
@@ -113,7 +113,7 @@ check: setup-hooks ## Validate prerequisites and configuration
 			echo "$(GREEN)✓$(RESET) Vault: group_vars/all/vault.yml (encrypted)"; \
 		else \
 			echo "$(RED)✗$(RESET) Vault: group_vars/all/vault.yml is NOT encrypted!"; \
-			echo "  Run: ansible-vault encrypt group_vars/all/vault.yml --vault-password-file .vault_pass.sh"; \
+			echo "  Run: ansible-vault encrypt group_vars/all/vault.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password"; \
 			exit 1; \
 		fi; \
 	else \
@@ -130,31 +130,31 @@ check: setup-hooks ## Validate prerequisites and configuration
 deploy: check-files ## Deploy all Wazuh components
 	@echo "$(CYAN)Deploying Wazuh stack...$(RESET)"
 	@read -p "$(YELLOW)Continue with deployment? [y/N]$(RESET) " confirm && [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ] || { echo "Aborted."; exit 1; }
-	ansible-playbook site.yml --vault-password-file .vault_pass.sh
+	ansible-playbook site.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 deploy-bootstrap: check-files ## First-time deployment (bootstrap + all components)
 	@echo "$(CYAN)Running bootstrap + full deployment...$(RESET)"
-	ansible-playbook site.yml --tags bootstrap,all --ask-pass --vault-password-file .vault_pass.sh
+	ansible-playbook site.yml --tags bootstrap,all --ask-pass --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 deploy-check: check-files ## Dry-run deployment (no changes)
 	@echo "$(CYAN)Running deployment in check mode...$(RESET)"
-	ansible-playbook site.yml --check --diff --vault-password-file .vault_pass.sh
+	ansible-playbook site.yml --check --diff --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 deploy-indexer: check-files ## Deploy only indexer nodes
 	@echo "$(CYAN)Deploying indexers...$(RESET)"
-	ansible-playbook site.yml --tags indexer --vault-password-file .vault_pass.sh
+	ansible-playbook site.yml --tags indexer --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 deploy-manager: check-files ## Deploy only manager nodes
 	@echo "$(CYAN)Deploying managers...$(RESET)"
-	ansible-playbook site.yml --tags manager --vault-password-file .vault_pass.sh
+	ansible-playbook site.yml --tags manager --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 deploy-dashboard: check-files ## Deploy only dashboard nodes
 	@echo "$(CYAN)Deploying dashboards...$(RESET)"
-	ansible-playbook site.yml --tags dashboard --vault-password-file .vault_pass.sh
+	ansible-playbook site.yml --tags dashboard --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 deploy-agent: check-files ## Deploy agents to monitored hosts
 	@echo "$(CYAN)Deploying agents...$(RESET)"
-	ansible-playbook site.yml --tags agent --vault-password-file .vault_pass.sh
+	ansible-playbook site.yml --tags agent --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 check-files:
 	@if [ ! -f inventory/hosts.yml ]; then \
@@ -180,7 +180,7 @@ check-files:
 
 health: ## Run comprehensive health check
 	@echo "$(CYAN)Running health check...$(RESET)"
-	ansible-playbook playbooks/health-check.yml --vault-password-file .vault_pass.sh
+	ansible-playbook playbooks/health-check.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 status: ## Quick status check of all services
 	@if [ -f scripts/status.sh ]; then \
@@ -192,7 +192,7 @@ status: ## Quick status check of all services
 
 backup: ## Create backup of Wazuh data
 	@echo "$(CYAN)Creating backup...$(RESET)"
-	ansible-playbook playbooks/backup.yml --vault-password-file .vault_pass.sh
+	ansible-playbook playbooks/backup.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 restore: ## Restore from backup (requires BACKUP_ID)
 	@if [ -z "$(BACKUP_ID)" ]; then \
@@ -201,27 +201,27 @@ restore: ## Restore from backup (requires BACKUP_ID)
 		exit 1; \
 	fi
 	@echo "$(CYAN)Restoring from backup $(BACKUP_ID)...$(RESET)"
-	ansible-playbook playbooks/restore.yml -e "restore_from=$(BACKUP_ID)" --vault-password-file .vault_pass.sh
+	ansible-playbook playbooks/restore.yml -e "restore_from=$(BACKUP_ID)" --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 upgrade: ## Upgrade Wazuh to version in group_vars
 	@echo "$(CYAN)Running upgrade...$(RESET)"
-	ansible-playbook playbooks/upgrade.yml --vault-password-file .vault_pass.sh
+	ansible-playbook playbooks/upgrade.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 upgrade-check: ## Check available upgrades (no changes)
 	@echo "$(CYAN)Checking for available upgrades...$(RESET)"
-	ansible-playbook playbooks/upgrade.yml --tags check --vault-password-file .vault_pass.sh
+	ansible-playbook playbooks/upgrade.yml --tags check --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 unlock: ## Unlock deployment user for new deployment
 	@echo "$(CYAN)Unlocking deployment user...$(RESET)"
-	ansible-playbook unlock-deploy-user.yml --vault-password-file .vault_pass.sh
+	ansible-playbook unlock-deploy-user.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 monitoring: ## Enable Prometheus monitoring exporters
 	@echo "$(CYAN)Deploying Prometheus exporters...$(RESET)"
-	ansible-playbook site.yml --tags monitoring -e wazuh_monitoring_enabled=true --vault-password-file .vault_pass.sh
+	ansible-playbook site.yml --tags monitoring -e wazuh_monitoring_enabled=true --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 deploy-rules: ## Deploy only custom rules, decoders, and CDB lists
 	@echo "$(CYAN)Deploying custom rules and decoders...$(RESET)"
-	ansible-playbook site.yml --tags manager -e wazuh_custom_content_enabled=true --vault-password-file .vault_pass.sh
+	ansible-playbook site.yml --tags manager -e wazuh_custom_content_enabled=true --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 threat-intel: ## Update threat intelligence feeds (IPs, domains, hashes)
 	@echo "$(CYAN)Updating threat intelligence feeds...$(RESET)"
@@ -242,7 +242,7 @@ vault-edit: ## Edit vault credentials
 vault-rotate: ## Rotate all passwords
 	@echo "$(CYAN)Rotating credentials...$(RESET)"
 	@if [ -f playbooks/rotate-credentials.yml ]; then \
-		ansible-playbook playbooks/rotate-credentials.yml --vault-password-file .vault_pass.sh; \
+		ansible-playbook playbooks/rotate-credentials.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password; \
 	else \
 		./scripts/manage-vault.sh rotate; \
 	fi
@@ -252,15 +252,15 @@ vault-rekey: ## Change vault encryption password
 
 certs-check: ## Check certificate expiration
 	@echo "$(CYAN)Checking certificate expiration...$(RESET)"
-	ansible-playbook playbooks/certificate-management.yml --tags check-expiry --vault-password-file .vault_pass.sh
+	ansible-playbook playbooks/certificate-management.yml --tags check-expiry --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 certs-rotate: ## Rotate all certificates
 	@echo "$(CYAN)Rotating certificates...$(RESET)"
-	ansible-playbook playbooks/certificate-management.yml --tags rotate --vault-password-file .vault_pass.sh
+	ansible-playbook playbooks/certificate-management.yml --tags rotate --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 certs-renew: ## Renew expiring certificates
 	@echo "$(CYAN)Renewing expiring certificates...$(RESET)"
-	ansible-playbook playbooks/certificate-management.yml --tags renew --vault-password-file .vault_pass.sh
+	ansible-playbook playbooks/certificate-management.yml --tags renew --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 #═══════════════════════════════════════════════════════════════════════════════
 # Docker
@@ -335,10 +335,10 @@ docker-setup: check-docker ## Full Docker environment (containers + deploy)
 	./setup.sh --profile docker --quiet; \
 	echo ""; \
 	echo "$(CYAN)Bootstrapping containers (SSH + deploy user)...$(RESET)"; \
-	ansible-playbook -i inventory/docker-hosts.yml docker-bootstrap.yml --vault-password-file .vault_pass.sh; \
+	ansible-playbook -i inventory/docker-hosts.yml docker-bootstrap.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password; \
 	echo ""; \
 	echo "$(CYAN)Deploying Wazuh stack...$(RESET)"; \
-	ansible-playbook -i inventory/docker-hosts.yml site.yml --vault-password-file .vault_pass.sh; \
+	ansible-playbook -i inventory/docker-hosts.yml site.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password; \
 	echo ""; \
 	echo "$(GREEN)══════════════════════════════════════════════$(RESET)"; \
 	echo "$(GREEN)  Wazuh Docker deployment complete!$(RESET)"; \
@@ -393,7 +393,7 @@ clean: ## Remove generated files (keeps vault and keys)
 	@echo "  - wazuh-client-prep.sh"
 	@echo ""
 	@echo "$(YELLOW)Keeping:$(RESET)"
-	@echo "  - .vault_password"
+	@echo "  - ~/.config/wazuh-deployment/.vault_password"
 	@echo "  - group_vars/all/vault.yml"
 	@echo "  - keys/"
 	@echo ""
@@ -405,12 +405,12 @@ clean: ## Remove generated files (keeps vault and keys)
 
 clean-all: ## Remove ALL generated files including vault and keys
 	@echo "$(RED)WARNING: This will remove ALL generated files including:$(RESET)"
-	@echo "  - .vault_password (CANNOT BE RECOVERED)"
+	@echo "  - ~/.config/wazuh-deployment/.vault_password (CANNOT BE RECOVERED)"
 	@echo "  - group_vars/all/vault.yml"
 	@echo "  - keys/"
 	@echo ""
 	@read -p "Are you SURE? Type 'yes' to confirm: " confirm && [ "$$confirm" = "yes" ] || exit 1
-	@rm -f ansible.cfg .vault_password
+	@rm -f ansible.cfg ~/.config/wazuh-deployment/.vault_password
 	@rm -f inventory/hosts.yml inventory/bootstrap.yml
 	@rm -rf group_vars/all/ keys/ client-prep/ credentials/
 	@rm -f wazuh-client-prep.sh

@@ -32,7 +32,7 @@ An Ansible Vault-encrypted file containing all sensitive credentials:
 - Agent enrollment passwords
 - Cluster keys
 
-This file is encrypted at rest. The vault password is provided by `.vault_pass.sh`, an executable script that outputs the decryption key. Manage credentials with:
+This file is encrypted at rest. The vault password is read from `~/.config/wazuh-deployment/.vault_password` (mode `600`). Manage credentials with:
 
 ```bash
 # View credentials
@@ -54,10 +54,10 @@ make vault-rekey
 
 ## How Vault Password Is Loaded
 
-The Makefile passes `--vault-password-file .vault_pass.sh` on all `ansible-playbook` calls automatically. For manual playbook runs, include the same flag:
+The Makefile passes `--vault-password-file ~/.config/wazuh-deployment/.vault_password` on all `ansible-playbook` calls automatically. For manual playbook runs, include the same flag:
 
 ```bash
-ansible-playbook site.yml --vault-password-file .vault_pass.sh
+ansible-playbook site.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password
 ```
 
 The generated `ansible.cfg` (when present) also sets `vault_password_file = ~/.config/wazuh-deployment/.vault_password` for convenience, but since this file is per-environment, using `make` targets is the recommended approach.

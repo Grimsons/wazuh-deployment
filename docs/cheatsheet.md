@@ -59,11 +59,11 @@ make setup-hooks
 
 # First-time deployment (bootstrap + deploy)
 make deploy-bootstrap
-# Manual: ansible-playbook site.yml --tags bootstrap,all --ask-pass --vault-password-file .vault_pass.sh
+# Manual: ansible-playbook site.yml --tags bootstrap,all --ask-pass --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 # Subsequent deployments
 make deploy
-# Manual: ansible-playbook site.yml --vault-password-file .vault_pass.sh
+# Manual: ansible-playbook site.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password
 ```
 
 ## Daily Operations
@@ -97,7 +97,7 @@ Dashboard: `https://localhost:443`
 ```bash
 # Unlock deployment user (locked after each deploy)
 make unlock
-# Manual: ansible-playbook unlock-deploy-user.yml --vault-password-file .vault_pass.sh
+# Manual: ansible-playbook unlock-deploy-user.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 # Then deploy
 make deploy
@@ -260,7 +260,7 @@ curl -k -u wazuh:PASSWORD https://MANAGER:55000/agents?pretty
 
 | File | Purpose |
 |------|---------|
-| `.vault_pass.sh` | Vault decryption script (BACKUP THIS!) |
+| `~/.config/wazuh-deployment/.vault_password` | Vault decryption key (BACKUP THIS!) |
 | `inventory/hosts.yml` | Main inventory |
 | `inventory/docker-hosts.yml` | Docker test environment inventory |
 | `group_vars/all/main.yml` | Configuration variables |
@@ -279,5 +279,5 @@ ansible-playbook site.yml -vvv
 ansible-playbook site.yml --check
 
 # Specify vault password file
-ansible-playbook site.yml --vault-password-file .vault_pass.sh
+ansible-playbook site.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password
 ```
