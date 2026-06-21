@@ -122,7 +122,7 @@
               ansible-vault encrypt
               {{ backup_base_path | quote }}/{{ backup_timestamp | quote }}/indexer/{{ inventory_hostname | quote }}/indexer-certs.tar.gz
           environment:
-            ANSIBLE_VAULT_PASSWORD_FILE: "{{ playbook_dir }}/../.vault_password"
+            ANSIBLE_VAULT_PASSWORD_FILE: "{{ lookup('env', 'HOME') }}/.config/wazuh-deployment/.vault_password"
           delegate_to: localhost
           become: false
           changed_when: true
@@ -262,7 +262,7 @@
               ansible-vault encrypt
               {{ backup_base_path | quote }}/{{ backup_timestamp | quote }}/manager/{{ inventory_hostname | quote }}/manager-certs.tar.gz
           environment:
-            ANSIBLE_VAULT_PASSWORD_FILE: "{{ playbook_dir }}/../.vault_password"
+            ANSIBLE_VAULT_PASSWORD_FILE: "{{ lookup('env', 'HOME') }}/.config/wazuh-deployment/.vault_password"
           delegate_to: localhost
           become: false
           changed_when: true
@@ -353,7 +353,7 @@
               ansible-vault encrypt
               {{ backup_base_path | quote }}/{{ backup_timestamp | quote }}/dashboard/{{ inventory_hostname | quote }}/dashboard-certs.tar.gz
           environment:
-            ANSIBLE_VAULT_PASSWORD_FILE: "{{ playbook_dir }}/../.vault_password"
+            ANSIBLE_VAULT_PASSWORD_FILE: "{{ lookup('env', 'HOME') }}/.config/wazuh-deployment/.vault_password"
           delegate_to: localhost
           become: false
           changed_when: true

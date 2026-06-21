@@ -36,7 +36,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 VAULT_DIR="$PROJECT_DIR/group_vars/all"
 VAULT_FILE="$VAULT_DIR/vault.yml"
-VAULT_PASSWORD_FILE="$PROJECT_DIR/.vault_password"
+VAULT_PASSWORD_DIR="${HOME}/.config/wazuh-deployment"
+VAULT_PASSWORD_FILE="$VAULT_PASSWORD_DIR/.vault_password"
 OLD_ALL_YML="$PROJECT_DIR/group_vars/all.yml"
 NEW_MAIN_YML="$VAULT_DIR/main.yml"
 TIMESTAMP="$(date +%Y%m%d%H%M%S)"
@@ -169,7 +170,7 @@ if [ -z "$MIGRATION_CASE" ] && [ -f "$NEW_MAIN_YML" ]; then
     else
         MIGRATION_CASE="partial"
         SOURCE_FILE="$NEW_MAIN_YML"
-        print_info "Detected: vault.yml exists but no .vault_password file"
+        print_info "Detected: vault.yml exists but no $VAULT_PASSWORD_FILE"
     fi
 fi
 
@@ -338,12 +339,13 @@ fi
 if [ ! -f "$VAULT_PASSWORD_FILE" ]; then
     print_info "Generating vault password..."
     vault_pass=$(generate_password 32)
+    mkdir -p "$VAULT_PASSWORD_DIR"
     echo "$vault_pass" > "$VAULT_PASSWORD_FILE"
     chmod 600 "$VAULT_PASSWORD_FILE"
-    print_success "Vault password created: .vault_password"
-    print_warning "IMPORTANT: Back up .vault_password securely!"
+    print_success "Vault password created: $VAULT_PASSWORD_FILE"
+    print_warning "IMPORTANT: Back up $VAULT_PASSWORD_FILE securely!"
 else
-    print_info "Using existing vault password: .vault_password"
+    print_info "Using existing vault password: $VAULT_PASSWORD_FILE"
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -429,7 +431,7 @@ wazuh_indexer_heap_size: "${INDEXER_HEAP_SIZE:-auto}"
 wazuh_indexer_admin_user: "${INDEXER_ADMIN_USER:-admin}"
 # Indexer admin password loaded from Ansible Vault
 # SECURITY: Password encrypted in group_vars/all/vault.yml
-# To view/edit: ansible-vault view/edit group_vars/all/vault.yml --vault-password-file .vault_password
+# To view/edit: ansible-vault view/edit group_vars/all/vault.yml --vault-password-file $VAULT_PASSWORD_FILE
 wazuh_indexer_admin_password: "{{ vault_wazuh_indexer_admin_password }}"
 
 # Indexer node list for cluster configuration

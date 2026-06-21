@@ -89,7 +89,7 @@ The maintenance cron playbook configures `scripts/run-scheduled-backup.sh` to ru
 
 #### Credentials
 - `./group_vars/all/vault.yml` (encrypted - all passwords)
-- `./.vault_password` (vault decryption key - BACKUP THIS!)
+- `~/.config/wazuh-deployment/.vault_password` (vault decryption key - BACKUP THIS!)
 
 ### Backup Locations
 

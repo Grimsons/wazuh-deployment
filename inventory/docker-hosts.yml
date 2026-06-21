@@ -1,36 +1,43 @@
 ---
+# Docker test inventory - Uses container names for docker exec and docker IPs for SSH
 all:
   vars:
     ansible_user: wazuh-deploy
     ansible_ssh_private_key_file: /tmp/opencode/wazuh_ansible_key
-    ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null"
-    wazuh_configure_firewall: false
-    wazuh_ssl_verify_certificates: false
-    wazuh_lockdown_deploy_user: false
-    wazuh_indexer_network_host: "0.0.0.0"
-    wazuh_dashboard_host: "0.0.0.0"
-    wazuh_indexer_heap_size: "512m"
-    wazuh_indexer_memory_lock: false
+    ansible_port: 22
+    ansible_become: true
+    # No passwords needed - SSH key auth and passwordless sudo
+
   children:
     wazuh_indexers:
       hosts:
         indexer-1:
-          ansible_host: 127.0.0.1
-          ansible_port: 2201
+          ansible_host: 172.18.0.2
+          indexer_node_name: indexer-1
           indexer_cluster_initial_master: true
+
     wazuh_managers:
       hosts:
         manager-1:
-          ansible_host: 127.0.0.1
-          ansible_port: 2202
+          ansible_host: 172.18.0.3
+          manager_node_name: manager-1
+          manager_node_type: master
+
     wazuh_dashboards:
       hosts:
         dashboard-1:
-          ansible_host: 127.0.0.1
-          ansible_port: 2203
+          ansible_host: 172.18.0.4
           dashboard_node_name: dashboard-1
+
     wazuh_agents:
       hosts:
         agent-1:
-          ansible_host: 127.0.0.1
-          ansible_port: 2204
+          ansible_host: 172.18.0.5
+
+    # Local deployment host (used by delegate_to: localhost tasks)
+    local:
+      hosts:
+        localhost:
+          ansible_connection: local
+          ansible_user: "{{ lookup('env', 'USER') }}"
+          ansible_become: false

@@ -61,7 +61,7 @@ Both generate:
 - `inventory/bootstrap.yml` - Bootstrap inventory (first deployment)
 - `group_vars/all/main.yml` - Configuration variables
 - `group_vars/all/vault.yml` - Encrypted credentials (Ansible Vault)
-- `.vault_password` - Vault encryption key (keep secure!)
+- `~/.config/wazuh-deployment/.vault_password` - Vault encryption key (keep secure!)
 - `ansible.cfg` - Ansible settings
 - `keys/wazuh_ansible_key` - SSH keypair for deployment
 
@@ -202,7 +202,7 @@ wazuh-deployment/
 
 ### Credential Management
 
-All credentials are stored in Ansible Vault (`group_vars/all/vault.yml`), encrypted with a randomly generated key (`.vault_password`). No plaintext passwords are stored anywhere.
+All credentials are stored in Ansible Vault (`group_vars/all/vault.yml`), encrypted with a randomly generated key at `~/.config/wazuh-deployment/.vault_password`. No plaintext passwords are stored anywhere.
 
 ```bash
 ./scripts/manage-vault.sh view      # View current credentials
@@ -414,7 +414,7 @@ Run this once after upgrading the repository to migrate from the old plaintext c
 | Certificate errors | Regenerate with `./generate-certs.sh` |
 | Agent not connecting | Verify manager IP and port 1514 accessibility |
 | Dashboard 401 errors | Run `./scripts/manage-vault.sh view` to verify credentials |
-| Vault permission denied | Run with `sudo` or fix `.vault_password` permissions |
+| Vault permission denied | Run with `sudo` or fix `~/.config/wazuh-deployment/.vault_password` permissions |
 | Deploy user locked | Run `ansible-playbook unlock-deploy-user.yml` |
 | Aggregation errors | Re-run `site.yml` to update index mappings |
 
@@ -436,7 +436,7 @@ Run this once after upgrading the repository to migrate from the old plaintext c
 
 ## Security Recommendations
 
-- Back up `.vault_password` securely offline - required to decrypt credentials
+- Back up `~/.config/wazuh-deployment/.vault_password` securely offline - required to decrypt credentials
 - Use external CA certificates for production environments
 - Restrict network access to management ports
 - Regularly rotate credentials with `./scripts/manage-vault.sh rotate`

@@ -230,7 +230,7 @@
           ansible-playbook {{ playbook_dir | quote }}/health-check.yml
           -i {{ playbook_dir | quote }}/../inventory/hosts.yml
       environment:
-        ANSIBLE_VAULT_PASSWORD_FILE: "{{ playbook_dir }}/../.vault_password"
+        ANSIBLE_VAULT_PASSWORD_FILE: "{{ lookup('env', 'HOME') }}/.config/wazuh-deployment/.vault_password"
       args:
         chdir: "{{ playbook_dir }}/.."
       when: not (skip_health_gates | default(false) | bool)

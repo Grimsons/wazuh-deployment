@@ -6,6 +6,7 @@ services:
     hostname: indexer-1
     container_name: indexer-1
     privileged: true
+    cgroup: host
     security_opt:
       - seccomp=unconfined
     volumes:
@@ -29,6 +30,7 @@ services:
     hostname: manager-1
     container_name: manager-1
     privileged: true
+    cgroup: host
     security_opt:
       - seccomp=unconfined
     volumes:
@@ -51,6 +53,7 @@ services:
     hostname: dashboard-1
     container_name: dashboard-1
     privileged: true
+    cgroup: host
     security_opt:
       - seccomp=unconfined
     volumes:
@@ -74,6 +77,7 @@ services:
     hostname: agent-1
     container_name: agent-1
     privileged: true
+    cgroup: host
     security_opt:
       - seccomp=unconfined
     volumes:

@@ -20,6 +20,7 @@ NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+VAULT_PASSWORD_FILE="${HOME}/.config/wazuh-deployment/.vault_password"
 ROLLBACK_DIR="$PROJECT_DIR/rollback-points"
 LATEST_ROLLBACK_FILE="$ROLLBACK_DIR/.latest"
 
@@ -147,14 +148,14 @@ do_rollback() {
     print_info "Running restore playbook..."
     cd "$PROJECT_DIR"
 
-    if [ ! -f ".vault_password" ]; then
-        print_error "Vault password file .vault_password not found — cannot decrypt cert archives during restore"
-        print_info "Set ANSIBLE_VAULT_PASSWORD_FILE or create .vault_password before running rollback"
+    if [ ! -f "$VAULT_PASSWORD_FILE" ]; then
+        print_error "Vault password file $VAULT_PASSWORD_FILE not found — cannot decrypt cert archives during restore"
+        print_info "Set ANSIBLE_VAULT_PASSWORD_FILE or create $VAULT_PASSWORD_FILE before running rollback"
         exit 1
     fi
 
     if ansible-playbook playbooks/restore.yml \
-        --vault-password-file .vault_password \
+        --vault-password-file "$VAULT_PASSWORD_FILE" \
         -e "restore_from=$rollback_point" \
         -e "backup_dest=$ROLLBACK_DIR" \
         -e "restart_services=true"; then

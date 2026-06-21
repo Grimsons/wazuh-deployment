@@ -15,6 +15,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VAULT_PASSWORD_DIR="${HOME}/.config/wazuh-deployment"
+VAULT_PASSWORD_FILE="$VAULT_PASSWORD_DIR/.vault_password"
 
 # ═══════════════════════════════════════════════════════════════
 # Check for gum installation
@@ -609,7 +611,7 @@ gathering = smart
 fact_caching = jsonfile
 fact_caching_connection = ${HOME}/.cache/ansible/facts
 fact_caching_timeout = 3600
-vault_password_file = .vault_password
+vault_password_file = ~/.config/wazuh-deployment/.vault_password
 
 [privilege_escalation]
 become = ${USE_BECOME:-true}
@@ -1016,7 +1018,7 @@ EOF
     GENERATED_API_PASSWORD=""
 
     if [[ -f "$SCRIPT_DIR/scripts/manage-vault.sh" ]]; then
-        if [[ ! -f "$SCRIPT_DIR/.vault_password" ]]; then
+        if [[ ! -f "$VAULT_PASSWORD_FILE" ]]; then
             bash "$SCRIPT_DIR/scripts/manage-vault.sh" init 2>/dev/null || true
         fi
 
@@ -1128,14 +1130,14 @@ EOF
         echo ""
     fi
 
-    if [[ -f "$SCRIPT_DIR/.vault_password" ]]; then
+    if [[ -f "$VAULT_PASSWORD_FILE" ]]; then
         gum style \
             --border rounded \
             --border-foreground "#FF6B6B" \
             --padding "1 2" \
             "SAVE YOUR VAULT PASSWORD FILE!
 
-Vault password file location: $SCRIPT_DIR/.vault_password
+Vault password file location: $VAULT_PASSWORD_FILE
 
 The password is NOT displayed here for security reasons.
 Store this file in a password manager or secure vault.

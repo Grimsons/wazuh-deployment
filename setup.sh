@@ -23,6 +23,10 @@ set -euo pipefail
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Vault password stored outside the repo with restrictive permissions
+VAULT_PASSWORD_DIR="${HOME}/.config/wazuh-deployment"
+VAULT_PASSWORD_FILE="$VAULT_PASSWORD_DIR/.vault_password"
+
 # ═══════════════════════════════════════════════════════════════
 # Source modular libraries
 # ═══════════════════════════════════════════════════════════════
@@ -100,7 +104,7 @@ ${YELLOW}Quick Start:${NC}
 
   2. Follow the prompts to configure your deployment
 
-  3. Run: ansible-playbook site.yml --vault-password-file .vault_password
+  3. Run: ansible-playbook site.yml --vault-password-file ${VAULT_PASSWORD_FILE}
 
 EOF
 }
@@ -667,7 +671,7 @@ main() {
     # Vault is enabled by default for security
     USE_VAULT="true"
     print_success "Ansible Vault will be used for credential encryption"
-    print_info "Vault password will be stored in: .vault_password"
+    print_info "Vault password will be stored in: ${VAULT_PASSWORD_FILE}"
     print_info "Encrypted credentials will be in: group_vars/all/vault.yml"
 
     # ═══════════════════════════════════════════════════════════════
@@ -1246,7 +1250,7 @@ EOF
     cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << 'EOF'
 # Indexer admin password loaded from Ansible Vault
 # SECURITY: Password encrypted in group_vars/all/vault.yml
-# To view/edit: ansible-vault view/edit group_vars/all/vault.yml --vault-password-file .vault_password
+# To view/edit: ansible-vault view/edit group_vars/all/vault.yml --vault-password-file ${VAULT_PASSWORD_FILE}
 wazuh_indexer_admin_password: "{{ vault_wazuh_indexer_admin_password }}"
 EOF
 
@@ -1622,7 +1626,7 @@ gathering = smart
 fact_caching = jsonfile
 fact_caching_connection = ${HOME}/.cache/ansible/facts
 fact_caching_timeout = 3600
-vault_password_file = .vault_password
+vault_password_file = ~/.config/wazuh-deployment/.vault_password
 
 [privilege_escalation]
 become = ${USE_BECOME}
@@ -1689,17 +1693,17 @@ EOF
         chmod +x "${SCRIPT_DIR}/scripts/manage-vault.sh"
 
         # Initialize vault (creates vault password)
-        if [ -f "${SCRIPT_DIR}/.vault_password" ]; then
+        if [ -f "${VAULT_PASSWORD_FILE}" ]; then
             print_info "Vault password file already exists"
         else
             print_info "Generating vault password..."
             bash "${SCRIPT_DIR}/scripts/manage-vault.sh" init
-            if [ ! -f "${SCRIPT_DIR}/.vault_password" ]; then
+            if [ ! -f "${VAULT_PASSWORD_FILE}" ]; then
                 print_error "Failed to create vault password file"
                 print_info "Try: bash scripts/manage-vault.sh init"
                 exit 1
             fi
-            print_success "Vault password created: .vault_password"
+            print_success "Vault password created: ${VAULT_PASSWORD_FILE}"
         fi
 
         # Create encrypted vault — pass credentials via a mode-0600 temp file,
@@ -1722,7 +1726,7 @@ EOF
         fi
         print_success "Encrypted credentials stored in: group_vars/all/vault.yml"
 
-        print_warning "IMPORTANT: Back up .vault_password securely!"
+        print_warning "IMPORTANT: Back up ${VAULT_PASSWORD_FILE} securely!"
         print_warning "Without it, you cannot decrypt your credentials."
     else
         print_warning "Vault management script not found, using plaintext credentials"
@@ -1833,7 +1837,7 @@ EOF
     echo
     echo -e "${CYAN}Security:${NC}"
     echo "  - Ansible Vault: Enabled (encrypted credentials)"
-    echo "  - Vault password: .vault_password"
+    echo "  - Vault password: ${VAULT_PASSWORD_FILE}"
     echo "  - Encrypted vault: group_vars/all/vault.yml"
     if [ "$EXTERNAL_CA" = "true" ]; then
         echo "  - Certificates: External CA (user-provided)"
@@ -1903,7 +1907,7 @@ EOF
     echo -e "   ${CYAN}group_vars/all/main.yml${NC}   - Variables file"
     echo -e "   ${CYAN}group_vars/all/vault.yml${NC}  - Encrypted credentials"
     echo -e "   ${CYAN}ansible.cfg${NC}            - Ansible configuration"
-    echo -e "   ${CYAN}.vault_password${NC}        - Vault encryption key (KEEP SECURE!)"
+    echo -e "   ${CYAN}${VAULT_PASSWORD_FILE}${NC} - Vault encryption key (KEEP SECURE!)"
     echo
 
     if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
@@ -1925,7 +1929,7 @@ EOF
     else
         echo -e "2. Test connectivity to your hosts:"
     fi
-    echo -e "   ${YELLOW}ansible all -m ping -i inventory/bootstrap.yml --vault-password-file .vault_password${NC}"
+    echo -e "   ${YELLOW}ansible all -m ping -i inventory/bootstrap.yml --vault-password-file ${VAULT_PASSWORD_FILE}${NC}"
     echo
 
     if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
@@ -1942,10 +1946,10 @@ EOF
     echo -e "   ${YELLOW}ansible-playbook site.yml${NC}"
     echo
     echo -e "   Or deploy components individually:"
-    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-indexer.yml --vault-password-file .vault_password${NC}"
-    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-manager.yml --vault-password-file .vault_password${NC}"
-    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-dashboard.yml --vault-password-file .vault_password${NC}"
-    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-agents.yml --vault-password-file .vault_password${NC}"
+    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-indexer.yml --vault-password-file ${VAULT_PASSWORD_FILE}${NC}"
+    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-manager.yml --vault-password-file ${VAULT_PASSWORD_FILE}${NC}"
+    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-dashboard.yml --vault-password-file ${VAULT_PASSWORD_FILE}${NC}"
+    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-agents.yml --vault-password-file ${VAULT_PASSWORD_FILE}${NC}"
     echo
 
     if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
@@ -1984,18 +1988,18 @@ EOF
     echo
 
     print_warning "SECURITY REMINDERS:"
-    echo -e "  - Back up ${CYAN}.vault_password${NC} securely (required to decrypt credentials)"
+    echo -e "  - Back up ${CYAN}${VAULT_PASSWORD_FILE}${NC} securely (required to decrypt credentials)"
     echo -e "  - Keep ${CYAN}keys/wazuh_ansible_key${NC} private (provides host access)"
     echo
 
     # Prompt user to back up vault password securely
-    if [ -f "$SCRIPT_DIR/.vault_password" ]; then
+    if [ -f "${VAULT_PASSWORD_FILE}" ]; then
         print_header "CRITICAL: BACK UP YOUR VAULT PASSWORD"
         echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
         echo -e "${RED}  ANSIBLE VAULT PASSWORD - BACK THIS UP NOW!${NC}"
         echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
         echo
-        echo -e "  ${YELLOW}Vault password file:${NC} ${CYAN}$SCRIPT_DIR/.vault_password${NC}"
+        echo -e "  ${YELLOW}Vault password file:${NC} ${CYAN}${VAULT_PASSWORD_FILE}${NC}"
         echo
         echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
         echo -e "${YELLOW}⚠ You will need this password to:${NC}"

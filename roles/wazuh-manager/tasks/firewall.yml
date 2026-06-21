@@ -80,7 +80,9 @@
   register: ufw_status
   changed_when: false
   failed_when: false
-  when: ufw_check.rc == 0
+  when:
+    - ansible_os_family == 'Debian'
+    - ufw_check.rc == 0
   become: true
 
 # Allow SSH first before enabling UFW to prevent lockout
@@ -92,6 +94,7 @@
     jump: ACCEPT
   become: true
   when:
+    - ansible_os_family == 'Debian'
     - ufw_check.rc == 0
     - ufw_status.stdout is defined
     - "'inactive' in ufw_status.stdout.lower()"
@@ -104,6 +107,7 @@
     direction: incoming
   become: true
   when:
+    - ansible_os_family == 'Debian'
     - ufw_check.rc == 0
     - ufw_status.stdout is defined
     - "'inactive' in ufw_status.stdout.lower()"
@@ -114,6 +118,7 @@
     direction: outgoing
   become: true
   when:
+    - ansible_os_family == 'Debian'
     - ufw_check.rc == 0
 
 - name: Re-check UFW status after enabling
@@ -121,12 +126,15 @@
   register: ufw_status
   changed_when: false
   failed_when: false
-  when: ufw_check.rc == 0
+  when:
+    - ansible_os_family == 'Debian'
+    - ufw_check.rc == 0
   become: true
 
 # UFW (Debian/Ubuntu)
 - name: Configure UFW rules
   when:
+    - ansible_os_family == 'Debian'
     - ufw_check.rc == 0
     - ufw_status.stdout is defined
     - "'active' in ufw_status.stdout.lower()"

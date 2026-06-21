@@ -63,6 +63,18 @@ generate_yaml_safe_password() {
     echo "$password" | fold -w1 | shuf --random-source=/dev/urandom | tr -d '\n'
 }
 
+# Escape a string for safe inclusion in a YAML double-quoted scalar.
+# Handles backslashes and double quotes. Newlines are converted to \n and
+# carriage returns are removed.
+yaml_escape() {
+    local str="$1"
+    str="${str//\\/\\\\}"
+    str="${str//\"/\\\"}"
+    str="${str//$'\n'/\\n}"
+    str="${str//$'\r'/}"
+    printf '%s' "$str"
+}
+
 # Generate hex key (for cluster keys)
 generate_hex_key() {
     local length="${1:-32}"

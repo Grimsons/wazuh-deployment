@@ -17,3 +17,4 @@
   ansible.builtin.command: service auditd restart
   become: true
   changed_when: true
+  ignore_errors: true

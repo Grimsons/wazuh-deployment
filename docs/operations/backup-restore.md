@@ -63,7 +63,7 @@ ansible-playbook playbooks/backup.yml -e "backup_indexer_data=true"
 
 ### Credentials
 - `./group_vars/all/vault.yml` - Encrypted credentials (Ansible Vault)
-- `./.vault_password` - Vault encryption key (back up securely!)
+- `~/.config/wazuh-deployment/.vault_password` - Vault encryption key (back up securely!)
 
 ## Backup Storage
 

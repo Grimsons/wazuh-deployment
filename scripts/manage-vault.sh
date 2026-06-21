@@ -22,7 +22,8 @@ source "$PROJECT_DIR/lib/generators.sh"
 # Use group_vars/all/ directory structure for proper Ansible auto-loading
 VAULT_DIR="$PROJECT_DIR/group_vars/all"
 VAULT_FILE="$VAULT_DIR/vault.yml"
-VAULT_PASSWORD_FILE="$PROJECT_DIR/.vault_password"
+VAULT_PASSWORD_DIR="${HOME}/.config/wazuh-deployment"
+VAULT_PASSWORD_FILE="$VAULT_PASSWORD_DIR/.vault_password"
 # Credentials stored exclusively in Ansible Vault — no plaintext files on disk
 
 print_header() {
@@ -64,6 +65,7 @@ init_vault() {
 
     # Generate vault password
     local vault_password=$(generate_yaml_safe_password 32)
+    mkdir -p "$VAULT_PASSWORD_DIR"
     echo "$vault_password" > "$VAULT_PASSWORD_FILE"
     chmod 600 "$VAULT_PASSWORD_FILE"
 
@@ -150,6 +152,7 @@ create_vault() {
     local cluster_key="${VAULT_CLUSTER_KEY:-}"
     local dashboard_admin_password="${VAULT_DASHBOARD_ADMIN_PASSWORD:-}"
     local grafana_api_key="${VAULT_GRAFANA_API_KEY:-}"
+    local filebeat_password="${VAULT_FILEBEAT_PASSWORD:-}"
 
     # Generate passwords if not provided
     if [ -z "$indexer_password" ]; then
@@ -165,6 +168,10 @@ create_vault() {
     if [ -z "$enrollment_password" ]; then
         enrollment_password=$(generate_yaml_safe_password 24)
         print_info "Generated new agent enrollment password"
+    fi
+
+    if [ -z "$filebeat_password" ]; then
+        filebeat_password=$(generate_yaml_safe_password 24)
     fi
 
     if [ -z "$cluster_key" ]; then

@@ -60,7 +60,7 @@ The Makefile passes `--vault-password-file .vault_pass.sh` on all `ansible-playb
 ansible-playbook site.yml --vault-password-file .vault_pass.sh
 ```
 
-The generated `ansible.cfg` (when present) also sets `vault_password_file = .vault_pass.sh` for convenience, but since this file is per-environment and gitignored, using `make` targets is the recommended approach.
+The generated `ansible.cfg` (when present) also sets `vault_password_file = ~/.config/wazuh-deployment/.vault_password` for convenience, but since this file is per-environment, using `make` targets is the recommended approach.
 
 ## Other Configuration Files
 

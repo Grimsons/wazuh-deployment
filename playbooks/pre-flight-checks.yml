@@ -47,13 +47,13 @@
 
     - name: Check vault password file
       ansible.builtin.stat:
-        path: "{{ playbook_dir }}/../.vault_password"
+        path: "{{ lookup('env', 'HOME') }}/.config/wazuh-deployment/.vault_password"
       register: vault_password_file
 
     - name: Fail if vault password file is missing
       ansible.builtin.fail:
         msg: >
-          Vault password file .vault_password not found.
+          Vault password file {{ lookup('env', 'HOME') }}/.config/wazuh-deployment/.vault_password not found.
           Run: ./scripts/manage-vault.sh init  (or create it manually before deployment)
       when: not vault_password_file.stat.exists
 

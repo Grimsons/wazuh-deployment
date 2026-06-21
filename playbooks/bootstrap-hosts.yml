@@ -7,7 +7,7 @@
 # Run this ONCE after initial setup.sh, before running site.yml
 #
 # Usage:
-#   ansible-playbook playbooks/bootstrap-hosts.yml -i inventory/bootstrap.yml --vault-password-file .vault_password
+#   ansible-playbook playbooks/bootstrap-hosts.yml -i inventory/bootstrap.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password
 #
 # Prerequisites:
 #   - SSH access to target hosts with your personal credentials
@@ -137,10 +137,10 @@
 
           You can now run deployments using the main inventory:
 
-            ansible-playbook site.yml --vault-password-file .vault_password
+            ansible-playbook site.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
           Or run health checks:
 
-            ansible-playbook playbooks/health-check.yml --vault-password-file .vault_password
+            ansible-playbook playbooks/health-check.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
           ══════════════════════════════════════════════════════════════

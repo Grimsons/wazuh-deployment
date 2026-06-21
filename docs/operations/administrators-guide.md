@@ -336,7 +336,7 @@ make restore BACKUP_ID=20260121_020000
 For complete recovery on new infrastructure:
 
 1. Install Ansible on new control node
-2. Restore `.vault_password` from secure backup
+2. Restore `~/.config/wazuh-deployment/.vault_password` from secure backup
 3. Restore `group_vars/all/vault.yml`
 4. Update `inventory/hosts.yml` with new host IPs
 5. Run: `ansible-playbook site.yml`

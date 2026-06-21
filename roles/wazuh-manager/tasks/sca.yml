@@ -15,26 +15,23 @@
   become: true
 
 - name: Find custom SCA policy files
-  ansible.builtin.find:
-    paths: "{{ role_path }}/../../files/sca"
-    patterns: "*.yml,*.yaml"
-  register: custom_sca_policies
-  delegate_to: localhost
+  ansible.builtin.set_fact:
+    custom_sca_policies: "{{ lookup('fileglob', playbook_dir ~ '/files/sca/*.yml', wantlist=True) + lookup('fileglob', playbook_dir ~ '/files/sca/*.yaml', wantlist=True) }}"
   become: false
 
 - name: Deploy custom SCA policies
   ansible.builtin.copy:
-    src: "{{ item.path }}"
-    dest: "{{ wazuh_manager_install_path }}/ruleset/sca/{{ item.path | basename }}"
+    src: "{{ item }}"
+    dest: "{{ wazuh_manager_install_path }}/ruleset/sca/{{ item | basename }}"
     owner: root
     group: "{{ wazuh_manager_group }}"
     mode: '0640'
   become: true
-  loop: "{{ custom_sca_policies.files }}"
+  loop: "{{ custom_sca_policies }}"
   loop_control:
-    label: "{{ item.path | basename }}"
+    label: "{{ item | basename }}"
   notify: restart wazuh-manager
-  when: custom_sca_policies.files | length > 0
+  when: custom_sca_policies | length > 0
 
 - name: Verify built-in CIS Linux benchmark policies are present
   ansible.builtin.stat:
