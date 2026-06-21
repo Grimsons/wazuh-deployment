@@ -21,6 +21,8 @@ For upstream wazuh-ansible changes, see the [wazuh-ansible releases](https://git
 - **Pre-Commit Hook** — `.githooks/pre-commit` that rejects commits with unencrypted `vault.yml`
 - **`make setup-hooks`** — Configures `.githooks/` as the git hooks path (auto-run by `make check`)
 - **Implementation Plan** — `docs/implementation-plan-5.0.md`: phased Wazuh 5.0 greenfield support plan
+- **Docker systemd support** — Added `cgroup: host` to all Docker Compose services so systemd-based containers start correctly
+- **Vault YAML escaping** — Added `yaml_escape()` helper in `lib/generators.sh` to safely quote special characters in generated vault values
 
 ### Changed
 
@@ -29,6 +31,8 @@ For upstream wazuh-ansible changes, see the [wazuh-ansible releases](https://git
   - `dashboard_node_name` variable added to inventory generation (indexed loop)
   - All dashboard cert references use `{{ dashboard_node_name | default("dashboard-1") }}`
 - **Vault Password File** — Makefile now passes `--vault-password-file .vault_pass.sh` explicitly on all `ansible-playbook` calls (20 targets), because `ansible.cfg` is gitignored and generated per-environment
+- **Vault Password Location** — Default vault password moved from repo-local `.vault_password` to `~/.config/wazuh-deployment/.vault_password` to keep secrets out of the working tree and avoid world-writable directory issues
+- **Vault Password Helper Removed** — `.vault_pass.sh` helper removed; `Makefile`, `setup.sh`, `setup-tui.sh`, and all operational scripts now reference `~/.config/wazuh-deployment/.vault_password` directly
 - **Container Networking** — `wazuh_is_container` flag enables `wazuh_indexer_network_host: 0.0.0.0`, `wazuh_dashboard_host: 0.0.0.0` bind for Docker containers
 - **Binary Prefix** — `wazuh_manager_binary_prefix: "wazuh-"` default in `roles/wazuh-manager/defaults/main.yml`
 - **Config File Selection** — `wazuh_manager_config_file` now selects `ossec.conf` for 4.x, `wazuh-manager.conf` for 5.x via `wazuh_is_5x` flag
@@ -42,6 +46,11 @@ For upstream wazuh-ansible changes, see the [wazuh-ansible releases](https://git
 - **Skip-if-Set Logic** — `prompt_with_default()` and `prompt_yes_no()` now skip already-configured values in setup scripts
 - **Config Path Guard** — Fixed `default(omit)` filter for `wazuh_manager_config_file` to prevent undefined variable errors
 - **`.gitignore` Additions** — Added `.vault_pass.sh`, `.ansible/`, `.opencode/`, `**/files/certs/*.pem` to prevent accidental commits
+- **Docker End-to-End Deployment** — Verified fresh Docker Compose deployment works: all four containers healthy, Manager API responsive, Filebeat → Indexer TLS working, Dashboard reachable
+- **Vault Generation** — Fixed `yaml_escape` undefined error and unbound `filebeat_password` variable during `setup.sh` vault creation
+- **Manager Firewall on RedHat** — UFW tasks now skipped on non-Debian systems
+- **SCA File Discovery** — Replaced `delegate_to: localhost find` task with controller-side `fileglob` lookup to avoid connection/authentication issues
+- **Agent Auditd Handler** — Made auditd restart handler ignore errors in container environments where the service may not exist
 
 ## [1.1.0] - Security Review, Community Rules, and Hardening
 
