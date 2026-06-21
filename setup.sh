@@ -1209,6 +1209,82 @@ EOF
 
     print_success "Bootstrap inventory created: inventory/bootstrap.yml"
 
+    # ========================================
+    # Docker inventory (docker-hosts.yml) - Container names for docker-bootstrap
+    # Only generated for docker profile
+    # ========================================
+    if [ "${SELECTED_PROFILE:-}" = "docker" ]; then
+        cat > "$SCRIPT_DIR/inventory/docker-hosts.yml" << EOF
+---
+# Docker Inventory - Container names for docker-bootstrap, IPs for SSH
+all:
+  vars:
+    ansible_user: wazuh-deploy
+    ansible_ssh_private_key_file: ${ANSIBLE_SSH_KEY}
+    ansible_port: ${ANSIBLE_SSH_PORT}
+    ansible_become: ${USE_BECOME}
+
+  children:
+    wazuh_indexers:
+      hosts:
+EOF
+        for i in "${!INDEXER_NODES_ARRAY[@]}"; do
+            node="${INDEXER_NODES_ARRAY[$i]}"
+            node_name="indexer-$((i+1))"
+            echo "        ${node_name}:" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            echo "          ansible_host: ${node}" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            echo "          indexer_node_name: ${node_name}" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            if [ $i -eq 0 ]; then
+                echo "          indexer_cluster_initial_master: true" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            fi
+        done
+
+        cat >> "$SCRIPT_DIR/inventory/docker-hosts.yml" << EOF
+
+    wazuh_managers:
+      hosts:
+EOF
+        for i in "${!MANAGER_NODES_ARRAY[@]}"; do
+            node="${MANAGER_NODES_ARRAY[$i]}"
+            node_name="manager-$((i+1))"
+            echo "        ${node_name}:" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            echo "          ansible_host: ${node}" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            echo "          manager_node_name: ${node_name}" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            if [ $i -eq 0 ]; then
+                echo "          manager_node_type: master" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            fi
+        done
+
+        cat >> "$SCRIPT_DIR/inventory/docker-hosts.yml" << EOF
+
+    wazuh_dashboards:
+      hosts:
+EOF
+        for i in "${!DASHBOARD_NODES_ARRAY[@]}"; do
+            node="${DASHBOARD_NODES_ARRAY[$i]}"
+            node_name="dashboard-$((i+1))"
+            echo "        ${node_name}:" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            echo "          ansible_host: ${node}" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            echo "          dashboard_node_name: ${node_name}" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+        done
+
+        if [ "$DEPLOY_AGENTS" = "true" ] && [ -n "$AGENT_NODES" ]; then
+            cat >> "$SCRIPT_DIR/inventory/docker-hosts.yml" << EOF
+
+    wazuh_agents:
+      hosts:
+EOF
+            for i in "${!AGENT_NODES_ARRAY[@]}"; do
+                node="${AGENT_NODES_ARRAY[$i]}"
+                node_name="agent-$((i+1))"
+                echo "        ${node_name}:" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+                echo "          ansible_host: ${node}" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            done
+        fi
+
+        print_success "Docker inventory created: inventory/docker-hosts.yml"
+    fi
+
     # Create group_vars/all/main.yml
     print_info "Creating group variables..."
     mkdir -p "$SCRIPT_DIR/group_vars/all"
@@ -1311,9 +1387,14 @@ EOF
         fi
     done
 
-    # Generate enrollment password
-    GENERATED_ENROLLMENT_PASSWORD=$(generate_password 24)
-    print_info "Generated agent enrollment password"
+    # Use provided enrollment password or generate one
+    if [ -n "${ENROLLMENT_PASSWORD:-}" ]; then
+        GENERATED_ENROLLMENT_PASSWORD="$ENROLLMENT_PASSWORD"
+        print_info "Using provided agent enrollment password"
+    else
+        GENERATED_ENROLLMENT_PASSWORD=$(generate_password 24)
+        print_info "Generated agent enrollment password"
+    fi
 
     if [ $MANAGER_COUNT -gt 1 ]; then
         cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << EOF
@@ -1382,7 +1463,6 @@ wazuh_certs_path: "files/certs"
 
 # Certificate paths on target hosts (destination)
 wazuh_indexer_certs_path: /etc/wazuh-indexer/certs
-wazuh_manager_certs_path: /var/ossec/etc/certs
 wazuh_dashboard_certs_path: /etc/wazuh-dashboard/certs
 
 # SSL certificate verification
@@ -1712,6 +1792,7 @@ EOF
         VAULT_INDEXER_PASSWORD="$GENERATED_INDEXER_PASSWORD" \
         VAULT_API_PASSWORD="$GENERATED_API_PASSWORD" \
         VAULT_ENROLLMENT_PASSWORD="$GENERATED_ENROLLMENT_PASSWORD" \
+        VAULT_FILEBEAT_PASSWORD="${FILEBEAT_PASSWORD:-}" \
         VAULT_DASHBOARD_ADMIN_PASSWORD="" \
         VAULT_GRAFANA_API_KEY="" \
         VAULT_ANSIBLE_USER="$ANSIBLE_USER" \

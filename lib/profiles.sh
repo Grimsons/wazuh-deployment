@@ -230,7 +230,7 @@ apply_profile_docker() {
 
     # Backup - disabled for ephemeral containers
     BACKUP_SCHEDULE="${BACKUP_SCHEDULE:-disabled}"
-    ENABLE_LOG_CLEANUP="${ENABLE_LOG_CLEANUP:-true}"
+    ENABLE_LOG_CLEANUP="${ENABLE_LOG_CLEANUP:-false}"
     LOG_RETENTION_DAYS="${LOG_RETENTION_DAYS:-7}"
     LOG_CLEANUP_SCHEDULE="${LOG_CLEANUP_SCHEDULE:-daily}"
 

@@ -1,12 +1,11 @@
 ---
-# Docker test inventory - Uses container names for docker exec and docker IPs for SSH
+# Docker Inventory - Container names for docker-bootstrap, IPs for SSH
 all:
   vars:
     ansible_user: wazuh-deploy
     ansible_ssh_private_key_file: /tmp/opencode/wazuh_ansible_key
     ansible_port: 22
     ansible_become: true
-    # No passwords needed - SSH key auth and passwordless sudo
 
   children:
     wazuh_indexers:
@@ -33,11 +32,3 @@ all:
       hosts:
         agent-1:
           ansible_host: 172.18.0.5
-
-    # Local deployment host (used by delegate_to: localhost tasks)
-    local:
-      hosts:
-        localhost:
-          ansible_connection: local
-          ansible_user: "{{ lookup('env', 'USER') }}"
-          ansible_become: false

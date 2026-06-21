@@ -2,6 +2,9 @@
 - name: Bootstrap Docker containers for Ansible management
   hosts: all
   gather_facts: false
+  become: false
+  vars:
+    ansible_become: false
   tasks:
     - name: Check that SSH key exists (from setup.sh)
       ansible.builtin.stat:
@@ -100,7 +103,7 @@
           -o UserKnownHostsFile=/dev/null \
           -o BatchMode=yes \
           -p {{ ansible_port | default(22) }} \
-          wazuh-deploy@127.0.0.1 \
+          wazuh-deploy@{{ ansible_host }} \
           'echo SSH_OK'
       register: ssh_test
       changed_when: false

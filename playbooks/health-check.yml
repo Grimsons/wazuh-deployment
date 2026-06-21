@@ -13,6 +13,9 @@
   hosts: wazuh_indexers
   become: true
   gather_facts: true
+  vars_files:
+    - ../group_vars/all/main.yml
+    - ../group_vars/all/vault.yml
   vars:
     health_results: []
   tasks:
@@ -92,6 +95,9 @@
   hosts: wazuh_managers
   become: true
   gather_facts: true
+  vars_files:
+    - ../group_vars/all/main.yml
+    - ../group_vars/all/vault.yml
   tasks:
     - name: Check manager service status
       ansible.builtin.systemd:
@@ -198,6 +204,9 @@
   hosts: wazuh_dashboards
   become: true
   gather_facts: true
+  vars_files:
+    - ../group_vars/all/main.yml
+    - ../group_vars/all/vault.yml
   tasks:
     - name: Check dashboard service status
       ansible.builtin.systemd:
@@ -246,7 +255,7 @@
           HTTP Status:      {{ dashboard_http_status }} ({{ dashboard_http.status | default('N/A') }})
           Recent Errors:    {{ dashboard_errors.stdout }} (last 100 log lines)
           Disk Usage:       {{ disk_usage.stdout }}%
-          URL:              https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}
+          URL:              https://{{ ansible_host | default(inventory_hostname) }}:{{ wazuh_dashboard_port }}
           ═══════════════════════════════════════════════════════════════
 
 - name: "End-to-End Data Flow Validation"
@@ -254,6 +263,9 @@
   become: true
   gather_facts: false
   tags: [e2e, dataflow]
+  vars_files:
+    - ../group_vars/all/main.yml
+    - ../group_vars/all/vault.yml
   tasks:
     # NOTE: wazuh-logtest-legacy runs a dry-run parse of the log through the rule engine.
     # It does NOT inject into the alert pipeline — no alert reaches the indexer from this.

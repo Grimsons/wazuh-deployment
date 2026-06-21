@@ -17,6 +17,8 @@
     executable: /bin/bash
   delegate_to: localhost
   become: false
+  vars:
+    ansible_become: false
   register: _api_pw_shell
   changed_when: false
   run_once: true

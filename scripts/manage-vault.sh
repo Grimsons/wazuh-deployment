@@ -7,7 +7,7 @@ set -euo pipefail
 
 # Ensure plaintext temp files are securely shredded on exit/interrupt
 # shred -u overwrites before unlinking to prevent disk-recovery of secrets
-trap 'shred -u "${VAULT_FILE:-}.tmp" "${VAULT_PASSWORD_FILE:-}.new" 2>/dev/null; rm -f "${VAULT_FILE:-}.tmp" "${VAULT_PASSWORD_FILE:-}.new"' EXIT INT TERM
+trap 'shred -u "${VAULT_FILE:-}.tmp" "${VAULT_PASSWORD_FILE:-}.new" 2>/dev/null || true; rm -f "${VAULT_FILE:-}.tmp" "${VAULT_PASSWORD_FILE:-}.new" 2>/dev/null || true' EXIT INT TERM
 
 # Colors
 RED='\033[0;31m'
@@ -256,10 +256,13 @@ ${host_creds_content}
 vault_wazuh_indexer_admin_password: \"${e_indexer_password}\"
 
 # Wazuh API credentials
-vault_wazuh_api_password: \"${e_api_password}\"
+vault_wazuh_api_password: "${e_api_password}"
+
+# Filebeat indexer credentials
+vault_wazuh_filebeat_password: "${e_filebeat_password}"
 
 # Agent enrollment password
-vault_wazuh_agent_enrollment_password: \"${e_enrollment_password}\"
+vault_wazuh_agent_enrollment_password: "${e_enrollment_password}"
 
 # Manager cluster key (for multi-node deployments)
 vault_wazuh_manager_cluster_key: \"${cluster_key}\"
