@@ -1640,6 +1640,13 @@ EOF
 
     print_success "Ansible configuration created: ansible.cfg"
 
+    # Create deterministic vault password helper script
+    cat > "$SCRIPT_DIR/.vault_pass.sh" << 'EOF'
+#!/bin/bash
+cat "${HOME}/.config/wazuh-deployment/.vault_password"
+EOF
+    chmod +x "$SCRIPT_DIR/.vault_pass.sh"
+
     # ═══════════════════════════════════════════════════════════════
     # SSH KEY GENERATION
     # ═══════════════════════════════════════════════════════════════
