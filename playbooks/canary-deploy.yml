@@ -4,10 +4,10 @@
 #
 # Usage:
 #   Full staged deployment:
-#     ansible-playbook playbooks/canary-deploy.yml
+#     ansible-playbook playbooks/canary-deploy.yml -i inventory/hosts.yml
 #
 #   Deploy only agents in batches:
-#     ansible-playbook playbooks/canary-deploy.yml --tags agents
+#     ansible-playbook playbooks/canary-deploy.yml -i inventory/hosts.yml --tags agents
 #
 #   Skip health check gates (not recommended):
 #     ansible-playbook playbooks/canary-deploy.yml -e "skip_health_gates=true"
@@ -38,7 +38,7 @@
         method: GET
         user: "{{ wazuh_indexer_admin_user | default('admin') }}"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: false
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         return_content: true
       register: pre_cluster_health
       failed_when: false
@@ -64,11 +64,11 @@
   post_tasks:
     - name: Health Gate - Wait for indexer to rejoin cluster
       ansible.builtin.uri:
-        url: "https://127.0.0.1:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health?wait_for_status=yellow&timeout=120s"
+        url: "https://127.0.0.1:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health?wait_for_status={{ wazuh_health_gate_status | default('green') }}&timeout=120s"
         method: GET
         user: "{{ wazuh_indexer_admin_user | default('admin') }}"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: false
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         return_content: true
       register: post_cluster_health
       until: post_cluster_health.status == 200
@@ -83,7 +83,7 @@
         method: GET
         user: "{{ wazuh_indexer_admin_user | default('admin') }}"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: false
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         return_content: true
       register: final_health
       no_log: true
@@ -126,7 +126,7 @@
       ansible.builtin.uri:
         url: "https://127.0.0.1:{{ wazuh_manager_api_port | default(55000) }}/"
         method: GET
-        validate_certs: false
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 401]
       register: post_manager_api
       until: post_manager_api.status in [200, 401]
@@ -169,7 +169,7 @@
       ansible.builtin.uri:
         url: "https://127.0.0.1:{{ wazuh_dashboard_port | default(443) }}/app/wazuh"
         method: GET
-        validate_certs: false
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 302, 401]
       register: post_dashboard_http
       until: post_dashboard_http.status in [200, 302, 401]
@@ -224,10 +224,18 @@
   tags: [always]
 
   tasks:
-    - name: Run health check
-      ansible.builtin.include_tasks:
-        file: "{{ playbook_dir }}/health-check.yml"
+    - name: Run health check playbook
+      ansible.builtin.command:
+        cmd: >
+          ansible-playbook {{ playbook_dir | quote }}/health-check.yml
+          -i {{ playbook_dir | quote }}/../inventory/hosts.yml
+      environment:
+        ANSIBLE_VAULT_PASSWORD_FILE: "{{ lookup('env', 'HOME') }}/.config/wazuh-deployment/.vault_password"
+      args:
+        chdir: "{{ playbook_dir }}/.."
       when: not (skip_health_gates | default(false) | bool)
+      register: health_check_result
+      changed_when: false
       ignore_errors: true
 
     - name: Deployment complete

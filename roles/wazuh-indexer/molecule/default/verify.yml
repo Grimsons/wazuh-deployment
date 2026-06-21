@@ -1,0 +1,44 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Check wazuh-indexer service is running
+      ansible.builtin.systemd:
+        name: wazuh-indexer
+      register: indexer_service
+      failed_when: indexer_service.status.ActiveState != "active"
+
+    - name: Verify indexer HTTP port is open
+      ansible.builtin.wait_for:
+        port: 9200
+        host: 127.0.0.1
+        timeout: 60
+
+    - name: Check opensearch.yml is configured
+      ansible.builtin.stat:
+        path: /etc/wazuh-indexer/opensearch.yml
+      register: opensearch_yml
+      failed_when: not opensearch_yml.stat.exists
+
+    - name: Verify indexer cluster health
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:9200/_cluster/health"
+        method: GET
+        user: admin
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: false
+        return_content: true
+      register: cluster_health
+      until: cluster_health.status == 200
+      retries: 10
+      delay: 10
+      no_log: true
+
+    - name: Assert cluster status is not red
+      ansible.builtin.assert:
+        that:
+          - cluster_health.json.status in ['green', 'yellow']
+        fail_msg: "Cluster status is {{ cluster_health.json.status }}"

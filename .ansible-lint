@@ -1,0 +1,28 @@
+---
+profile: production
+skip_list:
+  - yaml[indentation]
+  - yaml[line-length]
+  - yaml[document-start]
+  - no-changed-when
+  - ignore-errors
+  - no-handler
+  - experimental
+  - risky-shell-pipe
+  - risky-file-permissions
+  - package-latest
+  - fqcn-builtins
+  - fqcn[canonical]
+  - name
+  - var-naming[no-role-prefix]
+  - key-order
+  - command-instead-of-shell
+  - command-instead-of-module
+  - role-name
+  - unnamed-task
+  - schema
+exclude_paths:
+  - .git/
+  - .github/
+  - molecule/
+  - roles/*/molecule/

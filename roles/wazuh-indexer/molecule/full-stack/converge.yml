@@ -1,0 +1,28 @@
+---
+- name: Deploy indexer
+  hosts: indexer-*
+  become: true
+  gather_facts: true
+  roles:
+    - role: wazuh-indexer
+
+- name: Deploy manager
+  hosts: manager-*
+  become: true
+  gather_facts: true
+  roles:
+    - role: wazuh-manager
+
+- name: Deploy dashboard
+  hosts: dashboard-*
+  become: true
+  gather_facts: true
+  roles:
+    - role: wazuh-dashboard
+
+- name: Deploy agent
+  hosts: agent-*
+  become: true
+  gather_facts: true
+  roles:
+    - role: wazuh-agent

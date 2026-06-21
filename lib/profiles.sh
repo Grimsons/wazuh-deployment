@@ -10,6 +10,7 @@ _LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 declare -A PROFILES
 PROFILES["minimal"]="Single-node setup for testing/development"
 PROFILES["production"]="Multi-node HA setup with all security features"
+PROFILES["docker"]="Docker container environment (single or Swarm)"
 PROFILES["custom"]="Full interactive configuration"
 
 # Get profile description
@@ -41,7 +42,7 @@ apply_profile_minimal() {
     DEPLOY_AGENTS="false"
 
     # Basic settings
-    WAZUH_VERSION="${WAZUH_VERSION:-4.14.1}"
+    WAZUH_VERSION="${WAZUH_VERSION:-4.14.5}"
     ENVIRONMENT="development"
     ORG_NAME="TestOrg"
 
@@ -109,7 +110,7 @@ apply_profile_production() {
     AGENT_NODES=""
 
     # Production settings
-    WAZUH_VERSION="${WAZUH_VERSION:-4.14.1}"
+    WAZUH_VERSION="${WAZUH_VERSION:-4.14.5}"
     ENVIRONMENT="production"
     ORG_NAME="${ORG_NAME:-MyOrganization}"
 
@@ -167,6 +168,78 @@ apply_profile_production() {
     print_success "Production profile applied"
 }
 
+# Apply docker profile
+apply_profile_docker() {
+    print_info "Applying DOCKER profile (containerized deployment)"
+    echo
+
+    # Node IPs come from env vars (pre-set by Makefile)
+    INDEXER_NODES="${INDEXER_NODES:-}"
+    MANAGER_NODES="${MANAGER_NODES:-}"
+    DASHBOARD_NODES="${DASHBOARD_NODES:-}"
+    AGENT_NODES="${AGENT_NODES:-}"
+    DEPLOY_AGENTS="${DEPLOY_AGENTS:-true}"
+
+    # Basic settings
+    WAZUH_VERSION="${WAZUH_VERSION:-4.14.5}"
+    ENVIRONMENT="${ENVIRONMENT:-development}"
+    ORG_NAME="${ORG_NAME:-DockerTestOrg}"
+
+    # Network
+    INDEXER_HTTP_PORT="${INDEXER_HTTP_PORT:-9200}"
+    INDEXER_CLUSTER_NAME="${INDEXER_CLUSTER_NAME:-wazuh-docker}"
+    INDEXER_HEAP_SIZE="${INDEXER_HEAP_SIZE:-512m}"
+    MANAGER_API_PORT="${MANAGER_API_PORT:-55000}"
+    AGENT_PORT="${AGENT_PORT:-1514}"
+    DASHBOARD_PORT="${DASHBOARD_PORT:-443}"
+
+    # Security - auto-generate everything
+    CUSTOM_PASSWORDS="${CUSTOM_PASSWORDS:-false}"
+    API_USER="${API_USER:-wazuh}"
+    INDEXER_ADMIN_USER="${INDEXER_ADMIN_USER:-admin}"
+
+    # Certificates - self-signed
+    USE_SELF_SIGNED_CERTS="${USE_SELF_SIGNED_CERTS:-true}"
+    GENERATE_CERTS="${GENERATE_CERTS:-true}"
+    EXTERNAL_CA="${EXTERNAL_CA:-false}"
+
+    # SSH - generate key for container access
+    GENERATE_SSH_KEY="${GENERATE_SSH_KEY:-true}"
+    ANSIBLE_USER="${ANSIBLE_USER:-wazuh-deploy}"
+    ANSIBLE_SSH_PORT="${ANSIBLE_SSH_PORT:-22}"
+    USE_BECOME="${USE_BECOME:-true}"
+    SAME_SSH_CREDS="${SAME_SSH_CREDS:-true}"
+    INITIAL_SSH_USER="${INITIAL_SSH_USER:-root}"
+    DEFAULT_SSH_PASS="${DEFAULT_SSH_PASS:-}"
+    BECOME_PASS="${BECOME_PASS:-}"
+
+    # Features - all enabled for testing
+    ENABLE_VULN_DETECTION="${ENABLE_VULN_DETECTION:-true}"
+    ENABLE_FIM="${ENABLE_FIM:-true}"
+    ENABLE_ROOTKIT="${ENABLE_ROOTKIT:-true}"
+    ENABLE_SCA="${ENABLE_SCA:-true}"
+    ENABLE_SYSCOLLECTOR="${ENABLE_SYSCOLLECTOR:-true}"
+    ENABLE_LOG_COLLECTION="${ENABLE_LOG_COLLECTION:-true}"
+    ENABLE_ACTIVE_RESPONSE="${ENABLE_ACTIVE_RESPONSE:-true}"
+
+    # Integrations - disabled
+    ENABLE_EMAIL_ALERTS="${ENABLE_EMAIL_ALERTS:-false}"
+    ENABLE_SYSLOG_OUTPUT="${ENABLE_SYSLOG_OUTPUT:-false}"
+    ENABLE_SLACK="${ENABLE_SLACK:-false}"
+    ENABLE_VIRUSTOTAL="${ENABLE_VIRUSTOTAL:-false}"
+
+    # Backup - disabled for ephemeral containers
+    BACKUP_SCHEDULE="${BACKUP_SCHEDULE:-disabled}"
+    ENABLE_LOG_CLEANUP="${ENABLE_LOG_CLEANUP:-false}"
+    LOG_RETENTION_DAYS="${LOG_RETENTION_DAYS:-7}"
+    LOG_CLEANUP_SCHEDULE="${LOG_CLEANUP_SCHEDULE:-daily}"
+
+    # Client prep
+    CREATE_PREP_PACKAGE="${CREATE_PREP_PACKAGE:-false}"
+
+    print_success "Docker profile applied"
+}
+
 # Apply custom profile (no defaults, full interactive)
 apply_profile_custom() {
     print_info "Custom profile - all options will be prompted"
@@ -183,6 +256,9 @@ apply_profile() {
             ;;
         production)
             apply_profile_production
+            ;;
+        docker)
+            apply_profile_docker
             ;;
         custom)
             apply_profile_custom
@@ -208,7 +284,10 @@ select_profile() {
     echo -e "  ${YELLOW}2)${NC} ${BOLD}production${NC}  - Multi-node HA setup with all security features"
     echo -e "                   Prompts for node IPs, enables all features"
     echo
-    echo -e "  ${YELLOW}3)${NC} ${BOLD}custom${NC}      - Full interactive configuration"
+    echo -e "  ${YELLOW}3)${NC} ${BOLD}docker${NC}      - Docker container environment"
+    echo -e "                   Containerized deployment (single or Swarm)"
+    echo
+    echo -e "  ${YELLOW}4)${NC} ${BOLD}custom${NC}      - Full interactive configuration"
     echo -e "                   Configure every option manually"
     echo
 
@@ -229,12 +308,16 @@ select_profile() {
                 set_var "$var_name" "production"
                 return 0
                 ;;
-            3|custom)
+            3|docker)
+                set_var "$var_name" "docker"
+                return 0
+                ;;
+            4|custom)
                 set_var "$var_name" "custom"
                 return 0
                 ;;
             *)
-                print_error "Invalid selection. Please enter 1, 2, or 3"
+                print_error "Invalid selection. Please enter 1, 2, 3, or 4"
                 ;;
         esac
     done

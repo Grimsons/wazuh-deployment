@@ -32,7 +32,7 @@
         <description>Sysmon - Event 3: Network connection by $(eventdata.image)</description>
         <group>sysmon_event3</group>
         <mitre>
-         <id>T1043</id>
+         <id>T1571</id>
         </mitre>
         <options>no_full_log</options>
     </rule>
@@ -63,9 +63,9 @@
         <if_sid>200150</if_sid>
         <field name="system.eventID">^11$</field>
         <description>Sysmon - Event 11: FileCreate by $(eventdata.image)</description>
-	      <group>sysmon_event_11</group>
+        <group>sysmon_event_11</group>
         <mitre>
-         <id>T1044</id>
+         <id>T1574.010</id>
         </mitre>
         <options>no_full_log</options>
     </rule>
@@ -87,44 +87,44 @@
         <description>Sysmon - Event 23: FileDelete (A file delete was detected) by $(eventdata.image)</description>
         <group>sysmon_event_23</group>
         <mitre>
-         <id>T1107</id>
+         <id>T1070.004</id>
          <id>T1485</id>
         </mitre>
         <options>no_full_log</options>
     </rule>
 <!--Overrides-->
-<!--EventID = 3. Discrad events if Image = /var/ossec/bin/wazuh-agentd or Image = /usr/sbin/zabbix_agentd-->
+<!--EventID = 3. Discard events if Image = /var/ossec/bin/wazuh-agentd or Image = /usr/sbin/zabbix_agentd-->
     <rule id="200200" level="1">
         <if_sid>200152</if_sid>
         <field name="eventdata.image">wazuh-agentd$|zabbix_agentd$</field>
         <description>Sysmon - Event 3: Network connection by $(eventdata.image)</description>
         <group>sysmon_event3</group>
         <mitre>
-         <id>T1107</id>
+         <id>T1070.004</id>
          <id>T1485</id>
         </mitre>
         <options>no_full_log</options>
     </rule>
-<!--EventID = 11. Discrad events if Image = /var/ossec/bin/wazuh-agentd-->
+<!--EventID = 11. Discard events if Image = /var/ossec/bin/wazuh-agentd-->
     <rule id="200201" level="1">
         <if_sid>200155</if_sid>
         <field name="eventdata.image">wazuh-agentd$</field>
         <description>Sysmon - Event 11: FileCreate by $(eventdata.image)</description>
         <group>sysmon_event_11</group>
         <mitre>
-         <id>T1107</id>
+         <id>T1070.004</id>
          <id>T1485</id>
         </mitre>
         <options>no_full_log</options>
     </rule>
-<!--EventID = 23. Discrad events if Image = /var/ossec/bin/wazuh-agentd-->
+<!--EventID = 23. Discard events if Image = /var/ossec/bin/wazuh-agentd-->
     <rule id="200202" level="1">
         <if_sid>200157</if_sid>
         <field name="eventdata.image">wazuh-agentd$</field>
         <description>Sysmon - Event 23: FileDelete (A file delete was detected) by $(eventdata.image)</description>
         <group>sysmon_event_23</group>
         <mitre>
-         <id>T1107</id>
+         <id>T1070.004</id>
          <id>T1485</id>
         </mitre>
         <options>no_full_log</options>

@@ -10,7 +10,10 @@ The Makefile provides shortcuts for all common operations. Run `make help` to se
 |---------|-------------|
 | `make setup` | Run interactive CLI setup wizard |
 | `make setup-tui` | Run TUI setup (requires gum) |
+| `make setup-docker` | Run CLI setup with Docker container defaults |
 | `make check` | Validate prerequisites and configuration |
+| `make check-vault` | Validate vault.yml is encrypted |
+| `make check-docker` | Check Docker prerequisites |
 | `make deploy` | Deploy all Wazuh components |
 | `make deploy-bootstrap` | First-time deployment (bootstrap + all) |
 | `make deploy-check` | Dry-run deployment (no changes) |
@@ -18,11 +21,13 @@ The Makefile provides shortcuts for all common operations. Run `make help` to se
 | `make deploy-manager` | Deploy only manager nodes |
 | `make deploy-dashboard` | Deploy only dashboard nodes |
 | `make deploy-agent` | Deploy agents |
+| `make deploy-rules` | Deploy only custom rules and decoders |
 | `make health` | Run comprehensive health check |
 | `make status` | Quick status check of all services |
 | `make backup` | Create backup of Wazuh data |
 | `make restore BACKUP_ID=<id>` | Restore from backup |
 | `make upgrade` | Upgrade Wazuh to version in group_vars |
+| `make upgrade-check` | Check available upgrades (dry run) |
 | `make unlock` | Unlock deployment user for new deployment |
 | `make vault-view` | View vault credentials |
 | `make vault-edit` | Edit vault credentials |
@@ -32,8 +37,14 @@ The Makefile provides shortcuts for all common operations. Run `make help` to se
 | `make certs-rotate` | Rotate all certificates |
 | `make certs-renew` | Renew expiring certificates |
 | `make monitoring` | Enable Prometheus monitoring exporters |
-| `make test` | Run syntax and lint checks |
+| `make threat-intel` | Update threat intelligence feeds |
+| `make test` | Run all tests (syntax + lint + BATS) |
+| `make lint` | Run ansible-lint on all playbooks |
+| `make bats` | Run BATS unit tests for shell libraries |
+| `make setup-hooks` | Configure git pre-commit hooks |
 | `make clean` | Remove generated files (keeps vault and keys) |
+| `make clean-all` | Remove ALL generated files including vault and keys |
+| `make docker-setup` | Full Docker setup (containers + config + deploy) |
 
 ## Initial Setup
 
@@ -41,32 +52,55 @@ The Makefile provides shortcuts for all common operations. Run `make help` to se
 # Interactive setup (choose one)
 ./setup-tui.sh              # TUI (requires gum)
 ./setup.sh                  # Traditional CLI
+make setup-docker           # Docker environment defaults
+
+# Configure git pre-commit hooks (recommended)
+make setup-hooks
 
 # First-time deployment (bootstrap + deploy)
-ansible-playbook site.yml --tags bootstrap,all --ask-pass
+make deploy-bootstrap
+# Manual: ansible-playbook site.yml --tags bootstrap,all --ask-pass --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 # Subsequent deployments
-ansible-playbook site.yml
+make deploy
+# Manual: ansible-playbook site.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password
 ```
 
 ## Daily Operations
 
 | Task | Command |
 |------|---------|
-| **Deploy all** | `ansible-playbook site.yml` |
-| **Health check** | `ansible-playbook playbooks/health-check.yml` |
-| **Quick status** | `./scripts/status.sh` |
-| **View credentials** | `./scripts/manage-vault.sh view` |
-| **Backup** | `ansible-playbook playbooks/backup.yml` |
+| **Deploy all** | `make deploy` |
+| **Health check** | `make health` |
+| **Quick status** | `make status` |
+| **View credentials** | `make vault-view` |
+| **Backup** | `make backup` |
+
+## Docker Test Environment
+
+```bash
+# Check prerequisites
+make check-docker
+
+# Quick config with Docker defaults (containers must be running)
+make setup-docker
+
+# Full automated setup (containers + config + bootstrap + deploy)
+make docker-setup
+```
+
+Starts 4 systemd containers: indexer-1, manager-1, dashboard-1, agent-1.
+Dashboard: `https://localhost:443`
 
 ## Before Redeployment
 
 ```bash
 # Unlock deployment user (locked after each deploy)
-ansible-playbook unlock-deploy-user.yml
+make unlock
+# Manual: ansible-playbook unlock-deploy-user.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 # Then deploy
-ansible-playbook site.yml
+make deploy
 ```
 
 ## Scripts
@@ -226,11 +260,13 @@ curl -k -u wazuh:PASSWORD https://MANAGER:55000/agents?pretty
 
 | File | Purpose |
 |------|---------|
-| `.vault_password` | Vault encryption key (BACKUP THIS!) |
+| `~/.config/wazuh-deployment/.vault_password` | Vault decryption key (BACKUP THIS!) |
 | `inventory/hosts.yml` | Main inventory |
+| `inventory/docker-hosts.yml` | Docker test environment inventory |
 | `group_vars/all/main.yml` | Configuration variables |
 | `group_vars/all/vault.yml` | Encrypted credentials |
 | `keys/wazuh_ansible_key` | SSH private key |
+| `.githooks/pre-commit` | Pre-commit hook (vault encryption check) |
 | `backups/` | Vault backups from credential rotation |
 
 ## Environment Variables
@@ -241,4 +277,7 @@ ansible-playbook site.yml -vvv
 
 # Dry run (check mode)
 ansible-playbook site.yml --check
+
+# Specify vault password file
+ansible-playbook site.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password
 ```

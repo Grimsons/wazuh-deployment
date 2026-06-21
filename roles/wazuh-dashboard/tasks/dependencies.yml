@@ -20,9 +20,11 @@
     path: "{{ wazuh_dashboard_package_download_path }}"
     state: directory
     mode: '0755'
+  become: true
 
 - name: RHEL, CentOS, and Amazon Linux 2 | Configure system settings and install dependencies
   when: ansible_facts.os_family == 'RedHat'
+  become: true
   block:
     - name: RedHat/CentOS/Fedora | Install Dashboard dependencies
       ansible.builtin.dnf:
@@ -51,6 +53,7 @@
 
 - name: Debian-based systems | Install Wazuh dashboard dependencies and download package
   when: ansible_facts.os_family == 'Debian'
+  become: true
   block:
     - name: Debian-based | Install Dashboard dependencies
       ansible.builtin.apt:

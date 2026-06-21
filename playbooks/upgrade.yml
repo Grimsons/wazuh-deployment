@@ -9,36 +9,36 @@
 #
 # How it works:
 #   - Uses native package managers with state=latest
-#   - Compares installed version against wazuh_version in group_vars/all.yml
+#   - Compares installed version against wazuh_version in group_vars/all/main.yml
 #   - Only stops/starts services if an upgrade is actually needed
 #   - Creates automatic backup before any changes
 #
 # Usage:
 #   # Check current versions only (no changes)
-#   ansible-playbook playbooks/upgrade.yml --tags check
+#   ansible-playbook playbooks/upgrade.yml -i inventory/hosts.yml --tags check
 #
 #   # Full upgrade (uses Wazuh repository's latest packages)
-#   ansible-playbook playbooks/upgrade.yml
+#   ansible-playbook playbooks/upgrade.yml -i inventory/hosts.yml
 #
 #   # Upgrade specific components
-#   ansible-playbook playbooks/upgrade.yml --tags indexer
-#   ansible-playbook playbooks/upgrade.yml --tags manager
-#   ansible-playbook playbooks/upgrade.yml --tags dashboard
+#   ansible-playbook playbooks/upgrade.yml -i inventory/hosts.yml --tags indexer
+#   ansible-playbook playbooks/upgrade.yml -i inventory/hosts.yml --tags manager
+#   ansible-playbook playbooks/upgrade.yml -i inventory/hosts.yml --tags dashboard
 #
 #   # Include agent upgrades (disabled by default)
-#   ansible-playbook playbooks/upgrade.yml -e "upgrade_agents=true"
+#   ansible-playbook playbooks/upgrade.yml -i inventory/hosts.yml -e "upgrade_agents=true"
 #
 #   # Skip backup (not recommended)
-#   ansible-playbook playbooks/upgrade.yml -e "backup_before_upgrade=false"
+#   ansible-playbook playbooks/upgrade.yml -i inventory/hosts.yml -e "backup_before_upgrade=false"
 #
 #   # Skip confirmation prompt
-#   ansible-playbook playbooks/upgrade.yml -e "skip_confirmation=true"
+#   ansible-playbook playbooks/upgrade.yml -i inventory/hosts.yml -e "skip_confirmation=true"
 #
 # IMPORTANT:
 #   - Backup is created automatically before any upgrade
 #   - Upgrade order: Indexer → Manager → Dashboard → Agents
 #   - For clusters: Rolling upgrade one node at a time
-#   - Update wazuh_version in group_vars/all.yml to match target version
+#   - Update wazuh_version in group_vars/all/main.yml to match target version
 #
 # Rollback:
 #   ansible-playbook playbooks/restore.yml -e "restore_from=pre-upgrade-TIMESTAMP"
@@ -65,12 +65,12 @@
         that:
           - target_version is defined
           - target_version | length > 0
-          - target_version is regex('^[0-9]+\.[0-9]+\.[0-9]+$')
+          - target_version is regex('^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$')
         fail_msg: |
           ERROR: Invalid or missing target version!
 
-          Specify version with: -e "target_version=4.15.0"
-          Or set wazuh_version in group_vars/all.yml
+          Specify version with: -e "target_version=5.0.0-beta2"
+           Or set wazuh_version in group_vars/all/main.yml
 
           Current value: {{ target_version | default('not set') }}
         success_msg: "Target version: {{ target_version }}"
@@ -285,7 +285,7 @@
         - name: Run backup playbook
           ansible.builtin.command:
             cmd: >
-              ansible-playbook {{ playbook_dir }}/backup.yml
+              ansible-playbook {{ playbook_dir | quote }}/backup.yml
               -e "backup_dest={{ playbook_dir }}/../backups"
               -e "backup_timestamp=pre-upgrade-{{ upgrade_timestamp }}"
               -e "backup_indexer=true"
@@ -354,7 +354,7 @@
             cluster.routing.allocation.enable: "primaries"
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200]
       register: shard_allocation
       delegate_to: localhost
@@ -367,7 +367,7 @@
         method: POST
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 409]  # 409 is OK if some shards couldn't sync
       delegate_to: localhost
       when: groups['wazuh_indexers'] | length > 1
@@ -457,12 +457,12 @@
         export JAVA_HOME=/usr/share/wazuh-indexer/jdk
         /usr/share/wazuh-indexer/plugins/opensearch-security/tools/securityadmin.sh \
           -cd /etc/wazuh-indexer/opensearch-security \
-          -cacert {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') }}/root-ca.pem \
-          -cert {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') }}/admin.pem \
-          -key {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') }}/admin-key.pem \
+          -cacert {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') | quote }}/root-ca.pem \
+          -cert {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') | quote }}/admin.pem \
+          -key {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') | quote }}/admin-key.pem \
           -h 127.0.0.1 \
-          -p {{ wazuh_indexer_http_port | default(9200) }} \
-          -icl -nhnv
+          -p {{ wazuh_indexer_http_port | default(9200) | quote }} \
+          -icl
       become: true
       register: security_reapply
       when: indexer_needs_upgrade
@@ -481,7 +481,7 @@
         method: GET
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200]
       register: cluster_health
       until: cluster_health.status == 200
@@ -500,7 +500,7 @@
             cluster.routing.allocation.enable: null
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200]
       delegate_to: localhost
       when:
@@ -513,7 +513,7 @@
         method: GET
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200]
       register: cluster_stable
       delegate_to: localhost
@@ -639,7 +639,7 @@
       ansible.builtin.uri:
         url: "https://{{ inventory_hostname }}:{{ wazuh_manager_api_port | default(55000) }}/"
         method: GET
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 401]  # 401 is OK - means API is responding
       register: api_health
       until: api_health.status in [200, 401]
@@ -755,7 +755,7 @@
         method: GET
         user: "admin"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 302]
       register: dashboard_health
       until: dashboard_health.status in [200, 302]
@@ -902,7 +902,7 @@
         method: GET
         user: "{{ wazuh_indexer_admin_user | default('admin') }}"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         return_content: true
       register: indexer_health
       failed_when: false
@@ -912,7 +912,7 @@
       ansible.builtin.uri:
         url: "https://{{ hostvars[groups['wazuh_managers'][0]]['ansible_host'] | default(groups['wazuh_managers'][0]) }}:{{ wazuh_manager_api_port | default(55000) }}/"
         method: GET
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 401]
       register: manager_api
       failed_when: false
@@ -922,7 +922,7 @@
       ansible.builtin.uri:
         url: "https://{{ hostvars[groups['wazuh_dashboards'][0]]['ansible_host'] | default(groups['wazuh_dashboards'][0]) }}:{{ wazuh_dashboard_port | default(443) }}/api/status"
         method: GET
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 401, 302]
       register: dashboard_status
       failed_when: false

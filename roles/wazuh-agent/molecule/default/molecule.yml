@@ -1,0 +1,43 @@
+---
+dependency:
+  name: galaxy
+  options:
+    requirements-file: ../../../../requirements.yml
+
+driver:
+  name: docker
+
+platforms:
+  - name: wazuh-agent-ubuntu
+    image: geerlingguy/docker-ubuntu2404-ansible:latest
+    pre_build_image: true
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    command: /lib/systemd/systemd
+
+  - name: wazuh-agent-rocky
+    image: geerlingguy/docker-rockylinux9-ansible:latest
+    pre_build_image: true
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    command: /usr/lib/systemd/systemd
+
+provisioner:
+  name: ansible
+  inventory:
+    group_vars:
+      all:
+        wazuh_version: "4.14.5"
+        wazuh_manager_nodes:
+          - name: manager-1
+            ip: 127.0.0.1
+        wazuh_agent_enrollment_password: "{{ vault_wazuh_agent_enrollment_password }}"
+        wazuh_ssl_verify_certificates: false
+        wazuh_agent_auditd_enabled: false
+
+verifier:
+  name: ansible

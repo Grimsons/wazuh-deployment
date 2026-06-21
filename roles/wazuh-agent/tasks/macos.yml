@@ -10,20 +10,41 @@
     path: /tmp/wazuh
     state: directory
     mode: '0755'
+  become: true
+
+- name: Assert macOS agent SHA256 is not the placeholder value
+  ansible.builtin.assert:
+    that:
+      - wazuh_agent_macos_sha256 != "sha256:PLACEHOLDER_VERIFY_BEFORE_USE"
+    fail_msg: >
+      wazuh_agent_macos_sha256 is set to the placeholder value.
+      Download the PKG from https://packages.wazuh.com/4.x/macos/,
+      run sha256sum on it, and set the real hash in group_vars/all/main.yml.
 
 - name: Download Wazuh Agent PKG installer
   ansible.builtin.get_url:
     url: "https://packages.wazuh.com/4.x/macos/wazuh-agent-{{ wazuh_version }}-1.pkg"
     dest: /tmp/wazuh/wazuh-agent.pkg
+    checksum: "{{ wazuh_agent_macos_sha256 }}"
     mode: '0644'
 
+- name: Check if Wazuh agent is already installed at correct version (macOS)
+  ansible.builtin.command: /usr/bin/pkgutil --pkg-info com.wazuh.pkg.wazuh-agent
+  register: wazuh_pkg_info
+  changed_when: false
+  failed_when: false
+  become: false
+
 - name: Install Wazuh Agent
-  ansible.builtin.command: |
-    installer -pkg /tmp/wazuh/wazuh-agent.pkg -target /
+  ansible.builtin.command:
+    cmd: installer -pkg /tmp/wazuh/wazuh-agent.pkg -target /
+    creates: /Library/Ossec
   become: true
   environment:
     WAZUH_MANAGER: "{{ wazuh_manager_address }}"
-  changed_when: true
+  when: >
+    wazuh_pkg_info.rc != 0 or
+    wazuh_version not in (wazuh_pkg_info.stdout | default(''))
 
 - name: Configure Wazuh Agent for macOS
   ansible.builtin.template:
@@ -57,6 +78,7 @@
     group: wazuh
     mode: '0640'
   become: true
+  no_log: true
   when:
     - wazuh_authd_use_password | default(true)
     - wazuh_agent_enrollment_password is defined
@@ -65,9 +87,10 @@
 - name: Load Wazuh Agent service
   ansible.builtin.command: /Library/Ossec/bin/wazuh-control start
   become: true
-  changed_when: true
+  changed_when: false
 
 - name: Clean up temp files
   ansible.builtin.file:
     path: /tmp/wazuh
     state: absent
+  become: true

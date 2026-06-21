@@ -1,0 +1,115 @@
+---
+- name: Bootstrap Docker containers for Ansible management
+  hosts: all
+  gather_facts: false
+  become: false
+  vars:
+    ansible_become: false
+  tasks:
+    - name: Check that SSH key exists (from setup.sh)
+      ansible.builtin.stat:
+        path: /tmp/opencode/wazuh_ansible_key.pub
+      delegate_to: localhost
+      run_once: true
+      register: ssh_key_stat
+
+    - name: Fail if SSH key not found
+      ansible.builtin.fail:
+        msg: |
+          SSH key not found at /tmp/opencode/wazuh_ansible_key.pub.
+          Run setup.sh first to generate configuration and SSH keys:
+            ./setup.sh
+      when: not ssh_key_stat.stat.exists
+
+    - name: Read SSH public key
+      ansible.builtin.slurp:
+        src: /tmp/opencode/wazuh_ansible_key.pub
+      register: ssh_pub_key
+      delegate_to: localhost
+      run_once: true
+
+    - name: Set SSH key fact
+      ansible.builtin.set_fact:
+        wazuh_pubkey: "{{ ssh_pub_key.content | b64decode | trim }}"
+
+    - name: Install SSH server if missing
+      ansible.builtin.shell: |
+        docker exec {{ inventory_hostname }} bash -c '
+          if ! command -v sshd &>/dev/null && ! systemctl list-unit-files ssh.service &>/dev/null; then
+            if command -v apt-get &>/dev/null; then
+              apt-get update -qq && apt-get install -y -qq openssh-server
+            elif command -v dnf &>/dev/null; then
+              dnf install -y openssh-server
+            elif command -v yum &>/dev/null; then
+              yum install -y openssh-server
+            fi
+          fi
+        '
+      changed_when: false
+      delegate_to: localhost
+
+    - name: Ensure SSH is running inside container
+      ansible.builtin.shell: |
+        docker exec {{ inventory_hostname }} bash -c '
+          if command -v systemctl &>/dev/null; then
+            systemctl enable sshd.service 2>/dev/null || true
+            systemctl start sshd.service 2>/dev/null || true
+            systemctl enable ssh.service 2>/dev/null || true
+            systemctl start ssh.service 2>/dev/null || true
+          fi
+        '
+      changed_when: false
+      delegate_to: localhost
+
+    - name: Create wazuh-deploy user
+      ansible.builtin.shell: |
+        docker exec {{ inventory_hostname }} bash -c '
+          if ! id wazuh-deploy &>/dev/null; then
+            useradd --create-home --shell /bin/bash --comment "Wazuh Ansible Deployment User" wazuh-deploy
+            echo "wazuh-deploy ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/wazuh-deploy
+            chmod 0440 /etc/sudoers.d/wazuh-deploy
+          fi
+        '
+      changed_when: false
+      delegate_to: localhost
+
+    - name: Install SSH key for wazuh-deploy
+      ansible.builtin.shell: |
+        docker exec {{ inventory_hostname }} bash -c '
+          mkdir -p /home/wazuh-deploy/.ssh
+          echo "{{ wazuh_pubkey }}" > /home/wazuh-deploy/.ssh/authorized_keys
+          chown -R wazuh-deploy:wazuh-deploy /home/wazuh-deploy/.ssh
+          chmod 0700 /home/wazuh-deploy/.ssh
+          chmod 0600 /home/wazuh-deploy/.ssh/authorized_keys
+        '
+      changed_when: false
+      delegate_to: localhost
+
+    - name: Allow root SSH with key
+      ansible.builtin.shell: |
+        docker exec {{ inventory_hostname }} bash -c '
+          mkdir -p /root/.ssh
+          echo "{{ wazuh_pubkey }}" >> /root/.ssh/authorized_keys
+          chmod 0700 /root/.ssh
+          chmod 0600 /root/.ssh/authorized_keys
+        '
+      changed_when: false
+      delegate_to: localhost
+
+    - name: Verify SSH connectivity
+      ansible.builtin.shell: |
+        ssh -i /tmp/opencode/wazuh_ansible_key \
+          -o StrictHostKeyChecking=accept-new \
+          -o UserKnownHostsFile=/dev/null \
+          -o BatchMode=yes \
+          -p {{ ansible_port | default(22) }} \
+          wazuh-deploy@{{ ansible_host }} \
+          'echo SSH_OK'
+      register: ssh_test
+      changed_when: false
+      delegate_to: localhost
+      failed_when: "'SSH_OK' not in ssh_test.stdout"
+
+    - name: Bootstrap complete
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }} — SSH key auth OK, sudo configured"

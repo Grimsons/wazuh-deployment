@@ -3,40 +3,123 @@
 # Filebeat forwards alerts from the manager to the Wazuh Indexer
 # Indexer credentials are sourced from Ansible Vault via group_vars
 
-- name: Check if Filebeat is already installed
+- name: Assert filebeat module SHA256 is not the placeholder value
+  ansible.builtin.assert:
+    that:
+      - wazuh_filebeat_module_sha256 != "sha256:f5cdad5d3559c0b2be34f73f7f6c5fc8f25e6a1a4d2a9d8e64e0c8a3b6c7f8d2"
+    fail_msg: >
+      wazuh_filebeat_module_sha256 is set to the placeholder value in
+      roles/wazuh-manager/defaults/main.yml. Download the module once, run
+      sha256sum on it, and set the real hash in group_vars/all/main.yml.
+  when: wazuh_filebeat_module_sha256 is defined
+
+- name: Check if Filebeat is already installed (Debian)
   ansible.builtin.shell: dpkg -l filebeat 2>/dev/null | grep -q '^ii'
-  register: filebeat_installed
+  register: filebeat_installed_deb
   changed_when: false
   failed_when: false
   become: true
+  when: ansible_os_family == 'Debian'
 
-- name: Download Filebeat OSS package
+- name: Check if Filebeat is already installed (RedHat)
+  ansible.builtin.shell: rpm -q filebeat 2>/dev/null
+  register: filebeat_installed_rpm
+  changed_when: false
+  failed_when: false
+  become: true
+  when: ansible_os_family == 'RedHat'
+
+- name: Set filebeat_installed fact
+  ansible.builtin.set_fact:
+    filebeat_installed_rc: >-
+      {{ (ansible_os_family == 'Debian') | ternary(
+           filebeat_installed_deb.rc | default(1),
+           filebeat_installed_rpm.rc | default(1)
+         ) }}
+
+- name: Download Filebeat OSS package (Debian)
   ansible.builtin.get_url:
     url: "https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-oss-{{ wazuh_filebeat_version | default('7.10.2') }}-amd64.deb"
     dest: "/tmp/filebeat-oss-{{ wazuh_filebeat_version | default('7.10.2') }}-amd64.deb"
+    checksum: "{{ wazuh_filebeat_deb_sha256 }}"
     mode: '0644'
-  when: filebeat_installed.rc != 0
+    timeout: 60
+  when:
+    - ansible_os_family == 'Debian'
+    - filebeat_installed_rc | int != 0
   become: true
+  register: filebeat_deb_download
+  retries: 3
+  delay: 5
+  until: filebeat_deb_download is succeeded
 
-- name: Install Filebeat OSS
+- name: Install Filebeat OSS (Debian)
   ansible.builtin.apt:
     deb: "/tmp/filebeat-oss-{{ wazuh_filebeat_version | default('7.10.2') }}-amd64.deb"
     state: present
-  when: filebeat_installed.rc != 0
+  when:
+    - ansible_os_family == 'Debian'
+    - filebeat_installed_rc | int != 0
+  become: true
+
+- name: Download Filebeat OSS package (RedHat)
+  ansible.builtin.get_url:
+    url: "https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-oss-{{ wazuh_filebeat_version | default('7.10.2') }}-x86_64.rpm"
+    dest: "/tmp/filebeat-oss-{{ wazuh_filebeat_version | default('7.10.2') }}-x86_64.rpm"
+    checksum: "{{ wazuh_filebeat_rpm_sha256 }}"
+    mode: '0644'
+    timeout: 60
+  when:
+    - ansible_os_family == 'RedHat'
+    - filebeat_installed_rc | int != 0
+  become: true
+  register: filebeat_rpm_download
+  retries: 3
+  delay: 5
+  until: filebeat_rpm_download is succeeded
+
+- name: Install Filebeat OSS (RedHat)
+  ansible.builtin.yum:
+    name: "/tmp/filebeat-oss-{{ wazuh_filebeat_version | default('7.10.2') }}-x86_64.rpm"
+    state: present
+    disable_gpg_check: true
+  when:
+    - ansible_os_family == 'RedHat'
+    - filebeat_installed_rc | int != 0
   become: true
 
 - name: Download Wazuh Filebeat module
+  ansible.builtin.get_url:
+    url: "https://packages.wazuh.com/4.x/filebeat/wazuh-filebeat-0.4.tar.gz"
+    dest: "/tmp/wazuh-filebeat-0.4.tar.gz"
+    checksum: "{{ wazuh_filebeat_module_sha256 }}"
+    mode: '0644'
+  become: true
+  when: not ('/usr/share/filebeat/module/wazuh' is directory)
+
+- name: Extract Wazuh Filebeat module
   ansible.builtin.unarchive:
-    src: "https://packages.wazuh.com/4.x/filebeat/wazuh-filebeat-0.4.tar.gz"
+    src: "/tmp/wazuh-filebeat-0.4.tar.gz"
     dest: /usr/share/filebeat/module
     remote_src: true
     creates: /usr/share/filebeat/module/wazuh
   become: true
 
+- name: Assert filebeat template SHA256 is not the placeholder value
+  ansible.builtin.assert:
+    that:
+      - wazuh_filebeat_template_sha256 != "sha256:PLACEHOLDER_VERIFY_BEFORE_USE"
+    fail_msg: >
+      wazuh_filebeat_template_sha256 is set to the placeholder value.
+      Download wazuh-template.json for wazuh_version={{ wazuh_version }},
+      run sha256sum on it, and set the real hash in group_vars/all/main.yml.
+  when: wazuh_filebeat_template_sha256 is defined
+
 - name: Download Wazuh alerts template
   ansible.builtin.get_url:
     url: "https://raw.githubusercontent.com/wazuh/wazuh/v{{ wazuh_version }}/extensions/elasticsearch/7.x/wazuh-template.json"
     dest: /etc/filebeat/wazuh-template.json
+    checksum: "{{ wazuh_filebeat_template_sha256 }}"
     mode: '0644'
   become: true
 
@@ -51,7 +134,7 @@
 
 - name: Copy root CA certificate for Filebeat
   ansible.builtin.copy:
-    src: /var/ossec/etc/certs/root-ca.pem
+    src: "{{ wazuh_manager_certs_path }}/root-ca.pem"
     dest: /etc/filebeat/certs/root-ca.pem
     remote_src: true
     owner: root
@@ -61,7 +144,7 @@
 
 - name: Copy server certificate for Filebeat
   ansible.builtin.copy:
-    src: /var/ossec/etc/certs/server.pem
+    src: "{{ wazuh_manager_certs_path }}/{{ wazuh_manager_cert_name }}.pem"
     dest: /etc/filebeat/certs/filebeat.pem
     remote_src: true
     owner: root
@@ -71,7 +154,7 @@
 
 - name: Copy server key for Filebeat
   ansible.builtin.copy:
-    src: /var/ossec/etc/certs/server-key.pem
+    src: "{{ wazuh_manager_certs_path }}/{{ wazuh_manager_cert_name }}-key.pem"
     dest: /etc/filebeat/certs/filebeat-key.pem
     remote_src: true
     owner: root
@@ -80,7 +163,7 @@
   become: true
 
 - name: Verify Filebeat certificate files
-  ansible.builtin.command: openssl x509 -noout -subject -issuer -dates -in /etc/filebeat/certs/{{ item }}
+  ansible.builtin.command: openssl x509 -noout -subject -issuer -dates -in /etc/filebeat/certs/{{ item | quote }}
   become: true
   register: filebeat_cert_verify
   changed_when: false
@@ -90,9 +173,9 @@
 
 - name: Verify Filebeat key matches certificate
   ansible.builtin.shell: |
-    CERT_MOD=$(openssl x509 -noout -modulus -in /etc/filebeat/certs/filebeat.pem 2>&1 | openssl md5)
-    KEY_MOD=$(openssl rsa -noout -modulus -in /etc/filebeat/certs/filebeat-key.pem 2>&1 | openssl md5)
-    if [ "$CERT_MOD" = "$KEY_MOD" ]; then echo "MATCH: cert and key modulus match"; else echo "MISMATCH: cert=$CERT_MOD key=$KEY_MOD"; exit 1; fi
+    CERT_PUB=$(openssl x509 -pubkey -noout -in /etc/filebeat/certs/filebeat.pem 2>&1 | openssl md5)
+    KEY_PUB=$(openssl pkey -pubout -in /etc/filebeat/certs/filebeat-key.pem 2>&1 | openssl md5)
+    if [ "$CERT_PUB" = "$KEY_PUB" ]; then echo "MATCH: cert and key modulus match"; else echo "MISMATCH: cert=$CERT_PUB key=$KEY_PUB"; exit 1; fi
   become: true
   register: filebeat_key_match
   changed_when: false
@@ -105,7 +188,9 @@
     group: root
     mode: '0600'
   become: true
+  no_log: true
   notify: restart filebeat
+  register: filebeat_config_deployed
 
 # Filebeat 7.10.2 has two Go runtime issues on modern Linux:
 #
@@ -146,6 +231,8 @@
     group: root
     mode: '0644'
   become: true
+  notify: restart filebeat
+  register: filebeat_systemd_unit_deployed
 
 - name: Remove legacy systemd drop-in directory for Filebeat
   ansible.builtin.file:
@@ -181,8 +268,9 @@
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
       register: indexer_precheck
+      no_log: true
       retries: 3
       delay: 10
       until: indexer_precheck.status | default(0) == 200
@@ -225,6 +313,9 @@
         name: filebeat
         state: restarted
       become: true
+      when: >-
+        (filebeat_config_deployed is defined and filebeat_config_deployed is changed)
+        or (filebeat_systemd_unit_deployed is defined and filebeat_systemd_unit_deployed is changed)
 
     - name: Verify Filebeat service is running
       ansible.builtin.systemd:

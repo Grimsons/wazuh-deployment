@@ -4,24 +4,61 @@
 # All passwords are managed through Ansible Vault
 
 - name: Generate random API password
-  ansible.builtin.set_fact:
-    wazuh_api_password_generated: "{{ lookup('password', '/dev/null length=20 chars=ascii_letters,digits') }}@#"
+  ansible.builtin.shell: |
+    pass=$(LC_ALL=C tr -dc 'A-Za-z0-9@^_+=-' < /dev/urandom | head -c 20)
+    pass="${pass}$(LC_ALL=C tr -dc 'A-Z' < /dev/urandom | head -c 1)"
+    pass="${pass}$(LC_ALL=C tr -dc 'a-z' < /dev/urandom | head -c 1)"
+    pass="${pass}$(LC_ALL=C tr -dc '0-9' < /dev/urandom | head -c 1)"
+    symbols='@^_+-='
+    sym_idx=$(head -c 4 /dev/urandom | od -An -tu4 | tr -d ' ')
+    pass="${pass}${symbols:$((sym_idx % 6)):1}"
+    echo "$pass" | fold -w1 | shuf --random-source=/dev/urandom | tr -d '\n'
+  args:
+    executable: /bin/bash
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_become: false
+  register: _api_pw_shell
+  changed_when: false
   run_once: true
+  no_log: true
   when: wazuh_api_password_generated is not defined
+
+- name: Set generated API password fact
+  ansible.builtin.set_fact:
+    wazuh_api_password_generated: "{{ _api_pw_shell.stdout | trim }}"
+  run_once: true
+  no_log: true
+  when:
+    - wazuh_api_password_generated is not defined
+    - _api_pw_shell is not skipped
 
 - name: Set API password (use provided or generated)
   ansible.builtin.set_fact:
-    wazuh_api_password: "{{ wazuh_api_password | default(wazuh_api_password_generated) }}"
+    wazuh_api_password: "{{ wazuh_api_password if (wazuh_api_password is defined and wazuh_api_password | length > 0) else wazuh_api_password_generated }}"
   run_once: true
+  no_log: true
+
+- name: Validate API password meets requirements
+  ansible.builtin.assert:
+    that:
+      - wazuh_api_password is defined
+      - wazuh_api_password | length > 0
+      - wazuh_api_password | length >= 8
+    fail_msg: "API password must be defined and at least 8 characters. Check vault_wazuh_api_password in vault."
+    success_msg: "API password validation passed"
+  run_once: true
+  no_log: true
 
 - name: Authenticate with default credentials
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}/security/user/authenticate"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_manager_api_port }}/security/user/authenticate"
     method: POST
     user: "{{ wazuh_api_user }}"
     password: "{{ wazuh_api_default_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     return_content: true
   register: auth_response
   run_once: true
@@ -31,7 +68,10 @@
 - name: Debug auth response status
   ansible.builtin.debug:
     msg: "Auth response status: {{ auth_response.status | default('undefined') }}"
-  when: auth_response is defined and auth_response is not skipped
+  when:
+    - wazuh_debug | default(false)
+    - auth_response is defined
+    - auth_response is not skipped
   run_once: true
 
 - name: Extract JWT token
@@ -43,11 +83,11 @@
 
 - name: Get current user ID
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}/security/users"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_manager_api_port }}/security/users"
     method: GET
     headers:
       Authorization: "Bearer {{ wazuh_jwt_token }}"
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     return_content: true
   register: users_response
   when: wazuh_jwt_token is defined
@@ -61,14 +101,14 @@
 
 - name: Update API user password
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}/security/users/{{ wazuh_user_id }}"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_manager_api_port }}/security/users/{{ wazuh_user_id }}"
     method: PUT
     headers:
       Authorization: "Bearer {{ wazuh_jwt_token }}"
     body_format: json
     body:
       password: "{{ wazuh_api_password }}"
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200]
   register: password_update
   until: password_update.status | default(0) == 200
@@ -102,12 +142,12 @@
 # On re-runs, verify the vault password works against the API
 - name: Authenticate with configured password (re-run)
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}/security/user/authenticate"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_manager_api_port }}/security/user/authenticate"
     method: POST
     user: "{{ wazuh_api_user }}"
     password: "{{ wazuh_api_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     return_content: true
     status_code: [200, 401]
   register: rerun_auth_response
@@ -132,3 +172,18 @@
     - rerun_auth_response is not skipped
     - rerun_auth_response.status | default(0) != 200
   run_once: true
+
+- name: Assert default API credentials have been rotated
+  ansible.builtin.uri:
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_manager_api_port }}/security/user/authenticate"
+    method: POST
+    user: "{{ wazuh_api_user }}"
+    password: "{{ wazuh_api_default_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    status_code: [401, 403]
+  register: default_api_cred_check
+  failed_when: default_api_cred_check.status not in [401, 403]
+  changed_when: false
+  run_once: true
+  no_log: true

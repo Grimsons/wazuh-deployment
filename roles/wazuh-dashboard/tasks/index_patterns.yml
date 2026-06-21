@@ -4,17 +4,18 @@
 
 - name: Wait for dashboard API to be fully available
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/api/status"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/api/status"
     method: GET
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200]
   register: api_status
   until: api_status.status == 200 and api_status.json.status.overall.state == "green"
   retries: 30
   delay: 10
+  no_log: true
 
 - name: Define index patterns to create
   ansible.builtin.set_fact:
@@ -31,16 +32,17 @@
 
 - name: Check existing index patterns
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/api/saved_objects/_find?type=index-pattern&per_page=100"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/api/saved_objects/_find?type=index-pattern&per_page=100"
     method: GET
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     headers:
       osd-xsrf: "true"
     status_code: [200]
   register: existing_patterns
+  no_log: true
 
 - name: Extract existing pattern IDs
   ansible.builtin.set_fact:
@@ -48,12 +50,12 @@
 
 - name: Get field list for each index pattern
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/api/index_patterns/_fields_for_wildcard?pattern={{ item.title }}&meta_fields=_source&meta_fields=_id&meta_fields=_type&meta_fields=_index&meta_fields=_score"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/api/index_patterns/_fields_for_wildcard?pattern={{ item.title }}&meta_fields=_source&meta_fields=_id&meta_fields=_type&meta_fields=_index&meta_fields=_score"
     method: GET
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     headers:
       osd-xsrf: "true"
     status_code: [200]
@@ -62,15 +64,16 @@
   loop_control:
     label: "{{ item.title }}"
   ignore_errors: true
+  no_log: true
 
 - name: Create or update index patterns with field mappings
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/api/saved_objects/index-pattern/{{ item.0.id }}?overwrite=true"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/api/saved_objects/index-pattern/{{ item.0.id }}?overwrite=true"
     method: POST
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     headers:
       osd-xsrf: "true"
       Content-Type: "application/json"
@@ -87,15 +90,16 @@
   when: item.1.status is defined and item.1.status == 200
   register: pattern_creation
   ignore_errors: true
+  no_log: true
 
 - name: Set default index pattern to wazuh-alerts-*
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_dashboard_port }}/api/opensearch-dashboards/settings/defaultIndex"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/api/opensearch-dashboards/settings/defaultIndex"
     method: POST
     user: "{{ wazuh_indexer_admin_user }}"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     headers:
       osd-xsrf: "true"
       Content-Type: "application/json"
@@ -104,6 +108,7 @@
       value: "wazuh-alerts-*"
     status_code: [200, 400]
   ignore_errors: true
+  no_log: true
 
 - name: Display index pattern setup result
   ansible.builtin.debug:

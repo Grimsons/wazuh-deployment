@@ -5,14 +5,48 @@
 wazuh_manager_package_name: "wazuh-manager"
 wazuh_manager_service_name: "wazuh-manager"
 
-# Repository settings
-wazuh_repo_gpg_key: "https://packages.wazuh.com/key/GPG-KEY-WAZUH"
-wazuh_repo_url_apt: "https://packages.wazuh.com/4.x/apt/"
-wazuh_repo_url_yum: "https://packages.wazuh.com/4.x/yum/"
+# Binary prefix for Wazuh binaries (e.g. "wazuh-"). All Wazuh 4.x and 5.x
+# manager binaries use this prefix (wazuh-analysisd, wazuh-keystore, etc.)
+wazuh_manager_binary_prefix: "wazuh-"
+
+# Repository settings (version-aware)
+# Production releases (e.g. 4.14.5) use packages.wazuh.com
+# Pre-release versions (e.g. 5.0.0-beta2) use packages-staging.xdrsiem.wazuh.info
+wazuh_repo_gpg_key: >-
+  {{ 'https://packages-staging.xdrsiem.wazuh.info/key/GPG-KEY-WAZUH'
+     if (wazuh_version is search('-'))
+     else 'https://packages.wazuh.com/key/GPG-KEY-WAZUH' }}
+wazuh_repo_url_apt: >-
+  {{ 'https://packages-staging.xdrsiem.wazuh.info/pre-release/' + (wazuh_version.split('.')[0] + '.x') + '/apt/'
+     if (wazuh_version is search('-'))
+     else 'https://packages.wazuh.com/' + (wazuh_version.split('.')[0] + '.x') + '/apt/' }}
+wazuh_repo_url_yum: >-
+  {{ 'https://packages-staging.xdrsiem.wazuh.info/pre-release/' + (wazuh_version.split('.')[0] + '.x') + '/yum/'
+     if (wazuh_version is search('-'))
+     else 'https://packages.wazuh.com/' + (wazuh_version.split('.')[0] + '.x') + '/yum/' }}
 
 # Manager configuration
+wazuh_manager_install_path: "/var/ossec"
+wazuh_manager_config_file: "{{ wazuh_manager_install_path }}/etc/ossec.conf"
 wazuh_manager_config_path: /var/ossec/etc/ossec.conf
+wazuh_manager_certs_path: "{{ wazuh_manager_install_path }}/etc/certs"
 wazuh_manager_log_path: /var/ossec/logs
+wazuh_manager_owner: "wazuh"
+wazuh_manager_group: "wazuh"
+wazuh_manager_cert_name: "{{ manager_node_name | default('server') }}"
+
+# Indexer connection (shared with indexer role)
+wazuh_indexer_http_port: 9200
+wazuh_indexer_admin_user: "admin"
+
+# API credentials
+wazuh_api_user: "wazuh"
+
+# Filebeat management (4.x uses Filebeat, 5.x does not)
+wazuh_use_filebeat: true
+
+# Agent communication port (shared across roles, default: 1514)
+wazuh_manager_agent_port: 1514
 
 # ═══════════════════════════════════════════════════════════════
 # API Authentication Settings
@@ -28,10 +62,14 @@ wazuh_api_check_delay: 10
 wazuh_service_start_timeout: 300
 
 # API settings
+wazuh_manager_api_port: 55000
 wazuh_manager_api_bind_addr: "0.0.0.0"
 wazuh_manager_api_https: true
-wazuh_manager_api_ssl_protocol: "TLSv1.2"
+# "auto" enables TLS 1.3 negotiation when the client supports it (falls back to TLS 1.2)
+wazuh_manager_api_ssl_protocol: "auto"
 wazuh_manager_api_log_format: "json"
+# Restrict to forward-secret AEAD cipher suites; applies to TLS 1.2 (TLS 1.3 suites are always enabled)
+wazuh_manager_api_ssl_ciphers: "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305"
 
 # API Rate Limiting & Security Hardening
 # Max failed login attempts before blocking (default: 5)
@@ -46,7 +84,26 @@ wazuh_manager_api_max_requests_per_minute: 100
 wazuh_manager_api_allow_remote_localfile: false
 wazuh_manager_api_allow_remote_wodle: false
 
+# Restrict agent ports (1514/1515) to known networks; set true only when agents span untrusted networks
+wazuh_allow_agents_from_any: false
+# Populate in inventory/group_vars when wazuh_allow_agents_from_any: false
+# e.g. wazuh_agent_networks: ["10.0.0.0/8", "172.16.0.0/12"]
+wazuh_agent_networks: []
+
+# Firewall management (wazuh_configure_firewall must be true for OS firewall rules to apply)
+wazuh_configure_firewall: false
+wazuh_allowed_agent_networks: []
+wazuh_allowed_cluster_networks: []
+
+# Firewall: Open agent port on UDP (default: false)
+# When wazuh_agent_tls_enabled is true (default), agents use TLS over TCP only.
+# UDP on port 1514 is only needed for legacy non-TLS agent connections.
+wazuh_manager_firewall_agent_udp_enabled: false
+
 # Agent enrollment - SECURE DEFAULTS
+# Max agents allowed to enroll. 'yes' = Wazuh default (~3000).
+# Set to an integer (e.g. wazuh_authd_max_agents: 500) for explicit control.
+wazuh_authd_max_agents: 'yes'
 wazuh_authd_enabled: true
 wazuh_authd_use_source_ip: false
 wazuh_authd_purge: false
@@ -66,6 +123,10 @@ wazuh_manager_cluster_node_type: "master"
 wazuh_manager_cluster_key: ""
 wazuh_manager_cluster_port: 1516
 wazuh_manager_cluster_bind_addr: "0.0.0.0"
+
+# Backward-compatible aliases (legacy bare-name vars)
+manager_node_name: "{{ wazuh_manager_cluster_node_name }}"
+manager_node_type: "{{ wazuh_manager_cluster_node_type }}"
 
 # Alert output formats
 wazuh_jsonout_output: true           # JSON output for alerts (alerts.json)
@@ -153,11 +214,14 @@ wazuh_syslog_listeners: []
 # CDB lists loaded in the ruleset (paths relative to /var/ossec/)
 wazuh_cdb_lists:
   - "etc/lists/audit-keys"
+  - "etc/lists/bash_profile"
   - "etc/lists/amazon/aws-eventnames"
   - "etc/lists/security-eventchannel"
   - "etc/lists/malicious-ioc/malware-hashes"
   - "etc/lists/malicious-ioc/malicious-ip"
   - "etc/lists/malicious-ioc/malicious-domains"
+  - "etc/lists/malicious-powershell"
+  - "etc/lists/web-attack-patterns"
 
 # Custom content deployment (rules, decoders, CDB lists from files/)
 wazuh_custom_content_enabled: true
@@ -173,6 +237,17 @@ wazuh_alerting_profile: "none"
 # Security Configuration Assessment (SCA)
 wazuh_sca_enabled: true
 wazuh_sca_interval: "12h"
+wazuh_sca_verify_builtin: true
+# Built-in CIS benchmark policies shipped with Wazuh
+wazuh_sca_builtin_policies:
+  - cis_debian10.yml
+  - cis_debian11.yml
+  - cis_rhel8_linux.yml
+  - cis_rhel9_linux.yml
+  - cis_ubuntu20-04.yml
+  - cis_ubuntu22-04.yml
+  - cis_ubuntu24-04.yml
+  - cis_win2025.yml
 
 # System inventory (Syscollector)
 wazuh_syscollector_enabled: true
@@ -425,6 +500,10 @@ wazuh_logcollector_max_files: 256
 #     value: "0"
 
 # Indexer connection
+# Index alias names (shared with indexer role; duplicated here for self-contained manager role)
+wazuh_alerts_alias: "wazuh-alerts"
+wazuh_archives_alias: "wazuh-archives"
+
 wazuh_indexer_connection_enabled: true
 
 # Filebeat settings (for alert forwarding to indexer)
@@ -433,6 +512,15 @@ wazuh_filebeat_archives_enabled: false
 # Filebeat version - should be compatible with Wazuh version
 # See: https://documentation.wazuh.com/current/installation-guide/wazuh-indexer/step-by-step.html
 wazuh_filebeat_version: "7.10.2"
+# SHA256 checksums for Filebeat 7.10.2 artifacts — update when bumping wazuh_filebeat_version
+# Obtain from: https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-oss-<version>-amd64.deb.sha512
+wazuh_filebeat_deb_sha256: "sha256:f759a13e5407bba184d9f0235ab88409a0d77d821e64adb3dcc0ba8e397f0201"
+wazuh_filebeat_rpm_sha256: "sha256:1c1840616195f2e880bfd2d8e517a1a34f30c5f2a8632f9b8f37f59a17b23bc9"
+# VERIFY before use: fetch from https://packages.wazuh.com/4.x/filebeat/ and run sha256sum
+wazuh_filebeat_module_sha256: "sha256:b0683f1d5d7c5d076ea3a565b0aa7ca92e6483f8a14e8b96799e6ee632da2284"
+# VERIFY before use: download wazuh-template.json for the pinned wazuh_version and run sha256sum
+# Update this value whenever wazuh_version changes
+wazuh_filebeat_template_sha256: "sha256:c6e30822c67c10f7e777cb51926e261d8b2c3a941c4ffcf83325f700c1c8802f"
 
 # ═══════════════════════════════════════════════════════════════
 # Default Agent Groups
@@ -445,7 +533,7 @@ wazuh_filebeat_version: "7.10.2"
 # Only role-specific extras are defined here - the base agent templates
 # already handle platform-specific log sources, FIM, and modules.
 #
-# Override or extend in group_vars/all.yml to customize for your environment.
+# Override or extend in group_vars/all/main.yml to customize for your environment.
 wazuh_agent_groups:
 
   # ── Linux Groups ──────────────────────────────────────────────
@@ -719,6 +807,15 @@ wazuh_agent_groups:
           value: "endpoint"
         - key: "group.os"
           value: "macos"
+
+# Automatic agent group assignment
+# When enabled, agents are assigned to groups based on their OS platform
+wazuh_auto_group_assignment_enabled: false
+# Map of OS platform strings (from Wazuh API os.platform field) to group names
+wazuh_auto_group_assignment_rules:
+  linux: "linux-servers"
+  windows: "windows-workstations"
+  darwin: "macos-endpoints"
 
 # Log rotation settings
 wazuh_log_rotation_enabled: true

@@ -26,7 +26,7 @@
   vars:
     # Override connection to use initial SSH user for bootstrap
     ansible_user: "{{ wazuh_bootstrap_user | default('root') }}"
-    ansible_ssh_pass: "{{ vault_ansible_connection_password | default(wazuh_bootstrap_password) | default(omit) }}"
+    ansible_ssh_pass: "{{ vault_ansible_connection_password | default(vault_bootstrap_ssh_pass) | default(omit) }}"
     ansible_ssh_private_key_file: "{{ wazuh_bootstrap_ssh_key | default(omit) }}"
     ansible_user_name: "{{ wazuh_ansible_user | default('wazuh-deploy') }}"
     ssh_public_key_file: "{{ playbook_dir }}/keys/wazuh_ansible_key.pub"
@@ -100,7 +100,7 @@
       ansible.builtin.command:
         cmd: >
           ssh -i {{ playbook_dir }}/keys/wazuh_ansible_key
-          -o StrictHostKeyChecking=no
+          -o StrictHostKeyChecking=accept-new
           -o UserKnownHostsFile=/dev/null
           -o BatchMode=yes
           {{ ansible_user_name }}@{{ inventory_hostname }}
@@ -174,6 +174,32 @@
           Organization: {{ organization_name | default('N/A') }}
           ══════════════════════════════════════════════
       run_once: true
+
+    - name: Set wazuh_node_ip for containerized/docker environments
+      ansible.builtin.set_fact:
+        wazuh_node_ip: >-
+          {% if ansible_virtualization_type in ['docker', 'podman', 'containerd']
+             and ansible_virtualization_role == 'guest' -%}
+          127.0.0.1
+          {%- else -%}
+          {{ ansible_default_ipv4.address | default('127.0.0.1') }}
+          {%- endif %}
+
+    - name: Set wazuh_is_container flag for container environments
+      ansible.builtin.set_fact:
+        wazuh_is_container: >-
+          {{ ansible_virtualization_type in ['docker', 'podman', 'containerd']
+             and ansible_virtualization_role == 'guest' }}
+
+    - name: Override indexer network host for container environments
+      ansible.builtin.set_fact:
+        wazuh_indexer_network_host: "0.0.0.0"
+        wazuh_dashboard_host: "0.0.0.0"
+      when: wazuh_is_container | default(false)
+
+    - name: Use absolute certs path to avoid relative-path resolution issues
+      ansible.builtin.set_fact:
+        wazuh_certs_path: "{{ playbook_dir }}/files/certs"
 
     - name: Verify connectivity to all hosts
       ansible.builtin.ping:
@@ -271,7 +297,7 @@
 
     # File descriptor limit on indexer nodes — OpenSearch requires >= 65535
     - name: Check file descriptor limit on indexer nodes
-      ansible.builtin.shell: ulimit -n
+      ansible.builtin.shell: grep 'Max open files' /proc/1/limits 2>/dev/null | awk '{print $4}'
       register: fd_limit
       changed_when: false
       failed_when: false
@@ -280,11 +306,11 @@
     - name: Validate file descriptor limit for OpenSearch (>= 65535)
       ansible.builtin.assert:
         that:
-          - fd_limit.stdout | int >= 65535
+          - fd_limit.stdout | default('0') | int >= 65535
         fail_msg: >-
-          File descriptor limit on {{ inventory_hostname }} is {{ fd_limit.stdout }} (requires >= 65535).
-          OpenSearch will fail to start. Fix with: sysctl -w fs.file-max=65535
-          and add '* - nofile 65535' to /etc/security/limits.conf
+          File descriptor limit on {{ inventory_hostname }} is {{ fd_limit.stdout | default('unknown') }} (requires >= 65535).
+          OpenSearch will fail to start. Fix with: docker run --ulimit nofile=65535:65535
+          or set LimitNOFILE=65535 in the service override.
         success_msg: "File descriptor limit OK: {{ fd_limit.stdout }}"
       when:
         - inventory_hostname in groups['wazuh_indexers']
@@ -324,7 +350,8 @@
   hosts: wazuh_indexers
   become: true
   gather_facts: false  # Already gathered in pre-flight
-  serial: "{{ wazuh_indexer_deploy_serial | default(omit) }}"
+  serial: "{{ wazuh_indexer_deploy_serial | default(1) }}"
+  any_errors_fatal: true
   roles:
     - role: wazuh-indexer
   tags:
@@ -344,12 +371,12 @@
   tasks:
     - name: Check indexer cluster health
       ansible.builtin.uri:
-        url: "https://{{ wazuh_indexer_nodes[0].ip }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health"
+        url: "https://{{ hostvars[inventory_hostname]['wazuh_node_ip'] | default('127.0.0.1') }}:{{ wazuh_indexer_http_port | default(9200) }}/_cluster/health"
         method: GET
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         return_content: true
       register: indexer_health
       retries: 3
@@ -384,7 +411,8 @@
   hosts: wazuh_managers
   become: true
   gather_facts: false  # Already gathered in pre-flight
-  serial: "{{ wazuh_manager_deploy_serial | default(omit) }}"
+  serial: "{{ wazuh_manager_deploy_serial | default(1) }}"
+  any_errors_fatal: true
   roles:
     - role: wazuh-manager
   tags:
@@ -406,7 +434,7 @@
       ansible.builtin.uri:
         url: "https://127.0.0.1:{{ wazuh_manager_api_port | default(55000) }}/"
         method: GET
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 401]
       register: manager_api
       retries: 3
@@ -442,6 +470,7 @@
 - name: Deploy Wazuh Dashboard
   hosts: wazuh_dashboards
   become: true
+  any_errors_fatal: true
   gather_facts: false  # Already gathered in pre-flight
   roles:
     - role: wazuh-dashboard
@@ -464,7 +493,7 @@
       ansible.builtin.uri:
         url: "https://127.0.0.1:{{ wazuh_dashboard_port | default(443) }}/app/wazuh"
         method: GET
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 302, 401]
       register: dashboard_http
       retries: 3
@@ -537,7 +566,7 @@
       ansible.builtin.uri:
         url: "https://127.0.0.1:{{ wazuh_manager_api_port | default(55000) }}/"
         method: GET
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 401]
       register: smoke_manager_api
       failed_when: false
@@ -563,7 +592,7 @@
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         return_content: true
       register: smoke_indexer_health
       failed_when: false
@@ -575,7 +604,7 @@
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         return_content: true
       register: smoke_alert_count
       failed_when: false

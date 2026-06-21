@@ -1,0 +1,195 @@
+---
+name: CI
+
+on:
+  push:
+    branches: [main, "1.*"]
+  pull_request:
+    branches: [main, "1.*"]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-v1-${{ hashFiles('requirements.yml') }}
+          restore-keys: ${{ runner.os }}-pip-
+
+      - name: Cache Ansible Galaxy collections
+        uses: actions/cache@v4
+        with:
+          path: ~/.ansible
+          key: ${{ runner.os }}-galaxy-${{ hashFiles('requirements.yml') }}
+
+      - name: Install dependencies
+        run: |
+          pip install ansible-lint yamllint ansible
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Run yamllint
+        run: yamllint -c .yamllint .
+
+      - name: Run ansible-lint
+        run: ansible-lint --profile production roles/ playbooks/ site.yml
+        env:
+          ANSIBLE_ROLES_PATH: roles
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38  # v2.0.0
+        with:
+          scandir: "."
+          severity: error
+          ignore_paths: ".git, files/cdb_lists"
+
+  molecule:
+    name: Molecule
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        role: [wazuh-agent, wazuh-monitoring, wazuh-indexer, wazuh-manager, wazuh-dashboard]
+      fail-fast: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-molecule-v1-${{ hashFiles('requirements.yml') }}
+          restore-keys: ${{ runner.os }}-molecule-
+
+      - name: Cache Ansible Galaxy collections
+        uses: actions/cache@v4
+        with:
+          path: ~/.ansible
+          key: ${{ runner.os }}-galaxy-${{ hashFiles('requirements.yml') }}
+
+      - name: Install dependencies
+        run: |
+          pip install molecule molecule-plugins[docker] ansible ansible-lint
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Run Molecule tests
+        run: cd roles/${{ matrix.role }} && molecule test
+        env:
+          ANSIBLE_ROLES_PATH: ${{ github.workspace }}/roles
+
+  syntax-check:
+    name: Ansible Syntax Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Ansible
+        run: |
+          pip install ansible
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Create minimal inventory for syntax check
+        run: |
+          mkdir -p inventory
+          cat > inventory/hosts.yml <<'EOF'
+          all:
+            children:
+              wazuh_indexers:
+                hosts:
+                  indexer-1:
+                    ansible_host: 127.0.0.1
+                    ansible_connection: local
+              wazuh_managers:
+                hosts:
+                  manager-1:
+                    ansible_host: 127.0.0.1
+                    ansible_connection: local
+              wazuh_dashboards:
+                hosts:
+                  dashboard-1:
+                    ansible_host: 127.0.0.1
+                    ansible_connection: local
+          EOF
+
+      - name: Create minimal vars for syntax check
+        run: |
+          mkdir -p group_vars/all
+          cat > group_vars/all/main.yml <<'EOF'
+          wazuh_version: "4.14.5"
+          wazuh_indexer_nodes:
+            - name: indexer-1
+              ip: 127.0.0.1
+          wazuh_manager_nodes:
+            - name: manager-1
+              ip: 127.0.0.1
+          wazuh_indexer_admin_password: "{{ vault_wazuh_indexer_admin_password }}"
+          wazuh_api_password: "{{ vault_wazuh_api_password }}"
+          vault_wazuh_indexer_admin_password: "${{ secrets.SYNTAX_CHECK_PASSWORD }}"
+          vault_wazuh_api_password: "${{ secrets.SYNTAX_CHECK_PASSWORD }}"
+          vault_wazuh_dashboard_admin_password: "${{ secrets.SYNTAX_CHECK_PASSWORD }}"
+          wazuh_agent_enrollment_password: "{{ vault_wazuh_agent_enrollment_password }}"
+          vault_wazuh_agent_enrollment_password: "${{ secrets.SYNTAX_CHECK_PASSWORD }}"
+          vault_wazuh_manager_cluster_key: "${{ secrets.SYNTAX_CHECK_CLUSTER_KEY }}"
+          EOF
+
+      - name: Syntax check all playbooks
+        run: |
+          for playbook in site.yml playbooks/*.yml; do
+            echo "Checking: $playbook"
+            ansible-playbook --syntax-check "$playbook" -i inventory/hosts.yml
+          done
+        env:
+          ANSIBLE_ROLES_PATH: roles
+
+  integration:
+    name: Full-Stack Integration
+    runs-on: ubuntu-22.04
+    needs: [lint, shellcheck, syntax-check]
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install molecule molecule-plugins[docker] ansible
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Run full-stack scenario
+        run: cd roles/wazuh-indexer && molecule test -s full-stack
+        env:
+          ANSIBLE_ROLES_PATH: ${{ github.workspace }}/roles

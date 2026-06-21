@@ -7,7 +7,7 @@
 # ═══════════════════════════════════════════════════════════════
 # General Settings
 # ═══════════════════════════════════════════════════════════════
-wazuh_version: "4.14.1"
+wazuh_version: "4.14.5"
 environment_name: "production"
 organization_name: "MyOrganization"
 
@@ -55,7 +55,7 @@ wazuh_indexer_nodes:
 # ═══════════════════════════════════════════════════════════════
 wazuh_manager_api_port: 55000
 wazuh_manager_agent_port: 1514
-wazuh_api_user: "wazuh"
+wazuh_api_user: "wazuh-wui"
 
 # API password is auto-generated during deployment by default
 # Credentials saved to: ./credentials/api_password.txt
@@ -149,9 +149,15 @@ wazuh_dashboard_csp_strict: true
 
 # API security hardening (brute-force protection)
 wazuh_api_max_login_attempts: 5              # Lock after N failed attempts
-wazuh_api_lockout_time: 900                  # Lockout duration (seconds)
-wazuh_api_rate_limit: 100                    # Max requests per minute
-wazuh_api_https_only: true                   # Force HTTPS
+wazuh_manager_api_block_time: 900            # Lockout duration (seconds) — replaces wazuh_api_lockout_time
+wazuh_manager_api_max_requests_per_minute: 100  # Max requests per minute — replaces wazuh_api_rate_limit
+wazuh_manager_api_https: true                # Force HTTPS — replaces wazuh_api_https_only
+
+# Backward-compatible aliases for renamed API vars
+# Remove after all deployments have migrated to the new names
+# wazuh_manager_api_block_time: "{{ wazuh_api_lockout_time | default(900) }}"
+# wazuh_manager_api_max_requests_per_minute: "{{ wazuh_api_rate_limit | default(100) }}"
+# wazuh_manager_api_https: "{{ wazuh_api_https_only | default(true) }}"
 
 # Indexer security
 wazuh_indexer_ssl_http_enabled: true
@@ -310,10 +316,16 @@ wazuh_log_rotation_compress: true
 # Firewall configuration (installs and enables UFW/firewalld if needed)
 wazuh_configure_firewall: true
 
-# Allow agents from any network (recommended for flexibility)
-# When true, firewall allows agent connections (1514, 1515) from anywhere
-# When false, only allows from auto-detected or explicitly configured subnets
-wazuh_allow_agents_from_any: true
+# Allow agents from any network
+# When false (recommended), only allows agent connections from auto-detected or explicitly configured subnets
+# Change to true only if agents connect from many different networks
+wazuh_allow_agents_from_any: false
+
+# Bind addresses for Wazuh services
+# 127.0.0.1 = local only (single-node, security best practice)
+# 0.0.0.0  = all interfaces (required for multi-node clusters)
+wazuh_indexer_network_host: "127.0.0.1"
+wazuh_dashboard_host: "127.0.0.1"
 
 # Network subnets are auto-detected from the host's default interface.
 # These settings only apply when wazuh_allow_agents_from_any is false:
@@ -323,7 +335,7 @@ wazuh_allow_agents_from_any: true
 # wazuh_allowed_cluster_networks:
 #   - "10.0.0.0/24"
 
-# SELinux configuration
+# SELinux configuration (PLACEHOLDER — not yet consumed by any role; reserved for future use)
 wazuh_configure_selinux: true
 
 # Package repository settings

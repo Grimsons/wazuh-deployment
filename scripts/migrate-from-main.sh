@@ -36,7 +36,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 VAULT_DIR="$PROJECT_DIR/group_vars/all"
 VAULT_FILE="$VAULT_DIR/vault.yml"
-VAULT_PASSWORD_FILE="$PROJECT_DIR/.vault_password"
+VAULT_PASSWORD_DIR="${HOME}/.config/wazuh-deployment"
+VAULT_PASSWORD_FILE="$VAULT_PASSWORD_DIR/.vault_password"
 OLD_ALL_YML="$PROJECT_DIR/group_vars/all.yml"
 NEW_MAIN_YML="$VAULT_DIR/main.yml"
 TIMESTAMP="$(date +%Y%m%d%H%M%S)"
@@ -66,7 +67,7 @@ generate_password() {
     symbol_idx=$(head -c 4 /dev/urandom | od -An -tu4 | tr -d ' ')
     symbol="${symbols:$((symbol_idx % ${#symbols})):1}"
     password="${password}${upper}${lower}${number}${symbol}"
-    echo "$password" | fold -w1 | shuf | tr -d '\n'
+    echo "$password" | fold -w1 | shuf --random-source=/dev/urandom | tr -d '\n'
 }
 
 # Extract a YAML scalar value from a file
@@ -76,7 +77,7 @@ extract_var() {
     local file="$1"
     local var="$2"
     local value
-    value=$(grep -E "^${var}:" "$file" 2>/dev/null | head -1 | sed -E 's/^[^:]+:\s*//' | sed -E 's/^["'\''](.*?)["'\'']$/\1/' | sed 's/\s*#.*//' | xargs)
+    value=$(grep -E "^${var}:" "$file" 2>/dev/null | head -1 | sed -E 's/^[^:]+:\s*//' | sed -E 's/^["'\''](.*?)["'\'']$/\1/' | sed 's/ #[^"]*$//' | xargs)
     echo "$value"
 }
 
@@ -169,7 +170,7 @@ if [ -z "$MIGRATION_CASE" ] && [ -f "$NEW_MAIN_YML" ]; then
     else
         MIGRATION_CASE="partial"
         SOURCE_FILE="$NEW_MAIN_YML"
-        print_info "Detected: vault.yml exists but no .vault_password file"
+        print_info "Detected: vault.yml exists but no $VAULT_PASSWORD_FILE"
     fi
 fi
 
@@ -338,12 +339,13 @@ fi
 if [ ! -f "$VAULT_PASSWORD_FILE" ]; then
     print_info "Generating vault password..."
     vault_pass=$(generate_password 32)
+    mkdir -p "$VAULT_PASSWORD_DIR"
     echo "$vault_pass" > "$VAULT_PASSWORD_FILE"
     chmod 600 "$VAULT_PASSWORD_FILE"
-    print_success "Vault password created: .vault_password"
-    print_warning "IMPORTANT: Back up .vault_password securely!"
+    print_success "Vault password created: $VAULT_PASSWORD_FILE"
+    print_warning "IMPORTANT: Back up $VAULT_PASSWORD_FILE securely!"
 else
-    print_info "Using existing vault password: .vault_password"
+    print_info "Using existing vault password: $VAULT_PASSWORD_FILE"
 fi
 
 # ═══════════════════════════════════════════════════════════════
@@ -414,7 +416,7 @@ cat > "$NEW_MAIN_YML" << EOF
 # ═══════════════════════════════════════════════════════════════
 # General Settings
 # ═══════════════════════════════════════════════════════════════
-wazuh_version: "${WAZUH_VERSION:-4.14.2}"
+wazuh_version: "${WAZUH_VERSION:-4.14.5}"
 environment_name: "${ENVIRONMENT_NAME:-production}"
 organization_name: "${ORGANIZATION_NAME:-MyOrganization}"
 
@@ -429,7 +431,7 @@ wazuh_indexer_heap_size: "${INDEXER_HEAP_SIZE:-auto}"
 wazuh_indexer_admin_user: "${INDEXER_ADMIN_USER:-admin}"
 # Indexer admin password loaded from Ansible Vault
 # SECURITY: Password encrypted in group_vars/all/vault.yml
-# To view/edit: ansible-vault view/edit group_vars/all/vault.yml --vault-password-file .vault_password
+# To view/edit: ansible-vault view/edit group_vars/all/vault.yml --vault-password-file $VAULT_PASSWORD_FILE
 wazuh_indexer_admin_password: "{{ vault_wazuh_indexer_admin_password }}"
 
 # Indexer node list for cluster configuration
@@ -510,8 +512,6 @@ wazuh_configure_selinux: ${SELINUX_ENABLED}
 
 # Package repository settings
 wazuh_repo_gpg_key: "https://packages.wazuh.com/key/GPG-KEY-WAZUH"
-wazuh_repo_url_apt: "https://packages.wazuh.com/4.x/apt/"
-wazuh_repo_url_yum: "https://packages.wazuh.com/4.x/yum/"
 
 # ═══════════════════════════════════════════════════════════════
 # Backup & Maintenance
@@ -574,6 +574,21 @@ wazuh_log_rotation_enabled: true
 wazuh_log_rotation_keep_days: 30
 wazuh_log_rotation_max_size: "100M"
 wazuh_log_rotation_compress: true
+
+# ═══════════════════════════════════════════════════════════════
+# Version-Derived Variables (evaluated from wazuh_version above)
+# ═══════════════════════════════════════════════════════════════
+wazuh_is_5x: "{{ wazuh_version.split('.')[0] == '5' }}"
+wazuh_is_prerelease: "{{ '-' in wazuh_version }}"
+wazuh_direct_download: "{{ wazuh_is_prerelease }}"
+wazuh_manager_install_path: "{{ '/var/wazuh-manager' if wazuh_is_5x else '/var/ossec' }}"
+wazuh_manager_config_file: "{{ wazuh_manager_install_path }}/etc/{{ 'wazuh-manager.conf' if wazuh_is_5x else 'ossec.conf' }}"
+wazuh_manager_certs_path: "{{ wazuh_manager_install_path }}/etc/certs"
+wazuh_manager_log_path: "{{ wazuh_manager_install_path }}/logs"
+wazuh_manager_owner: "{{ 'wazuh-manager' if wazuh_is_5x else 'wazuh' }}"
+wazuh_manager_group: "{{ 'wazuh-manager' if wazuh_is_5x else 'wazuh' }}"
+wazuh_use_filebeat: "{{ false if wazuh_is_5x else true }}"
+wazuh_manager_cert_name: "{{ manager_node_name | default('server') }}"
 EOF
 
 print_success "Created: group_vars/all/main.yml"

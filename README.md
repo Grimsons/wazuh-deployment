@@ -61,7 +61,7 @@ Both generate:
 - `inventory/bootstrap.yml` - Bootstrap inventory (first deployment)
 - `group_vars/all/main.yml` - Configuration variables
 - `group_vars/all/vault.yml` - Encrypted credentials (Ansible Vault)
-- `.vault_password` - Vault encryption key (keep secure!)
+- `~/.config/wazuh-deployment/.vault_password` - Vault encryption key (keep secure!)
 - `ansible.cfg` - Ansible settings
 - `keys/wazuh_ansible_key` - SSH keypair for deployment
 
@@ -202,7 +202,7 @@ wazuh-deployment/
 
 ### Credential Management
 
-All credentials are stored in Ansible Vault (`group_vars/all/vault.yml`), encrypted with a randomly generated key (`.vault_password`). No plaintext passwords are stored anywhere.
+All credentials are stored in Ansible Vault (`group_vars/all/vault.yml`), encrypted with a randomly generated key at `~/.config/wazuh-deployment/.vault_password`. No plaintext passwords are stored anywhere.
 
 ```bash
 ./scripts/manage-vault.sh view      # View current credentials
@@ -272,7 +272,7 @@ ansible-playbook playbooks/pre-flight-checks.yml --tags quick
 ansible-playbook playbooks/backup.yml
 
 # Include indexer data snapshots
-ansible-playbook playbooks/backup.yml -e "include_indices=true"
+ansible-playbook playbooks/backup.yml -e "backup_indexer_data=true"
 
 # Restore from backup
 ansible-playbook playbooks/restore.yml -e "restore_from=20260110T120000"
@@ -317,7 +317,7 @@ All configuration is in `group_vars/all/main.yml`. Credentials are in the encryp
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `wazuh_version` | Wazuh version | 4.14.2 |
+| `wazuh_version` | Wazuh version | 4.14.5 |
 | `wazuh_indexer_heap_size` | Indexer JVM heap ("auto" = 50% RAM) | auto |
 | `wazuh_rollover_enabled` | Enable automatic index rollover | true |
 | `wazuh_close_cold_indices` | Close cold indices | true |
@@ -391,13 +391,20 @@ They do NOT include: vault encryption, SSH key generation, bootstrap, index mana
 
 ## Migrating from Older Versions
 
-If upgrading from the old `main` branch format (plaintext `group_vars/all.yml`):
+If upgrading from the old `main` branch format (plaintext `group_vars/all.yml` with credentials in `credentials/` directory):
 
 ```bash
 ./scripts/migrate-from-main.sh
 ```
 
-This converts plaintext credentials to the new vault-encrypted format, preserving your existing passwords.
+This script:
+1. Reads existing plaintext passwords from the `credentials/` directory
+2. Prompts for an Ansible Vault password
+3. Creates `group_vars/all/vault.yml` with credentials encrypted via Ansible Vault
+4. Generates `group_vars/all/main.yml` from `group_vars/all.yml.example`
+5. Removes the old `credentials/` directory (with confirmation)
+
+Run this once after upgrading the repository to migrate from the old plaintext credential format to vault-encrypted credentials. After migration, use `make vault-view` to verify credentials and `scripts/manage-vault.sh rotate` to generate fresh passwords.
 
 ## Troubleshooting
 
@@ -407,7 +414,7 @@ This converts plaintext credentials to the new vault-encrypted format, preservin
 | Certificate errors | Regenerate with `./generate-certs.sh` |
 | Agent not connecting | Verify manager IP and port 1514 accessibility |
 | Dashboard 401 errors | Run `./scripts/manage-vault.sh view` to verify credentials |
-| Vault permission denied | Run with `sudo` or fix `.vault_password` permissions |
+| Vault permission denied | Run with `sudo` or fix `~/.config/wazuh-deployment/.vault_password` permissions |
 | Deploy user locked | Run `ansible-playbook unlock-deploy-user.yml` |
 | Aggregation errors | Re-run `site.yml` to update index mappings |
 
@@ -429,7 +436,7 @@ This converts plaintext credentials to the new vault-encrypted format, preservin
 
 ## Security Recommendations
 
-- Back up `.vault_password` securely offline - required to decrypt credentials
+- Back up `~/.config/wazuh-deployment/.vault_password` securely offline - required to decrypt credentials
 - Use external CA certificates for production environments
 - Restrict network access to management ports
 - Regularly rotate credentials with `./scripts/manage-vault.sh rotate`

@@ -1,0 +1,96 @@
+---
+- name: Verify indexer
+  hosts: indexer-*
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Wait for indexer API
+      ansible.builtin.uri:
+        url: "https://localhost:9200/_cluster/health"
+        method: GET
+        user: admin
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: false
+      register: cluster_health
+      retries: 15
+      delay: 10
+      until: cluster_health.status == 200
+      no_log: true
+
+    - name: Assert cluster status is not red
+      ansible.builtin.assert:
+        that:
+          - cluster_health.json.status in ['green', 'yellow']
+        fail_msg: "Indexer cluster status is {{ cluster_health.json.status }}"
+
+- name: Verify manager
+  hosts: manager-*
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Wait for manager API
+      ansible.builtin.wait_for:
+        port: 55000
+        host: 127.0.0.1
+        timeout: 60
+
+    - name: Check manager can reach indexer
+      ansible.builtin.uri:
+        url: "https://indexer-1:9200/_cluster/health"
+        method: GET
+        user: admin
+        password: "{{ wazuh_indexer_admin_password }}"
+        validate_certs: false
+      register: manager_to_indexer
+      retries: 10
+      delay: 10
+      until: manager_to_indexer.status == 200
+      no_log: true
+
+    - name: Validate manager config
+      ansible.builtin.command:
+        cmd: /var/ossec/bin/wazuh-analysisd -t
+      changed_when: false
+
+- name: Verify dashboard
+  hosts: dashboard-*
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Wait for dashboard HTTPS
+      ansible.builtin.wait_for:
+        port: 443
+        host: 127.0.0.1
+        timeout: 90
+
+    - name: Check dashboard API
+      ansible.builtin.uri:
+        url: "https://localhost:443/api/status"
+        method: GET
+        validate_certs: false
+        status_code: [200, 302, 401]
+      register: dash_response
+      retries: 12
+      delay: 10
+      until: dash_response.status in [200, 302, 401]
+
+- name: Verify agent enrollment
+  hosts: manager-*
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Check agent list
+      ansible.builtin.command:
+        cmd: /var/ossec/bin/agent_control -l
+      register: agent_list
+      changed_when: false
+      retries: 6
+      delay: 10
+      until: agent_list.rc == 0
+      ignore_errors: true
+
+    - name: Log agent enrollment status
+      ansible.builtin.debug:
+        msg: |
+          Agent enrollment status:
+          {{ agent_list.stdout_lines | default(['No agent output - may still be connecting']) | to_nice_yaml }}

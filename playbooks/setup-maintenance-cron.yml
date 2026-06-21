@@ -3,10 +3,10 @@
 # This playbook configures scheduled maintenance tasks based on group_vars settings
 #
 # Usage:
-#   ansible-playbook playbooks/setup-maintenance-cron.yml
+#   ansible-playbook playbooks/setup-maintenance-cron.yml -i inventory/hosts.yml
 #
 # This playbook is automatically included in site.yml post-deployment
-# Configuration is read from group_vars/all.yml:
+# Configuration is read from group_vars/all/main.yml:
 #   - wazuh_backup_schedule: daily, weekly, or disabled
 #   - wazuh_backup_hour: Hour to run backup (0-23)
 #   - wazuh_backup_day: Day for weekly backup (0=Sun, 6=Sat)
@@ -20,10 +20,14 @@
   connection: local
   become: false
   gather_facts: true
-  # Note: group_vars/all/ is auto-loaded by Ansible, no vars_files needed
+  # Load group_vars explicitly because this playbook lives in playbooks/ and
+  # Ansible only searches group_vars relative to the playbook directory.
+  vars_files:
+    - ../group_vars/all/main.yml
   # Override ansible_user for localhost since it shouldn't use vault credentials
   vars:
     ansible_user: "{{ lookup('env', 'USER') }}"
+    ansible_become: false
     # Use playbook_dir which is always defined, unlike inventory_dir
     project_dir: "{{ playbook_dir | dirname }}"
     scripts_dir: "{{ project_dir }}/scripts"
@@ -33,6 +37,12 @@
     log_cleanup_cron_id: "wazuh-log-cleanup"
 
   tasks:
+    - name: Skip maintenance cron when nothing is scheduled
+      ansible.builtin.meta: end_play
+      when:
+        - (wazuh_backup_schedule | default('daily')) == 'disabled'
+        - not (wazuh_log_cleanup_enabled | default(true))
+
     - name: Check if crontab is available
       ansible.builtin.command: which crontab
       register: crontab_check
@@ -208,7 +218,7 @@
             - Backup logs: {{ logs_dir }}/backup-cron.log
             - Cleanup logs: {{ logs_dir }}/log-cleanup-cron.log
 
-          To modify settings, edit group_vars/all.yml and re-run:
+          To modify settings, edit group_vars/all/main.yml and re-run:
             ansible-playbook playbooks/setup-maintenance-cron.yml
 
           To disable all maintenance cron jobs:

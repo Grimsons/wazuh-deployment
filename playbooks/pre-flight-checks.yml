@@ -3,9 +3,9 @@
 # Run this BEFORE deployment to validate environment readiness
 #
 # Usage:
-#   ansible-playbook playbooks/pre-flight-checks.yml
-#   ansible-playbook playbooks/pre-flight-checks.yml --tags network
-#   ansible-playbook playbooks/pre-flight-checks.yml -e "skip_package_check=true"
+#   ansible-playbook playbooks/pre-flight-checks.yml -i inventory/hosts.yml
+#   ansible-playbook playbooks/pre-flight-checks.yml -i inventory/hosts.yml --tags network
+#   ansible-playbook playbooks/pre-flight-checks.yml -i inventory/hosts.yml -e "skip_package_check=true"
 #
 # This playbook validates:
 #   - System resources (CPU, RAM, disk)
@@ -47,13 +47,36 @@
 
     - name: Check vault password file
       ansible.builtin.stat:
-        path: "{{ playbook_dir }}/../.vault_password"
+        path: "{{ lookup('env', 'HOME') }}/.config/wazuh-deployment/.vault_password"
       register: vault_password_file
 
-    - name: Warn if vault password missing
-      ansible.builtin.debug:
-        msg: "WARNING: Vault password file not found. Credentials may not be encrypted."
+    - name: Fail if vault password file is missing
+      ansible.builtin.fail:
+        msg: >
+          Vault password file {{ lookup('env', 'HOME') }}/.config/wazuh-deployment/.vault_password not found.
+          Run: ./scripts/manage-vault.sh init  (or create it manually before deployment)
       when: not vault_password_file.stat.exists
+
+    - name: Validate vault contains required credential variables
+      ansible.builtin.assert:
+        that:
+          - vault_ansible_user is defined
+          - vault_ansible_connection_password is defined
+          - vault_wazuh_indexer_admin_password is defined
+          - vault_wazuh_api_password is defined
+          - vault_wazuh_agent_enrollment_password is defined
+          - vault_wazuh_manager_cluster_key is defined
+          - vault_wazuh_indexer_admin_password | length >= 16
+          - vault_wazuh_api_password | length > 0
+          - vault_wazuh_agent_enrollment_password | length > 0
+          - vault_wazuh_manager_cluster_key | length >= 16
+        fail_msg: >
+          One or more required vault variables are missing or invalid.
+          Run: ./scripts/manage-vault.sh view  (to verify vault contents)
+          Run: ./scripts/manage-vault.sh create  (to regenerate vault)
+      run_once: true
+      no_log: true
+      when: vault_password_file.stat.exists
 
     - name: Check certificates directory
       ansible.builtin.stat:
@@ -67,7 +90,7 @@
 
     - name: Check certificate expiration
       ansible.builtin.shell: |
-        openssl x509 -in "{{ playbook_dir }}/../files/certs/root-ca.pem" -noout -checkend 2592000
+        openssl x509 -in {{ playbook_dir | quote }}/../files/certs/root-ca.pem -noout -checkend 2592000
       register: cert_expiry_check
       failed_when: false
       changed_when: false
@@ -88,12 +111,85 @@
           Variables: {{ '✓' if required_files.results[1].stat.exists else '✗' }}
           Certificates: {{ '✓' if root_ca_file.stat.exists else '✗' }}
           Vault Password: {{ '✓' if vault_password_file.stat.exists else '⚠ (unencrypted)' }}
+          Vault Variables: ✓ (validated)
           ══════════════════════════════════════════════════════════
+
+- name: Pre-Flight Checks - Security Assertions
+  hosts: localhost
+  gather_facts: false
+  tags: [always, security]
+  tasks:
+    - name: Assert wazuh_api_password is defined and not the known default
+      ansible.builtin.assert:
+        that:
+          - wazuh_api_password is defined
+          - wazuh_api_password | length > 0
+          - wazuh_api_password != wazuh_api_default_password | default('wazuh')
+        fail_msg: >
+          SECURITY: wazuh_api_password is missing, empty, or still set to the
+          Wazuh factory default ("wazuh"). Set a strong unique password in
+          group_vars/vault.yml under vault_wazuh_api_password before deploying.
+        success_msg: "API password check passed"
+
+    - name: Assert firewall is either Ansible-managed or externally acknowledged
+      ansible.builtin.assert:
+        that:
+          - (wazuh_configure_firewall | default(true)) or (wazuh_firewall_external_managed | default(false))
+        fail_msg: >
+          SECURITY: wazuh_configure_firewall is false but wazuh_firewall_external_managed
+          is also false. This means no one is enforcing firewall rules on ports 1514,
+          1515, 1516, and 55000. Either set wazuh_configure_firewall: true (recommended)
+          to let Ansible manage firewall rules, or set wazuh_firewall_external_managed: true
+          to acknowledge that an external firewall (cloud security groups, perimeter
+          firewall, etc.) is already restricting these ports.
+        success_msg: "Firewall management check passed"
+
+    - name: Assert cluster bind address is not 0.0.0.0 when cluster is enabled
+      ansible.builtin.assert:
+        that:
+          - wazuh_manager_cluster_bind_addr | default('') != '0.0.0.0'
+        fail_msg: >
+          SECURITY: wazuh_manager_cluster_bind_addr is '0.0.0.0'. The cluster
+          port ({{ wazuh_manager_cluster_port | default(1516) }}) would be exposed
+          on all interfaces. Set wazuh_manager_cluster_bind_addr to the private
+          management interface IP.
+        success_msg: "Cluster bind address check passed"
+      when: wazuh_manager_cluster_enabled | default(false)
+
+    - name: Assert cluster key is vault-sourced when cluster is enabled
+      ansible.builtin.assert:
+        that:
+          - wazuh_manager_cluster_key is defined
+          - wazuh_manager_cluster_key | length >= 32
+        fail_msg: >
+          SECURITY: wazuh_manager_cluster_key is not set or is shorter than 32
+          characters. Store a 32+ character random key in vault.yml under
+          vault_wazuh_manager_cluster_key.
+        success_msg: "Cluster key check passed"
+      when: wazuh_manager_cluster_enabled | default(false)
 
 - name: Pre-Flight Checks - Gather Facts
   hosts: all
   gather_facts: true
   tags: [always]
+
+- name: Pre-Flight Checks - Container Detection
+  hosts: all
+  gather_facts: false
+  tags: [always]
+  tasks:
+    - name: Detect containerized environment
+      ansible.builtin.set_fact:
+        wazuh_is_container: >-
+          {{ ansible_virtualization_type in ['docker', 'podman', 'containerd']
+             and ansible_virtualization_role == 'guest' }}
+        wazuh_node_ip: >-
+          {% if ansible_virtualization_type in ['docker', 'podman', 'containerd']
+             and ansible_virtualization_role == 'guest' -%}
+          127.0.0.1
+          {%- else -%}
+          {{ ansible_default_ipv4.address | default('127.0.0.1') }}
+          {%- endif %}
 
 - name: Pre-Flight Checks - System Resources
   hosts: all
@@ -245,7 +341,7 @@
             - { port: "{{ wazuh_dashboard_port | default(443) }}", desc: "Dashboard HTTPS" }
 
     - name: Check if Indexer ports are available
-      ansible.builtin.shell: ss -tlnp | grep -q ':{{ item.port }} ' && echo "IN_USE" || echo "AVAILABLE"
+      ansible.builtin.shell: ss -tlnp | grep -q ':{{ item.port | quote }} ' && echo "IN_USE" || echo "AVAILABLE"
       loop: "{{ required_ports.wazuh_indexers }}"
       loop_control:
         label: "{{ item.port }} ({{ item.desc }})"
@@ -254,7 +350,7 @@
       when: inventory_hostname in groups.get('wazuh_indexers', [])
 
     - name: Check if Manager ports are available
-      ansible.builtin.shell: ss -tlnp | grep -q ':{{ item.port }} ' && echo "IN_USE" || echo "AVAILABLE"
+      ansible.builtin.shell: ss -tlnp | grep -q ':{{ item.port | quote }} ' && echo "IN_USE" || echo "AVAILABLE"
       loop: "{{ required_ports.wazuh_managers }}"
       loop_control:
         label: "{{ item.port }} ({{ item.desc }})"
@@ -263,7 +359,7 @@
       when: inventory_hostname in groups.get('wazuh_managers', [])
 
     - name: Check if Dashboard ports are available
-      ansible.builtin.shell: ss -tlnp | grep -q ':{{ item.port }} ' && echo "IN_USE" || echo "AVAILABLE"
+      ansible.builtin.shell: ss -tlnp | grep -q ':{{ item.port | quote }} ' && echo "IN_USE" || echo "AVAILABLE"
       loop: "{{ required_ports.wazuh_dashboards }}"
       loop_control:
         label: "{{ item.port }} ({{ item.desc }})"
@@ -378,7 +474,7 @@
       ignore_errors: true
       when:
         - inventory_hostname in groups.get('wazuh_indexers', [])
-        - item.ip != ansible_default_ipv4.address | default('')
+        - item.ip != wazuh_node_ip | default('')
 
     - name: Report network segmentation results
       ansible.builtin.debug:
@@ -415,13 +511,14 @@
       register: dns_elastic
       changed_when: false
       failed_when: false
+      when: wazuh_use_filebeat
 
     - name: Report DNS resolution status
       ansible.builtin.debug:
         msg: |
           DNS Resolution from {{ inventory_hostname }}:
           packages.wazuh.com: {{ 'OK' if dns_wazuh.rc == 0 else 'FAILED' }}
-          artifacts.elastic.co: {{ 'OK' if dns_elastic.rc == 0 else 'FAILED' }}
+          artifacts.elastic.co: {{ 'OK' if dns_elastic.rc == 0 else ('N/A (5.x)' if not wazuh_use_filebeat else 'FAILED') }}
 
     - name: Assert DNS resolution works
       ansible.builtin.assert:
@@ -471,8 +568,8 @@
     - name: Test SSH connectivity to all hosts
       ansible.builtin.command: >
         ssh -o BatchMode=yes -o ConnectTimeout=5
-        -o StrictHostKeyChecking=no
-        {{ hostvars[item].ansible_user | default('root') }}@{{ item }} echo "SSH OK"
+        -o StrictHostKeyChecking=accept-new
+        {{ hostvars[item].ansible_user | default('root') | quote }}@{{ item | quote }} echo "SSH OK"
       loop: "{{ groups['all'] | difference(['localhost']) }}"
       register: ssh_results
       changed_when: false
@@ -500,7 +597,7 @@
 
     - name: Check certificate expiry on Indexers
       ansible.builtin.shell: |
-        openssl x509 -enddate -noout -in {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') }}/indexer.pem 2>/dev/null | cut -d= -f2
+        openssl x509 -enddate -noout -in {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') | quote }}/indexer.pem 2>/dev/null | cut -d= -f2
       register: indexer_cert_expiry
       changed_when: false
       failed_when: false
@@ -510,7 +607,7 @@
 
     - name: Check days until certificate expiry
       ansible.builtin.shell: |
-        expiry_date=$(openssl x509 -enddate -noout -in {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') }}/indexer.pem 2>/dev/null | cut -d= -f2)
+        expiry_date=$(openssl x509 -enddate -noout -in {{ wazuh_indexer_certs_path | default('/etc/wazuh-indexer/certs') | quote }}/indexer.pem 2>/dev/null | cut -d= -f2)
         expiry_epoch=$(date -d "$expiry_date" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$expiry_date" +%s 2>/dev/null)
         current_epoch=$(date +%s)
         days_left=$(( (expiry_epoch - current_epoch) / 86400 ))
@@ -575,7 +672,7 @@
 
     - name: Get installed Wazuh version (Manager)
       ansible.builtin.shell: |
-        /var/ossec/bin/wazuh-control info 2>/dev/null | grep "WAZUH_VERSION" | cut -d'"' -f2 || echo "Not installed"
+        {{ wazuh_manager_install_path }}/bin/{{ wazuh_manager_binary_prefix | default('wazuh-') }}control info 2>/dev/null | grep "WAZUH_VERSION" | cut -d'"' -f2 || echo "Not installed"
       register: installed_manager_version
       changed_when: false
       failed_when: false

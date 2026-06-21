@@ -1,0 +1,69 @@
+---
+- name: Verify monitoring deployment
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Check OpenSearch exporter script exists
+      ansible.builtin.stat:
+        path: "/opt/wazuh-exporter/opensearch-exporter.py"
+      register: opensearch_exporter_script
+      when: wazuh_indexer_exporter_enabled | default(true)
+
+    - name: Assert OpenSearch exporter script is deployed
+      ansible.builtin.assert:
+        that:
+          - opensearch_exporter_script.stat.exists
+        fail_msg: "OpenSearch exporter script not found"
+      when: wazuh_indexer_exporter_enabled | default(true)
+
+    - name: Check Wazuh Manager exporter script exists
+      ansible.builtin.stat:
+        path: "/opt/wazuh-exporter/wazuh-manager-exporter.py"
+      register: manager_exporter_script
+      when: wazuh_manager_exporter_enabled | default(true)
+
+    - name: Assert Wazuh Manager exporter script is deployed
+      ansible.builtin.assert:
+        that:
+          - manager_exporter_script.stat.exists
+        fail_msg: "Wazuh Manager exporter script not found"
+      when: wazuh_manager_exporter_enabled | default(true)
+
+    - name: Check OpenSearch exporter systemd service unit exists
+      ansible.builtin.stat:
+        path: "/etc/systemd/system/wazuh-opensearch-exporter.service"
+      register: opensearch_service_unit
+      when: wazuh_indexer_exporter_enabled | default(true)
+
+    - name: Assert OpenSearch exporter systemd service unit exists
+      ansible.builtin.assert:
+        that:
+          - opensearch_service_unit.stat.exists
+        fail_msg: "OpenSearch exporter service unit not found"
+      when: wazuh_indexer_exporter_enabled | default(true)
+
+    - name: Check Wazuh Manager exporter systemd service unit exists
+      ansible.builtin.stat:
+        path: "/etc/systemd/system/wazuh-manager-exporter.service"
+      register: manager_service_unit
+      when: wazuh_manager_exporter_enabled | default(true)
+
+    - name: Assert Wazuh Manager exporter systemd service unit exists
+      ansible.builtin.assert:
+        that:
+          - manager_service_unit.stat.exists
+        fail_msg: "Wazuh Manager exporter service unit not found"
+      when: wazuh_manager_exporter_enabled | default(true)
+
+    - name: Check Grafana dashboard not deployed (disabled)
+      ansible.builtin.stat:
+        path: /etc/grafana/provisioning/dashboards/wazuh.yml
+      register: grafana_dash
+
+    - name: Assert Grafana dashboard not provisioned
+      ansible.builtin.assert:
+        that:
+          - not grafana_dash.stat.exists
+        fail_msg: "Grafana dashboard should not be provisioned when disabled"
+      when: not wazuh_grafana_dashboard_enabled | default(false)

@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 # This script is used to update the version of a repository in the specified files.
 # It takes a version number as an argument and updates the version in the specified files.
@@ -11,6 +12,22 @@ VERSION=""
 STAGE=""
 FILES_EDITED=()
 FILES_EXCLUDED='--exclude="repository_bumper_*.log" --exclude="CHANGELOG.md" --exclude="repository_bumper.sh" --exclude="4_bumper_repository.yml"'
+
+cleanup() {
+    local exit_code=$?
+    if [[ $exit_code -ne 0 && -f "${LOG_FILE:-}" ]]; then
+        rm -f "$LOG_FILE"
+    fi
+    # Clean up sed backup files left on macOS
+    find "${DIR}" -name '*.bak' -delete 2>/dev/null || true
+}
+trap cleanup EXIT
+
+# macOS compat: sed -i requires an argument
+SED_IN_PLACE=(-i)
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    SED_IN_PLACE=(-i '')
+fi
 
 get_old_version_and_stage() {
     local VERSION_FILE="${DIR}/VERSION.json"
@@ -25,7 +42,11 @@ grep_command() {
     # This function is used to search for a specific string in the specified directory.
     # It takes two arguments: the string to search for and the directory to search in.
     # Usage: grep_command <string> <directory>
-    eval grep -Rl "${1}" "${2}" --exclude-dir=".git" $FILES_EXCLUDED "${3}"
+    local exclude_opts=()
+    while IFS= read -r pattern; do
+        exclude_opts+=(--exclude="$pattern")
+    done < <(printf "%s\n" "repository_bumper_*.log" "CHANGELOG.md" "repository_bumper.sh" "4_bumper_repository.yml")
+    grep -Rl "${1}" "${2}" --exclude-dir=".git" "${exclude_opts[@]}"
 }
 
 update_version_in_files() {
@@ -36,28 +57,28 @@ update_version_in_files() {
     local NEW_MAYOR="$(echo "${VERSION}" | cut -d '.' -f 1)"
     local NEW_MINOR="$(echo "${VERSION}" | cut -d '.' -f 2)"
     local NEW_PATCH="$(echo "${VERSION}" | cut -d '.' -f 3)"
-    m_m_p_files=( $(grep_command "${OLD_MAYOR}\.${OLD_MINOR}\.${OLD_PATCH}" "${DIR}") )
+    mapfile -t m_m_p_files < <(grep_command "${OLD_MAYOR}\.${OLD_MINOR}\.${OLD_PATCH}" "${DIR}")
     for file in "${m_m_p_files[@]}"; do
-        sed -i "s/\bv${OLD_MAYOR}\.${OLD_MINOR}\.${OLD_PATCH}\b/v${NEW_MAYOR}\.${NEW_MINOR}\.${NEW_PATCH}/g; s/\b${OLD_MAYOR}\.${OLD_MINOR}\.${OLD_PATCH}/${NEW_MAYOR}\.${NEW_MINOR}\.${NEW_PATCH}/g" "${file}"
+        sed "${SED_IN_PLACE[@]}" "s/\bv${OLD_MAYOR}\.${OLD_MINOR}\.${OLD_PATCH}\b/v${NEW_MAYOR}\.${NEW_MINOR}\.${NEW_PATCH}/g; s/\b${OLD_MAYOR}\.${OLD_MINOR}\.${OLD_PATCH}/${NEW_MAYOR}\.${NEW_MINOR}\.${NEW_PATCH}/g" "${file}"
         if [[ $(git diff --name-only "${file}") ]]; then
             FILES_EDITED+=("${file}")
         fi
     done
-    m_m_files=( $(grep_command "${OLD_MAYOR}\.${OLD_MINOR}" "${DIR}") )
+    mapfile -t m_m_files < <(grep_command "${OLD_MAYOR}\.${OLD_MINOR}" "${DIR}")
     for file in "${m_m_files[@]}"; do
-        sed -i -E "/[0-9]+\.[0-9]+\.[0-9]+/! s/(^|[^0-9.])(${OLD_MAYOR}\.${OLD_MINOR})([^0-9.]|$)/\1${NEW_MAYOR}.${NEW_MINOR}\3/g" "$file"
+        sed "${SED_IN_PLACE[@]}" -E "/[0-9]+\.[0-9]+\.[0-9]+/! s/(^|[^0-9.])(${OLD_MAYOR}\.${OLD_MINOR})([^0-9.]|$)/\1${NEW_MAYOR}.${NEW_MINOR}\3/g" "$file"
         if [[ $(git diff --name-only "${file}") ]]; then
             FILES_EDITED+=("${file}")
         fi
     done
-    m_x_files=( $(grep_command "${OLD_MAYOR}\.x" "${DIR}" | grep -v "${DIR}/kitchen/README.md") )
+    mapfile -t m_x_files < <(grep_command "${OLD_MAYOR}\.x" "${DIR}" | grep -v "${DIR}/kitchen/README.md")
     for file in "${m_x_files[@]}"; do
-        sed -i "s/\b${OLD_MAYOR}\.x\b/${NEW_MAYOR}\.x/g" "${file}"
+        sed "${SED_IN_PLACE[@]}" "s/\b${OLD_MAYOR}\.x\b/${NEW_MAYOR}\.x/g" "${file}"
         if [[ $(git diff --name-only "${file}") ]]; then
             FILES_EDITED+=("${file}")
         fi
     done
-    if ! sed -i "/^All notable changes to this project will be documented in this file.$/a \\\n## [${VERSION}]\\n\\n### Added\\n\\n- None\\n\\n### Changed\\n\\n- None\\n\\n### Fixed\\n\\n- None\\n\\n### Deleted\\n\\n- None" "${DIR}/CHANGELOG.md"; then
+    if ! sed "${SED_IN_PLACE[@]}" "/^All notable changes to this project will be documented in this file.$/a \\\n## [${VERSION}]\\n\\n### Added\\n\\n- None\\n\\n### Changed\\n\\n- None\\n\\n### Fixed\\n\\n- None\\n\\n### Deleted\\n\\n- None" "${DIR}/CHANGELOG.md"; then
         echo "Error: Failed to update CHANGELOG.md" | tee -a "${LOG_FILE}"
     fi
     if [[ $(git diff --name-only "${DIR}/CHANGELOG.md") ]]; then
@@ -67,9 +88,9 @@ update_version_in_files() {
 
 update_stage_in_files() {
     local OLD_STAGE="$(echo "${OLD_STAGE}")"
-    files=( $(grep_command "${OLD_STAGE}" "${DIR}") )
+    mapfile -t files < <(grep_command "${OLD_STAGE}" "${DIR}")
     for file in "${files[@]}"; do
-        sed -i "s/${OLD_STAGE}/${STAGE}/g" "${file}"
+        sed "${SED_IN_PLACE[@]}" "s/${OLD_STAGE}/${STAGE}/g" "${file}"
         if [[ $(git diff --name-only "${file}") ]]; then
             FILES_EDITED+=("${file}")
         fi
@@ -140,12 +161,14 @@ main() {
     fi
 
     echo "The following files were edited:" | tee -a "${LOG_FILE}"
-    for file in $(printf "%s\n" "${FILES_EDITED[@]}" | sort -u); do
+    while IFS= read -r file; do
         echo "${file}" | tee -a "${LOG_FILE}"
-    done
+    done < <(printf "%s\n" "${FILES_EDITED[@]}" | sort -u)
 
     echo "Version and stage updated successfully." | tee -a "${LOG_FILE}"
 }
 
-# Call the main method with all arguments
-main "$@"
+# Call the main method only when executed directly (not sourced)
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

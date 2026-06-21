@@ -65,7 +65,7 @@
 
     - name: Validate - Get root CA info
       ansible.builtin.command:
-        cmd: openssl x509 -in "{{ cert_dir }}/root-ca.pem" -noout -subject -issuer -dates
+        cmd: openssl x509 -in {{ cert_dir | quote }}/root-ca.pem -noout -subject -issuer -dates
       register: root_ca_info
       changed_when: false
       tags: [validate, check-expiry]
@@ -89,8 +89,7 @@
 
     - name: Validate - Check each certificate
       ansible.builtin.shell: |
-        cert="{{ item.path }}"
-        key="${cert%-pem}-key.pem"
+        cert={{ item.path | quote }}
         key="${cert%.pem}-key.pem"
 
         echo "=== Certificate: $(basename $cert) ==="
@@ -99,7 +98,7 @@
         openssl x509 -in "$cert" -noout -subject -dates 2>/dev/null || echo "ERROR: Invalid certificate"
 
         # Check if certificate is signed by our CA
-        if openssl verify -CAfile "{{ cert_dir }}/root-ca.pem" "$cert" 2>/dev/null | grep -q "OK"; then
+        if openssl verify -CAfile {{ cert_dir | quote }}/root-ca.pem "$cert" 2>/dev/null | grep -q "OK"; then
           echo "Chain: Valid (signed by Root CA)"
         else
           echo "Chain: WARNING - Not signed by Root CA"
@@ -137,7 +136,7 @@
 
     - name: Check Expiry - Get expiration dates for all certificates
       ansible.builtin.shell: |
-        for cert in {{ cert_dir }}/*.pem; do
+        for cert in {{ cert_dir | quote }}/*.pem; do
           [ -f "$cert" ] || continue
           [[ "$cert" == *"-key.pem" ]] && continue
 
@@ -216,10 +215,10 @@
     - name: Rotate (Idempotency) - Check if regeneration is needed
       ansible.builtin.shell: |
         needs_regen=false
-        for cert in {{ cert_dir }}/*.pem; do
+        for cert in {{ cert_dir | quote }}/*.pem; do
           [ -f "$cert" ] || continue
           [[ "$cert" == *"-key.pem" ]] && continue
-          if ! openssl x509 -in "$cert" -noout -checkend {{ (cert_renewal_threshold_days | int * 86400) | int }} 2>/dev/null; then
+          if ! openssl x509 -in "$cert" -noout -checkend {{ (cert_renewal_threshold_days | int * 86400) | int | quote }} 2>/dev/null; then
             needs_regen=true
             break
           fi
@@ -240,8 +239,8 @@
     # Self-signed rotation
     - name: Rotate (Self-Signed) - Regenerate certificates
       ansible.builtin.command:
-        cmd: "{{ playbook_dir }}/../generate-certs.sh"
-        chdir: "{{ playbook_dir }}/.."
+        cmd: "{{ playbook_dir | quote }}/../generate-certs.sh"
+        chdir: "{{ playbook_dir | quote }}/.."
       when:
         - not external_ca | bool
         - needs_regeneration.stdout | trim == 'true' or (force_rotate | default(false) | bool)
@@ -281,7 +280,7 @@
 
     - name: Rotate (External CA) - Validate certificate chain
       ansible.builtin.command:
-        cmd: openssl verify -CAfile "{{ cert_dir }}/root-ca.pem" "{{ cert_dir }}/{{ item }}"
+        cmd: openssl verify -CAfile {{ cert_dir | quote }}/root-ca.pem {{ cert_dir | quote }}/{{ item | quote }}
       loop:
         - admin.pem
       register: chain_validation
@@ -314,8 +313,8 @@
 
     - name: Renew - Regenerate expiring certificates
       ansible.builtin.command:
-        cmd: "{{ playbook_dir }}/../generate-certs.sh"
-        chdir: "{{ playbook_dir }}/.."
+        cmd: "{{ playbook_dir | quote }}/../generate-certs.sh"
+        chdir: "{{ playbook_dir | quote }}/.."
       when:
         - certs_to_renew | length > 0
         - not external_ca | bool
@@ -348,7 +347,7 @@
     - name: Wait for indexer to be ready
       ansible.builtin.wait_for:
         port: "{{ wazuh_indexer_http_port | default(9200) }}"
-        host: "{{ ansible_default_ipv4.address }}"
+        host: "{{ wazuh_node_ip }}"
         delay: 10
         timeout: 120
 
@@ -375,7 +374,7 @@
     - name: Wait for manager to be ready
       ansible.builtin.wait_for:
         port: 1514
-        host: "{{ ansible_default_ipv4.address }}"
+        host: "{{ wazuh_node_ip }}"
         delay: 10
         timeout: 120
 
@@ -402,7 +401,7 @@
     - name: Wait for dashboard to be ready
       ansible.builtin.wait_for:
         port: "{{ wazuh_dashboard_port | default(443) }}"
-        host: "{{ ansible_default_ipv4.address }}"
+        host: "{{ wazuh_node_ip }}"
         delay: 10
         timeout: 120
 
@@ -426,8 +425,10 @@
         method: GET
         user: "{{ wazuh_indexer_admin_user | default('admin') }}"
         password: "{{ wazuh_indexer_admin_password }}"
-        validate_certs: false
+        force_basic_auth: true
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200]
+      no_log: true
       register: indexer_health
       ignore_errors: true
 
@@ -435,7 +436,7 @@
       ansible.builtin.uri:
         url: "https://{{ hostvars[groups['wazuh_dashboards'][0]]['ansible_host'] | default(groups['wazuh_dashboards'][0]) }}:{{ wazuh_dashboard_port | default(443) }}/api/status"
         method: GET
-        validate_certs: false
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         status_code: [200, 401]
       register: dashboard_health
       ignore_errors: true

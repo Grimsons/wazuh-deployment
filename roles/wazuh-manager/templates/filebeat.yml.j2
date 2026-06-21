@@ -9,7 +9,7 @@ output.elasticsearch:
 {% endfor %}
   protocol: https
   username: "{{ wazuh_indexer_admin_user }}"
-  password: "{{ wazuh_indexer_admin_password }}"
+  password: "{{ wazuh_indexer_admin_password | default('') }}"
   ssl.certificate_authorities:
     - /etc/filebeat/certs/root-ca.pem
   ssl.certificate: "/etc/filebeat/certs/filebeat.pem"
@@ -53,3 +53,10 @@ logging.files:
   name: filebeat
   keepfiles: 7
   permissions: 0640
+
+{% if wazuh_is_container | default(false) %}
+# Disable seccomp filter in container environments
+# Filebeat's built-in seccomp filter conflicts with Go runtime pthread_create
+seccomp:
+  enabled: false
+{% endif %}

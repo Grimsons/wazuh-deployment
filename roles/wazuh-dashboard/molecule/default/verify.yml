@@ -1,0 +1,35 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Check wazuh-dashboard service is running
+      ansible.builtin.systemd:
+        name: wazuh-dashboard
+      register: dashboard_service
+      failed_when: dashboard_service.status.ActiveState != "active"
+
+    - name: Verify dashboard HTTPS port is open
+      ansible.builtin.wait_for:
+        port: 443
+        host: 127.0.0.1
+        timeout: 60
+
+    - name: Check opensearch_dashboards.yml is configured
+      ansible.builtin.stat:
+        path: /etc/wazuh-dashboard/opensearch_dashboards.yml
+      register: dashboard_yml
+      failed_when: not dashboard_yml.stat.exists
+
+    - name: Verify dashboard HTTP response
+      ansible.builtin.uri:
+        url: "https://127.0.0.1:443/api/status"
+        method: GET
+        validate_certs: false
+        status_code: [200, 302, 401]
+      register: dashboard_response
+      until: dashboard_response.status in [200, 302, 401]
+      retries: 12
+      delay: 10

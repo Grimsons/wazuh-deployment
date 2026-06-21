@@ -34,7 +34,7 @@ Before upgrading:
 
 ```bash
 # Upgrade to a specific version
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0"
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.14.5"
 
 # Or use the make shortcut:
 make upgrade
@@ -44,30 +44,30 @@ make upgrade
 
 ```bash
 # Upgrade only indexers
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0" --tags indexer
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.14.5" --tags indexer
 
 # Upgrade only managers
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0" --tags manager
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.14.5" --tags manager
 
 # Upgrade only dashboard
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0" --tags dashboard
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.14.5" --tags dashboard
 ```
 
 ### Agent Upgrades
 
 ```bash
 # Upgrade all agents
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0" --tags agents
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.14.5" --tags agents
 
 # Upgrade specific agent group
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0" --limit agent_group_web
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.14.5" --limit agent_group_web
 ```
 
 ## Upgrade Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `target_version` | Target Wazuh version | Required |
+| `target_version` | Target Wazuh version | `{{ wazuh_version }}` (optional) |
 | `create_backup` | Create backup before upgrade | `true` |
 | `rolling_upgrade` | Use rolling upgrade for clusters | `true` |
 | `agent_batch_size` | Agents to upgrade per batch | `10` |

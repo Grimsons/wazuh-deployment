@@ -15,6 +15,7 @@
 
 - name: Configure Wazuh repository
   ansible.builtin.include_tasks: repository.yml
+  when: not wazuh_direct_download | default(false)
 
 - name: Install Wazuh Indexer
   ansible.builtin.include_tasks: install.yml
@@ -30,7 +31,7 @@
 
 - name: Configure firewall
   ansible.builtin.include_tasks: firewall.yml
-  when: wazuh_configure_firewall | default(true)
+  when: wazuh_configure_firewall | default(false)
 
 - name: Enable Wazuh Indexer service
   ansible.builtin.systemd:
@@ -50,10 +51,48 @@
 - name: Wait for Wazuh Indexer to be listening
   ansible.builtin.wait_for:
     port: "{{ wazuh_indexer_http_port }}"
-    host: "{{ ansible_default_ipv4.address }}"
+    host: "{{ wazuh_node_ip | default('127.0.0.1') }}"
     delay: "{{ wazuh_indexer_health_check_delay }}"
     timeout: "{{ wazuh_indexer_startup_timeout }}"
   become: true
+  register: indexer_start_wait
+  ignore_errors: true
+
+- name: Collect diagnostic info if indexer failed to start
+  when: indexer_start_wait is failed
+  block:
+    - name: Get indexer service status
+      ansible.builtin.systemd:
+        name: "{{ wazuh_indexer_service_name }}"
+      become: true
+      register: diag_service
+      failed_when: false
+
+    - name: Get OpenSearch journal logs
+      ansible.builtin.command:
+        cmd: journalctl -u "{{ wazuh_indexer_service_name }}" --no-pager -n 100
+      become: true
+      register: diag_journal
+      failed_when: false
+
+    - name: Get OpenSearch log file contents
+      ansible.builtin.command:
+        cmd: cat {{ wazuh_indexer_log_path }}/wazuh-indexer.log 2>/dev/null || cat {{ wazuh_indexer_log_path }}/opensearch.log 2>/dev/null || echo "No log file found"
+      become: true
+      register: diag_log
+      failed_when: false
+
+    - name: Dump diagnostic info
+      ansible.builtin.debug:
+        msg: |
+          === Indexer Service Status ===
+          {{ diag_service.status | default('N/A') }}
+
+          === Journal Logs (last 100 lines) ===
+          {{ diag_journal.stdout | default('N/A') }}
+
+          === OpenSearch Log ===
+          {{ diag_log.stdout | default('N/A') }}
 
 - name: Verify Wazuh Indexer service is running
   ansible.builtin.systemd:
@@ -79,7 +118,7 @@
 - name: Wait for Indexer to be ready after restart
   ansible.builtin.wait_for:
     port: "{{ wazuh_indexer_http_port }}"
-    host: "{{ ansible_default_ipv4.address }}"
+    host: "{{ wazuh_node_ip | default('127.0.0.1') }}"
     delay: "{{ wazuh_indexer_health_check_delay }}"
     timeout: "{{ wazuh_indexer_startup_timeout }}"
   become: true
@@ -91,11 +130,11 @@
 # Detect fresh install vs re-run by trying vault password against the indexer
 - name: Check Wazuh Indexer with vault credentials
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_cluster/health"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port }}/_cluster/health"
     user: "admin"
     password: "{{ wazuh_indexer_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200, 401]
     return_content: true
   register: indexer_health_vault
@@ -115,11 +154,11 @@
 # Wait for security to be ready with default credentials (fresh install only)
 - name: Wait for Wazuh Indexer security to be ready (fresh install)
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_cluster/health"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port }}/_cluster/health"
     user: "admin"
     password: "{{ wazuh_indexer_default_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200]
     return_content: true
   register: indexer_health_initial
@@ -147,14 +186,15 @@
 # Final health check with new password
 - name: Wait for Wazuh Indexer to be ready with credentials
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_cluster/health"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port }}/_cluster/health"
     user: "admin"
     password: "{{ wazuh_admin_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
     status_code: [200]
     return_content: true
   register: indexer_health
+  no_log: true
   until: indexer_health.status == 200
   retries: 10
   delay: 5
@@ -178,5 +218,5 @@
       Cluster status: {{ (indexer_health.content | from_json).status | default('unknown') }}
       Credentials: Managed by Ansible Vault (group_vars/all/vault.yml)
       ═══════════════════════════════════════════════════════════════
-  when: indexer_health is defined and indexer_health.status == 200
+  when: (indexer_health | default({})).status | default('') == 200
   run_once: true

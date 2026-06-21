@@ -33,22 +33,22 @@ This guide provides best practices and operational procedures for managing your 
 
 - [ ] Run `./setup.sh` (or `./setup-tui.sh` for the TUI version) and complete the interactive wizard
 - [ ] Note the admin credentials displayed at the end
-- [ ] Verify `.vault_password` file was created
+- [ ] Verify `~/.config/wazuh-deployment/.vault_password` was created
+- [ ] Configure git hooks: `make setup-hooks`
 
 ### Bootstrap & Deployment
 
 ```bash
 # 1. First-time deployment (bootstrap + deploy in one step)
-ansible-playbook site.yml --tags bootstrap,all --ask-pass
-
-# Or use the make shortcut:
 make deploy-bootstrap
+# Manual: ansible-playbook site.yml --tags bootstrap,all --ask-pass --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
-# 2. Subsequent deployments (uses SSH key auth from bootstrap)
-ansible-playbook site.yml
+# 2. Bootstrap only (if using separate bootstrap playbook)
+ansible-playbook playbooks/bootstrap-hosts.yml -i inventory/bootstrap.yml --ask-pass
 
-# Or use the make shortcut:
+# 3. Subsequent deployments (uses SSH key auth from bootstrap)
 make deploy
+# Manual: ansible-playbook site.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password
 ```
 
 The bootstrap step creates the `wazuh-deploy` user on all hosts with:
@@ -59,12 +59,13 @@ After bootstrap, all operations use the main inventory (`hosts.yml`) with SSH ke
 
 ### After Deployment
 
-- [ ] **CRITICAL**: Back up `.vault_password` to secure offline storage
+- [ ] **CRITICAL**: Back up `~/.config/wazuh-deployment/.vault_password` to secure offline storage
 - [ ] Back up `group_vars/all/vault.yml` (encrypted credentials)
 - [ ] Test dashboard login at `https://<dashboard-ip>:443`
-- [ ] Verify all services running: `ansible-playbook playbooks/health-check.yml`
-- [ ] Quick status check: `./scripts/status.sh` (or `make status`)
-- [ ] Test credential retrieval: `./scripts/manage-vault.sh view`
+- [ ] Verify all services running: `make health`
+- [ ] Quick status check: `make status`
+- [ ] Test credential retrieval: `make vault-view`
+- [ ] Configure git hooks: `make setup-hooks`
 - [ ] Configure automated backups (see [Maintenance Schedule](#maintenance-schedule))
 
 ---
@@ -113,7 +114,7 @@ Change the vault encryption password periodically:
 
 | Practice | Recommendation |
 |----------|----------------|
-| Vault password backup | Store in password manager AND offline (USB/printed) |
+| Vault password backup | Store `~/.config/wazuh-deployment/.vault_password` in password manager AND offline (USB/printed) |
 | Credential rotation | Every 90 days or after personnel changes |
 | Vault rekey | Every 6 months |
 | Access control | Limit who can access the deployment host |
@@ -222,6 +223,32 @@ Default hardening settings (already configured):
 - [ ] Vault password stored securely offline
 - [ ] Regular credential rotation scheduled
 
+### Secrets Integration
+
+The secrets integration playbook syncs credentials from Ansible Vault to external secret managers:
+
+```bash
+# Sync vault credentials to external secret manager
+ansible-playbook playbooks/secrets-integration.yml
+```
+
+Supports HashiCorp Vault, AWS Secrets Manager, and Azure Key Vault backends.
+Configure the target backend in `group_vars/all/main.yml` under the `wazuh_secrets_integration` key.
+
+### Compliance Report
+
+Generate a compliance report summarizing the security posture of your deployment:
+
+```bash
+# Generate and save compliance report
+ansible-playbook playbooks/compliance-report.yml
+
+# Save report to specific path
+ansible-playbook playbooks/compliance-report.yml -e "report_path=/tmp/compliance-$(date +%Y%m%d).json"
+```
+
+Reports cover TLS settings, credential rotation status, certificate expiry, firewall rules, and security hardening configuration.
+
 ---
 
 ## Maintenance Schedule
@@ -272,7 +299,7 @@ ansible-playbook playbooks/backup.yml
 make backup
 
 # Backup with index snapshots (larger, includes alert data)
-ansible-playbook playbooks/backup.yml -e "include_indices=true"
+ansible-playbook playbooks/backup.yml -e "backup_indexer_data=true"
 ```
 
 ### What Gets Backed Up
@@ -309,7 +336,7 @@ make restore BACKUP_ID=20260121_020000
 For complete recovery on new infrastructure:
 
 1. Install Ansible on new control node
-2. Restore `.vault_password` from secure backup
+2. Restore `~/.config/wazuh-deployment/.vault_password` from secure backup
 3. Restore `group_vars/all/vault.yml`
 4. Update `inventory/hosts.yml` with new host IPs
 5. Run: `ansible-playbook site.yml`
@@ -411,7 +438,7 @@ ansible-playbook playbooks/upgrade.yml
 make upgrade
 
 # Upgrade to specific version
-ansible-playbook playbooks/upgrade.yml -e "target_version=4.12.0"
+ansible-playbook playbooks/upgrade.yml -e "target_version=4.14.5"
 ```
 
 ### Post-Upgrade Verification
@@ -535,29 +562,32 @@ ssh <manager-ip> 'sudo tail -100 /var/ossec/logs/alerts/alerts.json | jq .'
 
 ```bash
 # View credentials
-./scripts/manage-vault.sh view          # or: make vault-view
+make vault-view
 
 # Quick status
-./scripts/status.sh                     # or: make status
+make status
 
 # Health check
-ansible-playbook playbooks/health-check.yml  # or: make health
+make health
 
 # Backup
-ansible-playbook playbooks/backup.yml   # or: make backup
+make backup
 
 # Rotate credentials
-./scripts/manage-vault.sh rotate        # or: make vault-rotate
+make vault-rotate
 
 # Check certificates
 make certs-check
 
 # OS security updates
-ansible-playbook playbooks/system-update.yml -e "security_only=true"
+ansible-playbook playbooks/system-update.yml -e "security_only=true" --vault-password-file ~/.config/wazuh-deployment/.vault_password
 
 # Wazuh upgrade (dry run)
 make upgrade-check
 
 # Full deployment
-ansible-playbook site.yml               # or: make deploy
+make deploy
+
+# Docker test environment
+make docker-setup
 ```

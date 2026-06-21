@@ -23,6 +23,10 @@ set -euo pipefail
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Vault password stored outside the repo with restrictive permissions
+VAULT_PASSWORD_DIR="${HOME}/.config/wazuh-deployment"
+VAULT_PASSWORD_FILE="$VAULT_PASSWORD_DIR/.vault_password"
+
 # ═══════════════════════════════════════════════════════════════
 # Source modular libraries
 # ═══════════════════════════════════════════════════════════════
@@ -100,7 +104,7 @@ ${YELLOW}Quick Start:${NC}
 
   2. Follow the prompts to configure your deployment
 
-  3. Run: ansible-playbook site.yml --vault-password-file .vault_password
+  3. Run: ansible-playbook site.yml --vault-password-file ${VAULT_PASSWORD_FILE}
 
 EOF
 }
@@ -140,18 +144,18 @@ done
 # Validate profile if specified
 if [[ -n "$SELECTED_PROFILE" ]]; then
     case "$SELECTED_PROFILE" in
-        minimal|production|custom)
+        minimal|production|custom|docker)
             ;;
         *)
             echo -e "${RED}Error: Invalid profile '$SELECTED_PROFILE'${NC}"
-            echo "Valid profiles: minimal, production, custom"
+            echo "Valid profiles: minimal, production, custom, docker"
             exit 1
             ;;
     esac
 fi
 
 # Default values
-DEFAULT_WAZUH_VERSION="4.14.1"
+DEFAULT_WAZUH_VERSION="4.14.5"
 DEFAULT_INDEXER_HTTP_PORT="9200"
 DEFAULT_INDEXER_TRANSPORT_PORT="9300"
 DEFAULT_DASHBOARD_PORT="443"
@@ -210,10 +214,12 @@ sanitize_alphanum() {
 }
 
 sanitize_path() {
-    # Allow path characters but prevent traversal
     local path="$1"
-    # Remove any ../ sequences
-    path="${path//\.\.\//}"
+    # Iterative removal: single-pass misses crafted inputs like "..../"
+    while [[ "$path" == *".."* ]]; do
+        path="${path//\.\.\//}"
+        path="${path//\.\./}"
+    done
     echo "$path" | tr -cd 'a-zA-Z0-9._/-'
 }
 
@@ -252,6 +258,15 @@ prompt_with_default() {
     local is_password="${4:-false}"
     local value=""
 
+    # Skip prompt if variable already has a value (set by profile or env)
+    # including empty string (must handle indirect reference for bash compat)
+    if [[ -n "${!var_name+defined}" ]]; then
+        if [ "$is_password" != "true" ]; then
+            print_info "$prompt: ${!var_name:-}"
+        fi
+        return 0
+    fi
+
     if [ "$is_password" = "true" ]; then
         # For passwords, -s hides input, no -e needed since no editing visible
         read -rsp "$(echo -e "${CYAN}$prompt ${NC}[${YELLOW}hidden${NC}]: ")" value
@@ -274,6 +289,13 @@ prompt_yes_no() {
     local default="$2"
     local var_name="$3"
     local value=""
+
+    # Skip prompt if variable already has a value (set by profile or env)
+    # including empty string (must handle indirect reference for bash compat)
+    if [[ -n "${!var_name+defined}" ]]; then
+        print_info "$prompt: ${!var_name}"
+        return 0
+    fi
 
     while true; do
         read -erp "$(echo -e "${CYAN}$prompt ${NC}[${YELLOW}$default${NC}]: ")" value
@@ -323,7 +345,7 @@ prompt_hosts() {
 generate_password() {
     local length="${1:-24}"
     local password=""
-    local symbols='!@#$%^&*'
+    local symbols='@^_+-='
 
     # Generate base password with mixed characters
     local base_len=$((length - 4))
@@ -358,7 +380,7 @@ generate_password() {
     password="${password}${upper}${lower}${number}${symbol}"
 
     # Shuffle the password to distribute special chars
-    password=$(echo "$password" | fold -w1 | shuf | tr -d '\n')
+    password=$(echo "$password" | fold -w1 | shuf --random-source=/dev/urandom | tr -d '\n')
 
     echo "$password"
 }
@@ -384,12 +406,14 @@ main() {
             echo -e "${CYAN}Select Deployment Profile:${NC}"
             echo -e "  ${YELLOW}1)${NC} minimal     - Single-node for testing"
             echo -e "  ${YELLOW}2)${NC} production  - Multi-node HA setup ${GREEN}[default]${NC}"
-            echo -e "  ${YELLOW}3)${NC} custom      - Full interactive"
+            echo -e "  ${YELLOW}3)${NC} docker      - Docker container environment"
+            echo -e "  ${YELLOW}4)${NC} custom      - Full interactive"
             echo
             read -erp "$(echo -e "${CYAN}Select profile ${NC}[${YELLOW}2${NC}]: ")" profile_choice
             case "${profile_choice:-2}" in
                 1) SELECTED_PROFILE="minimal" ;;
-                3) SELECTED_PROFILE="custom" ;;
+                3) SELECTED_PROFILE="docker" ;;
+                4) SELECTED_PROFILE="custom" ;;
                 *) SELECTED_PROFILE="production" ;;
             esac
         fi
@@ -419,6 +443,12 @@ main() {
             print_info "Using PRODUCTION profile - multi-node HA setup"
             if [[ "$MODULAR_MODE" == "true" ]]; then
                 apply_profile_production
+            fi
+            ;;
+        docker)
+            print_info "Using DOCKER profile - containerized deployment"
+            if [[ "$MODULAR_MODE" == "true" ]]; then
+                apply_profile_docker
             fi
             ;;
         custom)
@@ -501,7 +531,11 @@ main() {
     print_info "The Wazuh Manager analyzes data received from agents."
     echo
 
-    prompt_hosts "Enter Wazuh Manager node(s)" "MANAGER_NODES"
+    if [[ -z "${MANAGER_NODES:-}" ]]; then
+        prompt_hosts "Enter Wazuh Manager node(s)" "MANAGER_NODES"
+    else
+        print_info "Manager nodes: $MANAGER_NODES"
+    fi
 
     if [ -z "$MANAGER_NODES" ]; then
         print_error "At least one Manager node is required!"
@@ -511,8 +545,17 @@ main() {
     IFS=' ' read -r -a MANAGER_NODES_ARRAY <<< "$MANAGER_NODES"
     MANAGER_COUNT=${#MANAGER_NODES_ARRAY[@]}
 
-    prompt_with_default "Manager API port" "$DEFAULT_MANAGER_API_PORT" "MANAGER_API_PORT"
-    prompt_with_default "Agent registration port" "$DEFAULT_AGENT_PORT" "AGENT_PORT"
+    if [[ -z "${MANAGER_API_PORT:-}" ]]; then
+        prompt_with_default "Manager API port" "$DEFAULT_MANAGER_API_PORT" "MANAGER_API_PORT"
+    else
+        print_info "Manager API port: $MANAGER_API_PORT"
+    fi
+
+    if [[ -z "${AGENT_PORT:-}" ]]; then
+        prompt_with_default "Agent registration port" "$DEFAULT_AGENT_PORT" "AGENT_PORT"
+    else
+        print_info "Agent registration port: $AGENT_PORT"
+    fi
 
     if [ $MANAGER_COUNT -gt 1 ]; then
         print_info "Multiple managers detected. Configuring cluster..."
@@ -543,7 +586,11 @@ main() {
     print_info "The Wazuh Dashboard provides a web interface for data visualization."
     echo
 
-    prompt_hosts "Enter Wazuh Dashboard node(s)" "DASHBOARD_NODES"
+    if [[ -z "${DASHBOARD_NODES:-}" ]]; then
+        prompt_hosts "Enter Wazuh Dashboard node(s)" "DASHBOARD_NODES"
+    else
+        print_info "Dashboard nodes: $DASHBOARD_NODES"
+    fi
 
     if [ -z "$DASHBOARD_NODES" ]; then
         print_error "At least one Dashboard node is required!"
@@ -552,7 +599,11 @@ main() {
 
     IFS=' ' read -r -a DASHBOARD_NODES_ARRAY <<< "$DASHBOARD_NODES"
 
-    prompt_with_default "Dashboard HTTPS port" "$DEFAULT_DASHBOARD_PORT" "DASHBOARD_PORT"
+    if [[ -z "${DASHBOARD_PORT:-}" ]]; then
+        prompt_with_default "Dashboard HTTPS port" "$DEFAULT_DASHBOARD_PORT" "DASHBOARD_PORT"
+    else
+        print_info "Dashboard port: $DASHBOARD_PORT"
+    fi
 
     # ═══════════════════════════════════════════════════════════════
     # WAZUH AGENTS CONFIGURATION
@@ -562,11 +613,19 @@ main() {
     print_info "Wazuh Agents collect and forward security data from monitored systems."
     echo
 
-    prompt_yes_no "Do you want to deploy agents now?" "yes" "DEPLOY_AGENTS"
+    if [[ -z "${DEPLOY_AGENTS:-}" ]]; then
+        prompt_yes_no "Do you want to deploy agents now?" "yes" "DEPLOY_AGENTS"
+    else
+        print_info "Deploy agents: $DEPLOY_AGENTS"
+    fi
 
     AGENT_NODES_ARRAY=()
     if [ "$DEPLOY_AGENTS" = "true" ]; then
-        prompt_hosts "Enter Agent host(s)" "AGENT_NODES"
+        if [[ -z "${AGENT_NODES:-}" ]]; then
+            prompt_hosts "Enter Agent host(s)" "AGENT_NODES"
+        else
+            print_info "Agent nodes: $AGENT_NODES"
+        fi
         # Use read -a to safely split into array without glob expansion
         IFS=' ' read -r -a AGENT_NODES_ARRAY <<< "$AGENT_NODES"
     fi
@@ -580,7 +639,11 @@ main() {
     print_info "Credentials will be encrypted in Ansible Vault and displayed at the end."
     echo
 
-    prompt_yes_no "Provide custom passwords instead of auto-generating?" "no" "CUSTOM_PASSWORDS"
+    if [[ -z "${CUSTOM_PASSWORDS:-}" ]]; then
+        prompt_yes_no "Provide custom passwords instead of auto-generating?" "no" "CUSTOM_PASSWORDS"
+    else
+        print_info "Custom passwords: $CUSTOM_PASSWORDS"
+    fi
 
     if [ "$CUSTOM_PASSWORDS" = "true" ]; then
         prompt_with_default "Wazuh API admin username" "wazuh" "API_USER"
@@ -608,7 +671,7 @@ main() {
     # Vault is enabled by default for security
     USE_VAULT="true"
     print_success "Ansible Vault will be used for credential encryption"
-    print_info "Vault password will be stored in: .vault_password"
+    print_info "Vault password will be stored in: ${VAULT_PASSWORD_FILE}"
     print_info "Encrypted credentials will be in: group_vars/all/vault.yml"
 
     # ═══════════════════════════════════════════════════════════════
@@ -620,7 +683,11 @@ main() {
     print_info "You can use self-signed certificates or your own CA certificates."
     echo
 
-    prompt_yes_no "Use self-signed certificates? (No = provide your own)" "yes" "USE_SELF_SIGNED_CERTS"
+    if [[ -z "${USE_SELF_SIGNED_CERTS:-}" ]]; then
+        prompt_yes_no "Use self-signed certificates? (No = provide your own)" "yes" "USE_SELF_SIGNED_CERTS"
+    else
+        print_info "Self-signed certificates: $USE_SELF_SIGNED_CERTS"
+    fi
 
     if [ "$USE_SELF_SIGNED_CERTS" = "true" ]; then
         GENERATE_CERTS="true"
@@ -636,7 +703,7 @@ main() {
         print_info "  - admin.pem, admin-key.pem (Admin certificate)"
         print_info "  - indexer-N.pem, indexer-N-key.pem (Indexer nodes)"
         print_info "  - manager-N.pem, manager-N-key.pem (Manager nodes)"
-        print_info "  - dashboard.pem, dashboard-key.pem (Dashboard)"
+        print_info "  - dashboard-1.pem, dashboard-1-key.pem (Dashboard)"
         echo
         print_warning "Ensure your certificates include proper SANs for all hostnames/IPs"
     fi
@@ -666,7 +733,11 @@ main() {
         [ $found -eq 0 ] && ALL_INFRA_HOSTS+=("$h")
     done
 
-    prompt_yes_no "Generate new SSH key pair for Ansible?" "yes" "GENERATE_SSH_KEY"
+    if [[ -z "${GENERATE_SSH_KEY:-}" ]]; then
+        prompt_yes_no "Generate new SSH key pair for Ansible?" "yes" "GENERATE_SSH_KEY"
+    else
+        print_info "Generate SSH key: $GENERATE_SSH_KEY"
+    fi
 
     if [ "$GENERATE_SSH_KEY" = "true" ]; then
         ANSIBLE_SSH_KEY="${SCRIPT_DIR}/keys/wazuh_ansible_key"
@@ -685,7 +756,11 @@ main() {
     # Per-host SSH credentials
     echo
     print_info "You can configure SSH credentials per host, or use the same for all."
-    prompt_yes_no "Do all hosts use the same initial SSH user/password?" "yes" "SAME_SSH_CREDS"
+    if [[ -z "${SAME_SSH_CREDS:-}" ]]; then
+        prompt_yes_no "Do all hosts use the same initial SSH user/password?" "yes" "SAME_SSH_CREDS"
+    else
+        print_info "Same SSH credentials: $SAME_SSH_CREDS"
+    fi
 
     # Declare associative arrays for per-host credentials
     declare -gA HOST_SSH_USER
@@ -752,13 +827,27 @@ main() {
     print_info "Configure which Wazuh security modules to enable."
     echo
 
-    prompt_yes_no "Enable Vulnerability Detection?" "yes" "ENABLE_VULN_DETECTION"
-    prompt_yes_no "Enable File Integrity Monitoring (FIM)?" "yes" "ENABLE_FIM"
-    prompt_yes_no "Enable Rootkit Detection?" "yes" "ENABLE_ROOTKIT"
-    prompt_yes_no "Enable Security Configuration Assessment (SCA)?" "yes" "ENABLE_SCA"
-    prompt_yes_no "Enable System Inventory (Syscollector)?" "yes" "ENABLE_SYSCOLLECTOR"
-    prompt_yes_no "Enable Log Collection?" "yes" "ENABLE_LOG_COLLECTION"
-    prompt_yes_no "Enable Active Response?" "yes" "ENABLE_ACTIVE_RESPONSE"
+    if [[ -z "${ENABLE_VULN_DETECTION:-}" ]]; then
+        prompt_yes_no "Enable Vulnerability Detection?" "yes" "ENABLE_VULN_DETECTION"
+    fi
+    if [[ -z "${ENABLE_FIM:-}" ]]; then
+        prompt_yes_no "Enable File Integrity Monitoring (FIM)?" "yes" "ENABLE_FIM"
+    fi
+    if [[ -z "${ENABLE_ROOTKIT:-}" ]]; then
+        prompt_yes_no "Enable Rootkit Detection?" "yes" "ENABLE_ROOTKIT"
+    fi
+    if [[ -z "${ENABLE_SCA:-}" ]]; then
+        prompt_yes_no "Enable Security Configuration Assessment (SCA)?" "yes" "ENABLE_SCA"
+    fi
+    if [[ -z "${ENABLE_SYSCOLLECTOR:-}" ]]; then
+        prompt_yes_no "Enable System Inventory (Syscollector)?" "yes" "ENABLE_SYSCOLLECTOR"
+    fi
+    if [[ -z "${ENABLE_LOG_COLLECTION:-}" ]]; then
+        prompt_yes_no "Enable Log Collection?" "yes" "ENABLE_LOG_COLLECTION"
+    fi
+    if [[ -z "${ENABLE_ACTIVE_RESPONSE:-}" ]]; then
+        prompt_yes_no "Enable Active Response?" "yes" "ENABLE_ACTIVE_RESPONSE"
+    fi
 
     # ═══════════════════════════════════════════════════════════════
     # EMAIL ALERTS CONFIGURATION
@@ -838,57 +927,71 @@ main() {
     echo
 
     # Backup schedule
-    echo -e "${CYAN}Backup schedule options:${NC}"
-    echo "  1) Daily (recommended for production)"
-    echo "  2) Weekly"
-    echo "  3) Disabled (manual backups only)"
-    echo
-    read -erp "$(echo -e "${YELLOW}Select backup schedule [1]: ${NC}")" BACKUP_SCHEDULE_CHOICE
-    BACKUP_SCHEDULE_CHOICE=${BACKUP_SCHEDULE_CHOICE:-1}
+    if [[ -z "${BACKUP_SCHEDULE:-}" ]]; then
+        echo -e "${CYAN}Backup schedule options:${NC}"
+        echo "  1) Daily (recommended for production)"
+        echo "  2) Weekly"
+        echo "  3) Disabled (manual backups only)"
+        echo
+        read -erp "$(echo -e "${YELLOW}Select backup schedule [1]: ${NC}")" BACKUP_SCHEDULE_CHOICE
+        BACKUP_SCHEDULE_CHOICE=${BACKUP_SCHEDULE_CHOICE:-1}
 
-    case $BACKUP_SCHEDULE_CHOICE in
-        1)
-            BACKUP_SCHEDULE="daily"
-            prompt_with_default "Backup hour (0-23)" "2" "BACKUP_HOUR"
-            ;;
-        2)
-            BACKUP_SCHEDULE="weekly"
-            prompt_with_default "Backup hour (0-23)" "2" "BACKUP_HOUR"
-            echo -e "${CYAN}Day options: 0=Sunday, 1=Monday, ..., 6=Saturday${NC}"
-            prompt_with_default "Backup day of week (0-6)" "0" "BACKUP_DAY"
-            ;;
-        3)
-            BACKUP_SCHEDULE="disabled"
-            ;;
-        *)
-            BACKUP_SCHEDULE="daily"
-            BACKUP_HOUR="2"
-            ;;
-    esac
+        case $BACKUP_SCHEDULE_CHOICE in
+            1)
+                BACKUP_SCHEDULE="daily"
+                prompt_with_default "Backup hour (0-23)" "2" "BACKUP_HOUR"
+                ;;
+            2)
+                BACKUP_SCHEDULE="weekly"
+                prompt_with_default "Backup hour (0-23)" "2" "BACKUP_HOUR"
+                echo -e "${CYAN}Day options: 0=Sunday, 1=Monday, ..., 6=Saturday${NC}"
+                prompt_with_default "Backup day of week (0-6)" "0" "BACKUP_DAY"
+                ;;
+            3)
+                BACKUP_SCHEDULE="disabled"
+                ;;
+            *)
+                BACKUP_SCHEDULE="daily"
+                BACKUP_HOUR="2"
+                ;;
+        esac
+    else
+        print_info "Backup schedule: $BACKUP_SCHEDULE"
+    fi
 
     if [ "$BACKUP_SCHEDULE" != "disabled" ]; then
-        prompt_with_default "Number of backups to keep" "7" "BACKUP_RETENTION"
+        if [[ -z "${BACKUP_RETENTION:-}" ]]; then
+            prompt_with_default "Number of backups to keep" "7" "BACKUP_RETENTION"
+        fi
     fi
 
     echo
 
     # Log cleanup
-    prompt_yes_no "Enable automatic log cleanup on manager?" "yes" "ENABLE_LOG_CLEANUP"
+    if [[ -z "${ENABLE_LOG_CLEANUP:-}" ]]; then
+        prompt_yes_no "Enable automatic log cleanup on manager?" "yes" "ENABLE_LOG_CLEANUP"
+    fi
 
     if [ "$ENABLE_LOG_CLEANUP" = "true" ]; then
-        prompt_with_default "Days of logs to keep" "30" "LOG_RETENTION_DAYS"
-        echo -e "${CYAN}Log cleanup schedule:${NC}"
-        echo "  1) Daily (recommended)"
-        echo "  2) Weekly"
-        echo
-        read -erp "$(echo -e "${YELLOW}Select log cleanup schedule [1]: ${NC}")" LOG_CLEANUP_SCHEDULE_CHOICE
-        LOG_CLEANUP_SCHEDULE_CHOICE=${LOG_CLEANUP_SCHEDULE_CHOICE:-1}
+        if [[ -z "${LOG_RETENTION_DAYS:-}" ]]; then
+            prompt_with_default "Days of logs to keep" "30" "LOG_RETENTION_DAYS"
+        fi
+        if [[ -z "${LOG_CLEANUP_SCHEDULE:-}" ]]; then
+            echo -e "${CYAN}Log cleanup schedule:${NC}"
+            echo "  1) Daily (recommended)"
+            echo "  2) Weekly"
+            echo
+            read -erp "$(echo -e "${YELLOW}Select log cleanup schedule [1]: ${NC}")" LOG_CLEANUP_SCHEDULE_CHOICE
+            LOG_CLEANUP_SCHEDULE_CHOICE=${LOG_CLEANUP_SCHEDULE_CHOICE:-1}
 
-        case $LOG_CLEANUP_SCHEDULE_CHOICE in
-            1) LOG_CLEANUP_SCHEDULE="daily" ;;
-            2) LOG_CLEANUP_SCHEDULE="weekly" ;;
-            *) LOG_CLEANUP_SCHEDULE="daily" ;;
-        esac
+            case $LOG_CLEANUP_SCHEDULE_CHOICE in
+                1) LOG_CLEANUP_SCHEDULE="daily" ;;
+                2) LOG_CLEANUP_SCHEDULE="weekly" ;;
+                *) LOG_CLEANUP_SCHEDULE="daily" ;;
+            esac
+        else
+            print_info "Log cleanup schedule: $LOG_CLEANUP_SCHEDULE"
+        fi
     fi
 
     # ═══════════════════════════════════════════════════════════════
@@ -957,8 +1060,11 @@ EOF
 EOF
 
     # Add dashboard hosts (simplified)
-    for node in "${DASHBOARD_NODES_ARRAY[@]}"; do
+    for i in "${!DASHBOARD_NODES_ARRAY[@]}"; do
+        node="${DASHBOARD_NODES_ARRAY[$i]}"
+        node_name="dashboard-$((i+1))"
         echo "        ${node}:" >> "$SCRIPT_DIR/inventory/hosts.yml"
+        echo "          dashboard_node_name: ${node_name}" >> "$SCRIPT_DIR/inventory/hosts.yml"
     done
 
     if [ "$DEPLOY_AGENTS" = "true" ] && [ -n "$AGENT_NODES" ]; then
@@ -1103,6 +1209,82 @@ EOF
 
     print_success "Bootstrap inventory created: inventory/bootstrap.yml"
 
+    # ========================================
+    # Docker inventory (docker-hosts.yml) - Container names for docker-bootstrap
+    # Only generated for docker profile
+    # ========================================
+    if [ "${SELECTED_PROFILE:-}" = "docker" ]; then
+        cat > "$SCRIPT_DIR/inventory/docker-hosts.yml" << EOF
+---
+# Docker Inventory - Container names for docker-bootstrap, IPs for SSH
+all:
+  vars:
+    ansible_user: wazuh-deploy
+    ansible_ssh_private_key_file: ${ANSIBLE_SSH_KEY}
+    ansible_port: ${ANSIBLE_SSH_PORT}
+    ansible_become: ${USE_BECOME}
+
+  children:
+    wazuh_indexers:
+      hosts:
+EOF
+        for i in "${!INDEXER_NODES_ARRAY[@]}"; do
+            node="${INDEXER_NODES_ARRAY[$i]}"
+            node_name="indexer-$((i+1))"
+            echo "        ${node_name}:" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            echo "          ansible_host: ${node}" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            echo "          indexer_node_name: ${node_name}" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            if [ $i -eq 0 ]; then
+                echo "          indexer_cluster_initial_master: true" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            fi
+        done
+
+        cat >> "$SCRIPT_DIR/inventory/docker-hosts.yml" << EOF
+
+    wazuh_managers:
+      hosts:
+EOF
+        for i in "${!MANAGER_NODES_ARRAY[@]}"; do
+            node="${MANAGER_NODES_ARRAY[$i]}"
+            node_name="manager-$((i+1))"
+            echo "        ${node_name}:" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            echo "          ansible_host: ${node}" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            echo "          manager_node_name: ${node_name}" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            if [ $i -eq 0 ]; then
+                echo "          manager_node_type: master" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            fi
+        done
+
+        cat >> "$SCRIPT_DIR/inventory/docker-hosts.yml" << EOF
+
+    wazuh_dashboards:
+      hosts:
+EOF
+        for i in "${!DASHBOARD_NODES_ARRAY[@]}"; do
+            node="${DASHBOARD_NODES_ARRAY[$i]}"
+            node_name="dashboard-$((i+1))"
+            echo "        ${node_name}:" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            echo "          ansible_host: ${node}" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            echo "          dashboard_node_name: ${node_name}" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+        done
+
+        if [ "$DEPLOY_AGENTS" = "true" ] && [ -n "$AGENT_NODES" ]; then
+            cat >> "$SCRIPT_DIR/inventory/docker-hosts.yml" << EOF
+
+    wazuh_agents:
+      hosts:
+EOF
+            for i in "${!AGENT_NODES_ARRAY[@]}"; do
+                node="${AGENT_NODES_ARRAY[$i]}"
+                node_name="agent-$((i+1))"
+                echo "        ${node_name}:" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+                echo "          ansible_host: ${node}" >> "$SCRIPT_DIR/inventory/docker-hosts.yml"
+            done
+        fi
+
+        print_success "Docker inventory created: inventory/docker-hosts.yml"
+    fi
+
     # Create group_vars/all/main.yml
     print_info "Creating group variables..."
     mkdir -p "$SCRIPT_DIR/group_vars/all"
@@ -1144,7 +1326,7 @@ EOF
     cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << 'EOF'
 # Indexer admin password loaded from Ansible Vault
 # SECURITY: Password encrypted in group_vars/all/vault.yml
-# To view/edit: ansible-vault view/edit group_vars/all/vault.yml --vault-password-file .vault_password
+# To view/edit: ansible-vault view/edit group_vars/all/vault.yml --vault-password-file ${VAULT_PASSWORD_FILE}
 wazuh_indexer_admin_password: "{{ vault_wazuh_indexer_admin_password }}"
 EOF
 
@@ -1187,6 +1369,9 @@ wazuh_api_password: "{{ vault_wazuh_api_password }}"
 
 # Agent enrollment password loaded from Ansible Vault
 wazuh_agent_enrollment_password: "{{ vault_wazuh_agent_enrollment_password }}"
+
+# Filebeat writer password (scoped indexer user — not admin)
+wazuh_filebeat_password: "{{ vault_wazuh_filebeat_password }}"
 EOF
 
     # Build per-host SSH credentials string for vault (format: host1:user1:pass1,host2:user2:pass2)
@@ -1202,9 +1387,14 @@ EOF
         fi
     done
 
-    # Generate enrollment password
-    GENERATED_ENROLLMENT_PASSWORD=$(generate_password 24)
-    print_info "Generated agent enrollment password"
+    # Use provided enrollment password or generate one
+    if [ -n "${ENROLLMENT_PASSWORD:-}" ]; then
+        GENERATED_ENROLLMENT_PASSWORD="$ENROLLMENT_PASSWORD"
+        print_info "Using provided agent enrollment password"
+    else
+        GENERATED_ENROLLMENT_PASSWORD=$(generate_password 24)
+        print_info "Generated agent enrollment password"
+    fi
 
     if [ $MANAGER_COUNT -gt 1 ]; then
         cat >> "$SCRIPT_DIR/group_vars/all/main.yml" << EOF
@@ -1259,17 +1449,28 @@ EOF
 # Certificate type: self-signed or external CA
 wazuh_use_external_ca: ${EXTERNAL_CA:-false}
 
+# Certificate Distinguished Name fields — read by generate-certs.sh to produce
+# unique, identifiable DNs per deployment instead of hardcoded "Wazuh/California".
+# Override these before running generate-certs.sh.
+wazuh_cert_country: "US"
+wazuh_cert_state: "California"
+wazuh_cert_location: "San Jose"
+wazuh_cert_org: "${ANSIBLE_USER:-wazuh}-deployment"
+wazuh_cert_ou: "Security Operations"
+
 # Local path where certificates are stored (source for Ansible copy)
 wazuh_certs_path: "files/certs"
 
 # Certificate paths on target hosts (destination)
 wazuh_indexer_certs_path: /etc/wazuh-indexer/certs
-wazuh_manager_certs_path: /var/ossec/etc/certs
 wazuh_dashboard_certs_path: /etc/wazuh-dashboard/certs
 
-# SSL certificate verification (set to false for self-signed certs)
-# For external CA with proper chain, set to true
-wazuh_ssl_verify_certificates: ${EXTERNAL_CA:-false}
+# SSL certificate verification
+# When true (default), all HTTPS connections verify certificates.
+# External CA deployments work automatically.
+# Self-signed cert deployments: root-ca.pem is already distributed to all nodes.
+# Set to 'false' ONLY if you cannot trust the CA bundle (not recommended).
+wazuh_ssl_verify_certificates: ${EXTERNAL_CA:-true}
 
 # ═══════════════════════════════════════════════════════════════
 # Security Feature Toggles
@@ -1387,8 +1588,6 @@ wazuh_configure_selinux: true
 
 # Package repository settings
 wazuh_repo_gpg_key: "https://packages.wazuh.com/key/GPG-KEY-WAZUH"
-wazuh_repo_url_apt: "https://packages.wazuh.com/4.x/apt/"
-wazuh_repo_url_yum: "https://packages.wazuh.com/4.x/yum/"
 
 # ═══════════════════════════════════════════════════════════════
 # Backup & Maintenance
@@ -1475,6 +1674,21 @@ wazuh_log_rotation_enabled: true
 wazuh_log_rotation_keep_days: 30
 wazuh_log_rotation_max_size: "100M"
 wazuh_log_rotation_compress: true
+
+# ═══════════════════════════════════════════════════════════════
+# Version-Derived Variables (evaluated from wazuh_version above)
+# ═══════════════════════════════════════════════════════════════
+wazuh_is_5x: "{{ wazuh_version.split('.')[0] == '5' }}"
+wazuh_is_prerelease: "{{ '-' in wazuh_version }}"
+wazuh_direct_download: "{{ wazuh_is_prerelease }}"
+wazuh_manager_install_path: "{{ '/var/wazuh-manager' if wazuh_is_5x else '/var/ossec' }}"
+wazuh_manager_config_file: "{{ wazuh_manager_install_path }}/etc/{{ 'wazuh-manager.conf' if wazuh_is_5x else 'ossec.conf' }}"
+wazuh_manager_certs_path: "{{ wazuh_manager_install_path }}/etc/certs"
+wazuh_manager_log_path: "{{ wazuh_manager_install_path }}/logs"
+wazuh_manager_owner: "{{ 'wazuh-manager' if wazuh_is_5x else 'wazuh' }}"
+wazuh_manager_group: "{{ 'wazuh-manager' if wazuh_is_5x else 'wazuh' }}"
+wazuh_use_filebeat: "{{ false if wazuh_is_5x else true }}"
+wazuh_manager_cert_name: "{{ manager_node_name | default('server') }}"
 EOF
 
     print_success "Group variables created: group_vars/all/main.yml"
@@ -1486,13 +1700,13 @@ EOF
 [defaults]
 inventory = inventory/hosts.yml
 roles_path = roles
-host_key_checking = False
+host_key_checking = True
 retry_files_enabled = False
 gathering = smart
 fact_caching = jsonfile
-fact_caching_connection = /tmp/ansible_facts_cache
+fact_caching_connection = ${HOME}/.cache/ansible/facts
 fact_caching_timeout = 3600
-vault_password_file = .vault_password
+vault_password_file = ~/.config/wazuh-deployment/.vault_password
 
 [privilege_escalation]
 become = ${USE_BECOME}
@@ -1501,7 +1715,7 @@ become_user = root
 
 [ssh_connection]
 pipelining = True
-ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o UserKnownHostsFile=/dev/null
+ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o StrictHostKeyChecking=accept-new
 EOF
 
     print_success "Ansible configuration created: ansible.cfg"
@@ -1524,6 +1738,10 @@ EOF
 
         if [ ! -f "$ANSIBLE_SSH_KEY" ]; then
             ssh-keygen -t ed25519 -f "$ANSIBLE_SSH_KEY" -N "" -C "wazuh-ansible-deploy"
+            if [ ! -f "$ANSIBLE_SSH_KEY" ]; then
+                print_error "SSH key generation failed"
+                exit 1
+            fi
             chmod 600 "$ANSIBLE_SSH_KEY"
             chmod 644 "${ANSIBLE_SSH_KEY}.pub"
             print_success "SSH key pair generated"
@@ -1555,28 +1773,41 @@ EOF
         chmod +x "${SCRIPT_DIR}/scripts/manage-vault.sh"
 
         # Initialize vault (creates vault password)
-        if [ -f "${SCRIPT_DIR}/.vault_password" ]; then
+        if [ -f "${VAULT_PASSWORD_FILE}" ]; then
             print_info "Vault password file already exists"
         else
             print_info "Generating vault password..."
             bash "${SCRIPT_DIR}/scripts/manage-vault.sh" init
-            print_success "Vault password created: .vault_password"
+            if [ ! -f "${VAULT_PASSWORD_FILE}" ]; then
+                print_error "Failed to create vault password file"
+                print_info "Try: bash scripts/manage-vault.sh init"
+                exit 1
+            fi
+            print_success "Vault password created: ${VAULT_PASSWORD_FILE}"
         fi
 
-        # Create encrypted vault with credentials via environment variables
+        # Create encrypted vault — pass credentials via a mode-0600 temp file,
+        # not env vars (env vars leak via /proc/<pid>/environ).
         print_info "Creating encrypted vault with credentials..."
         VAULT_INDEXER_PASSWORD="$GENERATED_INDEXER_PASSWORD" \
         VAULT_API_PASSWORD="$GENERATED_API_PASSWORD" \
         VAULT_ENROLLMENT_PASSWORD="$GENERATED_ENROLLMENT_PASSWORD" \
+        VAULT_FILEBEAT_PASSWORD="${FILEBEAT_PASSWORD:-}" \
+        VAULT_DASHBOARD_ADMIN_PASSWORD="" \
+        VAULT_GRAFANA_API_KEY="" \
         VAULT_ANSIBLE_USER="$ANSIBLE_USER" \
         VAULT_CONNECTION_PASSWORD="${DEFAULT_SSH_PASS:-}" \
         VAULT_BECOME_PASSWORD="${BECOME_PASS:-}" \
         VAULT_HOST_CREDENTIALS="$HOST_CREDENTIALS_STRING" \
         VAULT_CLUSTER_KEY="${MANAGER_CLUSTER_KEY:-}" \
         bash "${SCRIPT_DIR}/scripts/manage-vault.sh" create
+        if [ ! -f "${SCRIPT_DIR}/group_vars/all/vault.yml" ]; then
+            print_error "Vault creation failed"
+            exit 1
+        fi
         print_success "Encrypted credentials stored in: group_vars/all/vault.yml"
 
-        print_warning "IMPORTANT: Back up .vault_password securely!"
+        print_warning "IMPORTANT: Back up ${VAULT_PASSWORD_FILE} securely!"
         print_warning "Without it, you cannot decrypt your credentials."
     else
         print_warning "Vault management script not found, using plaintext credentials"
@@ -1618,6 +1849,10 @@ EOF
                 if [ "$REGEN_CERTS" = "true" ]; then
                     print_info "Regenerating certificates..."
                     bash "${SCRIPT_DIR}/generate-certs.sh"
+                    if [ ! -f "${SCRIPT_DIR}/files/certs/root-ca.pem" ]; then
+                        print_error "Certificate generation failed"
+                        exit 1
+                    fi
                     print_success "Certificates regenerated"
                 else
                     print_info "Using existing certificates"
@@ -1625,6 +1860,10 @@ EOF
             else
                 print_info "Generating self-signed SSL/TLS certificates..."
                 bash "${SCRIPT_DIR}/generate-certs.sh"
+                if [ ! -f "${SCRIPT_DIR}/files/certs/root-ca.pem" ]; then
+                    print_error "Certificate generation failed"
+                    exit 1
+                fi
                 print_success "Certificates generated in files/certs/"
             fi
         else
@@ -1679,7 +1918,7 @@ EOF
     echo
     echo -e "${CYAN}Security:${NC}"
     echo "  - Ansible Vault: Enabled (encrypted credentials)"
-    echo "  - Vault password: .vault_password"
+    echo "  - Vault password: ${VAULT_PASSWORD_FILE}"
     echo "  - Encrypted vault: group_vars/all/vault.yml"
     if [ "$EXTERNAL_CA" = "true" ]; then
         echo "  - Certificates: External CA (user-provided)"
@@ -1749,7 +1988,7 @@ EOF
     echo -e "   ${CYAN}group_vars/all/main.yml${NC}   - Variables file"
     echo -e "   ${CYAN}group_vars/all/vault.yml${NC}  - Encrypted credentials"
     echo -e "   ${CYAN}ansible.cfg${NC}            - Ansible configuration"
-    echo -e "   ${CYAN}.vault_password${NC}        - Vault encryption key (KEEP SECURE!)"
+    echo -e "   ${CYAN}${VAULT_PASSWORD_FILE}${NC} - Vault encryption key (KEEP SECURE!)"
     echo
 
     if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
@@ -1771,7 +2010,7 @@ EOF
     else
         echo -e "2. Test connectivity to your hosts:"
     fi
-    echo -e "   ${YELLOW}ansible all -m ping -i inventory/bootstrap.yml --vault-password-file .vault_password${NC}"
+    echo -e "   ${YELLOW}ansible all -m ping -i inventory/bootstrap.yml --vault-password-file ${VAULT_PASSWORD_FILE}${NC}"
     echo
 
     if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
@@ -1788,10 +2027,10 @@ EOF
     echo -e "   ${YELLOW}ansible-playbook site.yml${NC}"
     echo
     echo -e "   Or deploy components individually:"
-    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-indexer.yml --vault-password-file .vault_password${NC}"
-    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-manager.yml --vault-password-file .vault_password${NC}"
-    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-dashboard.yml --vault-password-file .vault_password${NC}"
-    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-agents.yml --vault-password-file .vault_password${NC}"
+    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-indexer.yml --vault-password-file ${VAULT_PASSWORD_FILE}${NC}"
+    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-manager.yml --vault-password-file ${VAULT_PASSWORD_FILE}${NC}"
+    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-dashboard.yml --vault-password-file ${VAULT_PASSWORD_FILE}${NC}"
+    echo -e "   ${YELLOW}ansible-playbook playbooks/wazuh-agents.yml --vault-password-file ${VAULT_PASSWORD_FILE}${NC}"
     echo
 
     if [ "$CREATE_PREP_PACKAGE" = "true" ]; then
@@ -1830,51 +2069,47 @@ EOF
     echo
 
     print_warning "SECURITY REMINDERS:"
-    echo -e "  - Back up ${CYAN}.vault_password${NC} securely (required to decrypt credentials)"
+    echo -e "  - Back up ${CYAN}${VAULT_PASSWORD_FILE}${NC} securely (required to decrypt credentials)"
     echo -e "  - Keep ${CYAN}keys/wazuh_ansible_key${NC} private (provides host access)"
     echo
 
-    # Display vault password prominently
-    if [ -f "$SCRIPT_DIR/.vault_password" ]; then
-        print_header "CRITICAL: SAVE YOUR VAULT PASSWORD"
+    # Prompt user to back up vault password securely
+    if [ -f "${VAULT_PASSWORD_FILE}" ]; then
+        print_header "CRITICAL: BACK UP YOUR VAULT PASSWORD"
         echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
-        echo -e "${RED}  ANSIBLE VAULT PASSWORD - SAVE THIS NOW!${NC}"
+        echo -e "${RED}  ANSIBLE VAULT PASSWORD - BACK THIS UP NOW!${NC}"
         echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
         echo
-        echo -e "  ${YELLOW}Vault Password:${NC} ${CYAN}$(cat "$SCRIPT_DIR/.vault_password")${NC}"
+        echo -e "  ${YELLOW}Vault password file:${NC} ${CYAN}${VAULT_PASSWORD_FILE}${NC}"
         echo
         echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
-        echo -e "${YELLOW}⚠ WARNING: You will need this password to:${NC}"
+        echo -e "${YELLOW}⚠ You will need this password to:${NC}"
         echo -e "  - Deploy or redeploy the Wazuh cluster"
         echo -e "  - View or edit encrypted credentials"
-        echo -e "  - Make any changes that require credential access"
+        echo -e "  - Run './scripts/manage-vault.sh view' to see all credentials"
         echo
-        echo -e "${YELLOW}⚠ Store this password securely (password manager, secure vault)${NC}"
-        echo -e "${YELLOW}⚠ The .vault_password file will be needed on this machine${NC}"
+        echo -e "${YELLOW}⚠ BACK UP THIS FILE NOW to a password manager or secure vault.${NC}"
+        echo -e "${YELLOW}⚠ The password is NOT displayed here for security reasons.${NC}"
+        echo -e "${YELLOW}⚠ If lost, your encrypted credentials cannot be recovered.${NC}"
         echo -e "${RED}════════════════════════════════════════════════════════════════${NC}"
         echo
     fi
 
-    # Display admin credentials
+    # Remind user about admin credentials (NOT displayed in plaintext)
     print_header "WAZUH ADMIN CREDENTIALS"
     echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}  SAVE THESE CREDENTIALS - THEY ARE STORED IN THE VAULT${NC}"
+    echo -e "${GREEN}  CREDENTIALS ARE ENCRYPTED IN THE ANSIBLE VAULT${NC}"
     echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
     echo
-    echo -e "  ${CYAN}Wazuh Dashboard / Indexer Admin:${NC}"
-    echo -e "    Username: ${YELLOW}${INDEXER_ADMIN_USER}${NC}"
-    echo -e "    Password: ${YELLOW}${GENERATED_INDEXER_PASSWORD}${NC}"
-    echo
-    echo -e "  ${CYAN}Wazuh API:${NC}"
-    echo -e "    Username: ${YELLOW}${API_USER}${NC}"
-    echo -e "    Password: ${YELLOW}${GENERATED_API_PASSWORD}${NC}"
+    echo -e "  ${CYAN}Username:${NC} ${YELLOW}${INDEXER_ADMIN_USER}${NC}"
     echo
     echo -e "  ${CYAN}Dashboard URL:${NC} https://${DASHBOARD_NODES_ARRAY[0]}:${DASHBOARD_PORT}"
     echo -e "  ${CYAN}API URL:${NC} https://${MANAGER_NODES_ARRAY[0]}:${MANAGER_API_PORT}"
     echo
     echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${YELLOW}⚠ These credentials are encrypted in the vault.${NC}"
-    echo -e "${YELLOW}⚠ Use './scripts/manage-vault.sh view' to see them later.${NC}"
+    echo -e "${YELLOW}⚠ Passwords are NOT displayed here for security reasons.${NC}"
+    echo -e "${YELLOW}⚠ To view credentials, run: ./scripts/manage-vault.sh view${NC}"
+    echo -e "${YELLOW}⚠ (You will need the vault password that you just backed up)${NC}"
     echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
     echo
 

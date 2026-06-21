@@ -221,7 +221,7 @@ It's recommended to run pre-flight checks before:
 2. **Upgrades**
    ```bash
    ansible-playbook playbooks/pre-flight-checks.yml
-   ansible-playbook playbooks/upgrade.yml -e "target_version=4.10.0"
+   ansible-playbook playbooks/upgrade.yml -e "target_version=4.14.5"
    ```
 
 3. **Disaster recovery**

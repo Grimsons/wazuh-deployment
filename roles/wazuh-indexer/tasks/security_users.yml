@@ -3,22 +3,30 @@
 # This configures the admin user with a secure random password
 # All passwords are managed through Ansible Vault
 
-- name: Generate random admin password
-  ansible.builtin.set_fact:
-    wazuh_indexer_admin_password_generated: "{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits') }}{{ ['!', '@', '#', '%', '^', '*', '-', '_', '+', '='] | random }}{{ ['!', '@', '#', '%', '^', '*', '-', '_', '+', '='] | random }}"
+- name: Assert indexer admin password is set in vault
+  ansible.builtin.assert:
+    that:
+      - wazuh_indexer_admin_password is defined
+      - wazuh_indexer_admin_password | length >= 16
+      - wazuh_indexer_admin_password != 'admin'
+    fail_msg: >
+      Set wazuh_indexer_admin_password in group_vars/all/vault.yml before deployment.
+      Run: make vault-edit  (minimum 16 chars, not 'admin')
   run_once: true
-  when: wazuh_indexer_admin_password_generated is not defined
 
-- name: Set admin password (use provided or generated)
+- name: Set admin password from vault
   ansible.builtin.set_fact:
-    wazuh_admin_password: "{{ wazuh_indexer_admin_password if (wazuh_indexer_admin_password is defined and wazuh_indexer_admin_password != 'admin') else wazuh_indexer_admin_password_generated }}"
+    wazuh_admin_password: "{{ wazuh_indexer_admin_password }}"
   run_once: true
+  no_log: true
 
 - name: Hash the admin password using OpenSearch security tools
-  ansible.builtin.shell: |
-    export JAVA_HOME=/usr/share/wazuh-indexer/jdk
-    /usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p {{ wazuh_admin_password | quote }}
   become: true
+  ansible.builtin.shell: |
+    OPENSEARCH_JAVA_HOME=/usr/share/wazuh-indexer/jdk \
+      /usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p '{{ wazuh_admin_password }}'
+  args:
+    executable: /bin/bash
   register: password_hash
   changed_when: false
   no_log: true
@@ -42,22 +50,25 @@
     regexp: '^(admin:\s*\n\s*hash:\s*)"[^"]*"'
     replace: '\1"{{ admin_password_hash }}"'
   become: true
+  no_log: true
+  diff: false
 
 - name: Apply security configuration with new password
   ansible.builtin.shell: |
     export JAVA_HOME=/usr/share/wazuh-indexer/jdk
     /usr/share/wazuh-indexer/plugins/opensearch-security/tools/securityadmin.sh \
       -cd /etc/wazuh-indexer/opensearch-security \
-      -cacert {{ wazuh_indexer_certs_path }}/root-ca.pem \
-      -cert {{ wazuh_indexer_certs_path }}/admin.pem \
-      -key {{ wazuh_indexer_certs_path }}/admin-key.pem \
+      -cacert {{ wazuh_indexer_certs_path | quote }}/root-ca.pem \
+      -cert {{ wazuh_indexer_certs_path | quote }}/admin.pem \
+      -key {{ wazuh_indexer_certs_path | quote }}/admin-key.pem \
       -h 127.0.0.1 \
-      -p {{ wazuh_indexer_http_port }} \
-      -icl -nhnv
+      -p {{ wazuh_indexer_http_port | quote }} \
+      -icl
   become: true
   register: security_update
   changed_when: security_update.rc == 0
   run_once: true
+  no_log: true
 
 - name: Display security update result
   ansible.builtin.debug:

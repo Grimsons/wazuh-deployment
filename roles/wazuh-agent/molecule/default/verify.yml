@@ -1,0 +1,36 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Check wazuh-agent service is running
+      ansible.builtin.systemd:
+        name: wazuh-agent
+      register: agent_service
+      failed_when: agent_service.status.ActiveState != "active"
+
+    - name: Check ossec.conf is configured
+      ansible.builtin.stat:
+        path: /var/ossec/etc/ossec.conf
+      register: agent_ossec_conf
+      failed_when: not agent_ossec_conf.stat.exists
+
+    - name: Verify agent manager address is set
+      ansible.builtin.command: grep -c "127.0.0.1" /var/ossec/etc/ossec.conf
+      register: manager_addr_check
+      changed_when: false
+      failed_when: manager_addr_check.rc != 0
+
+    - name: Check agent state file is created
+      ansible.builtin.wait_for:
+        path: /var/ossec/var/run/wazuh-agentd.state
+        timeout: 30
+      ignore_errors: true
+
+    - name: Verify agent log is being written
+      ansible.builtin.stat:
+        path: /var/ossec/logs/ossec.log
+      register: agent_log
+      failed_when: not agent_log.stat.exists

@@ -110,7 +110,7 @@ curl -k -u admin:<your-password> https://<indexer-ip>:9200/_cluster/health?prett
 
 1. **Check vault password file:**
    ```bash
-   ls -la .vault_password
+   ls -la ~/.config/wazuh-deployment/.vault_password
    # Should be mode 0600
    ```
 

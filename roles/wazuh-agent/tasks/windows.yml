@@ -1,20 +1,27 @@
 ---
 
+- name: Windows | Set Wazuh Manager address for agent enrollment
+  ansible.builtin.set_fact:
+    wazuh_manager_address: "{{ wazuh_agent_registration_address | default(wazuh_manager_nodes[0].ip, true) }}"
+
 - name: Windows | Ensure Wazuh agent download directory exists
   ansible.windows.win_file:
     path: "{{ wazuh_agent_win_package_download_path }}"
     state: directory
+  become: true
 
 - name: Windows | Download Wazuh agent installer
   ansible.windows.win_get_url:
     url: "{{ wazuh_agent_windows }}"
     dest: "{{ wazuh_agent_win_package_download_path }}\\{{ wazuh_agent_package_name }}.msi"
+  become: true
 
 - name: Windows | Install Wazuh agent
   ansible.windows.win_package:
     path: "{{ wazuh_agent_win_package_download_path }}\\{{ wazuh_agent_package_name }}.msi"
     arguments: '/q WAZUH_MANAGER="{{ wazuh_manager_address }}"'
     state: present
+  become: true
 
 - name: Windows | Fail if enrollment password is required but not in vault
   ansible.builtin.fail:
@@ -33,6 +40,38 @@
   ansible.windows.win_copy:
     content: "{{ wazuh_agent_enrollment_password }}"
     dest: 'C:\Program Files (x86)\ossec-agent\authd.pass'
+  no_log: true
+  become: true
+  when:
+    - wazuh_authd_use_password | default(true)
+    - wazuh_agent_enrollment_password is defined
+    - wazuh_agent_enrollment_password | length > 0
+
+- name: Windows | Restrict authd.pass ACL to SYSTEM and Administrators only
+  community.windows.win_acl:
+    path: 'C:\Program Files (x86)\ossec-agent\authd.pass'
+    user: "{{ item.user }}"
+    rights: "{{ item.rights }}"
+    type: allow
+    state: present
+    inherit: none
+    propagation: none
+  loop:
+    - { user: "SYSTEM", rights: "FullControl" }
+    - { user: "Administrators", rights: "FullControl" }
+  no_log: true
+  become: true
+  when:
+    - wazuh_authd_use_password | default(true)
+    - wazuh_agent_enrollment_password is defined
+    - wazuh_agent_enrollment_password | length > 0
+
+- name: Windows | Remove inherited ACEs from authd.pass
+  community.windows.win_acl_inheritance:
+    path: 'C:\Program Files (x86)\ossec-agent\authd.pass'
+    reorganize: true
+    state: absent
+  become: true
   when:
     - wazuh_authd_use_password | default(true)
     - wazuh_agent_enrollment_password is defined
@@ -42,13 +81,16 @@
   ansible.windows.win_service:
     name: "Wazuh"
     state: stopped
+  become: true
 
 - name: Windows | Start Wazuh agent service
   ansible.windows.win_service:
     name: "Wazuh"
     state: started
+  become: true
 
 - name: Windows | Delete Wazuh agent download directory
   ansible.windows.win_file:
     path: "{{ wazuh_agent_win_package_download_path }}"
     state: absent
+  become: true

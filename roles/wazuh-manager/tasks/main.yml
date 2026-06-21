@@ -15,6 +15,7 @@
 
 - name: Configure Wazuh repository
   ansible.builtin.include_tasks: repository.yml
+  when: not wazuh_direct_download | default(false)
 
 - name: Install Wazuh Manager
   ansible.builtin.include_tasks: install.yml
@@ -32,6 +33,10 @@
 - name: Deploy custom rules and decoders
   ansible.builtin.include_tasks: custom_rules.yml
   when: wazuh_custom_content_enabled | default(false)
+
+- name: Manage SCA policies
+  ansible.builtin.include_tasks: sca.yml
+  when: wazuh_sca_enabled | default(true)
 
 - name: Configure Wazuh API
   ansible.builtin.include_tasks: api.yml
@@ -61,7 +66,7 @@
 - name: Wait for Wazuh Manager to be listening
   ansible.builtin.wait_for:
     port: 1514
-    host: "{{ ansible_default_ipv4.address }}"
+    host: "{{ wazuh_node_ip }}"
     delay: "{{ wazuh_api_check_delay }}"
     timeout: "{{ wazuh_service_start_timeout }}"
   become: true
@@ -77,19 +82,23 @@
 
 - name: Wait for Wazuh Manager API to be ready
   ansible.builtin.uri:
-    url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}/security/user/authenticate"
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_manager_api_port }}/security/user/authenticate"
     method: POST
     user: "{{ wazuh_api_user }}"
     password: "{{ wazuh_api_default_password }}"
     force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
-    status_code: [200, 401]
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    status_code: [200, 401, 403]
   register: wazuh_api_check
-  until: wazuh_api_check.status in [200, 401]
+  until: wazuh_api_check.status in [200, 401, 403]
   retries: "{{ wazuh_api_check_retries | default(30) }}"
   delay: "{{ wazuh_api_check_delay | default(10) }}"
   when: manager_node_type | default('master') == 'master'
   no_log: true
+
+# Store indexer credentials in wazuh-keystore (after service start ensures RocksDB is initialized)
+- name: Configure Wazuh keystore with indexer credentials
+  ansible.builtin.include_tasks: keystore.yml
 
 # Configure secure API password (run only on master)
 - name: Configure secure API password
@@ -107,6 +116,7 @@
   ansible.builtin.include_tasks: filebeat.yml
   when:
     - wazuh_filebeat_enabled | default(true)
+    - wazuh_use_filebeat
     - manager_node_type | default('master') == 'master'
 
 - name: Configure log rotation
@@ -118,8 +128,9 @@
     msg: |
       ═══════════════════════════════════════════════════════════════
       Wazuh Manager is ready!
-      API URL: https://{{ ansible_default_ipv4.address }}:{{ wazuh_manager_api_port }}
+      API URL: https://{{ wazuh_node_ip }}:{{ wazuh_manager_api_port }}
       Credentials: Managed by Ansible Vault (group_vars/all/vault.yml)
       ═══════════════════════════════════════════════════════════════
   when: manager_node_type | default('master') == 'master'
   run_once: true
+  changed_when: false

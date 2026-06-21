@@ -5,6 +5,7 @@
     path: "{{ wazuh_indexer_package_download_path }}"
     state: directory
     mode: '0755'
+  become: true
 
 - name: Amazon Linux | Configure system settings
   when: ansible_facts.distribution == 'Amazon'
@@ -32,6 +33,7 @@
 
 - name: RHEL, CentOS, and Amazon Linux 2 | Configure system settings and install dependencies
   when: ansible_facts.os_family == 'RedHat'
+  become: true
   block:
     - name: RedHat/CentOS/Fedora | Install Indexer dependencies
       ansible.builtin.dnf:
@@ -60,6 +62,7 @@
 
 - name: Debian-based systems | Install Wazuh indexer dependencies and download package
   when: ansible_facts.os_family == 'Debian'
+  become: true
   block:
     - name: Debian-based | Install Indexer dependencies
       ansible.builtin.apt:

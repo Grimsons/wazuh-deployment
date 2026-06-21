@@ -7,15 +7,3 @@
     state: restarted
     no_block: true
   become: true
-
-- name: reload wazuh-indexer
-  ansible.builtin.systemd:
-    name: "{{ wazuh_indexer_service_name }}"
-    state: reloaded
-  become: true
-
-- name: reload firewalld
-  ansible.builtin.service:
-    name: firewalld
-    state: reloaded
-  become: true

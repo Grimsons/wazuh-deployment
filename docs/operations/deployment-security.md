@@ -10,10 +10,10 @@ All credentials are encrypted using Ansible Vault by default:
 
 | File | Purpose |
 |------|---------|
-| `.vault_password` | Encryption key for Ansible Vault (KEEP SECURE!) |
+| `~/.config/wazuh-deployment/.vault_password` | Vault decryption key (KEEP SECURE!) |
 | `group_vars/all/vault.yml` | Encrypted credentials storage |
 
-Credentials are displayed at the end of `setup.sh` and stored only in the encrypted vault.
+Credentials are shown once on stdout at the end of `setup.sh` (not logged to any file) and stored encrypted in the Ansible Vault.
 
 ### Vault Management Commands
 
@@ -41,10 +41,11 @@ All passwords are automatically generated with the following characteristics:
 
 ### Best Practices
 
-1. **Back up `.vault_password`**: Store this file securely offline - you cannot decrypt credentials without it
+1. **Back up `~/.config/wazuh-deployment/.vault_password`**: Store this file securely offline - you cannot decrypt credentials without it
 2. **Access control**: Restrict access to deployment host and vault password
-3. **Rotation**: Rotate credentials periodically using `./scripts/manage-vault.sh rotate`
-4. **Rekey periodically**: Change the vault encryption password with `./scripts/manage-vault.sh rekey`
+3. **Rotation**: Rotate credentials periodically using `make vault-rotate` or `./scripts/manage-vault.sh rotate`
+4. **Rekey periodically**: Change the vault encryption password with `make vault-rekey` or `./scripts/manage-vault.sh rekey`
+5. **Pre-commit hooks**: Run `make setup-hooks` to prevent accidental commits of unencrypted vault files
 
 ## Certificate Management
 
@@ -87,7 +88,7 @@ When using external CA certificates, place them in `files/certs/`:
 | `admin.pem`, `admin-key.pem` | Admin certificate for indexer operations |
 | `indexer-N.pem`, `indexer-N-key.pem` | Indexer node certificates |
 | `manager-N.pem`, `manager-N-key.pem` | Manager node certificates |
-| `dashboard.pem`, `dashboard-key.pem` | Dashboard certificate |
+| `dashboard-1.pem`, `dashboard-1-key.pem` | Dashboard certificate |
 
 Certificates must include proper Subject Alternative Names (SANs) for all hostnames and IP addresses.
 
@@ -327,10 +328,11 @@ All rules are deployed to the Manager at `/var/ossec/etc/rules/` and `/var/ossec
 ### Pre-Deployment
 
 - [ ] Secure control node with encryption and access controls
-- [ ] Back up `.vault_password` file securely (offline storage recommended)
+- [ ] Back up `~/.config/wazuh-deployment/.vault_password` file securely (offline storage recommended)
 - [ ] Generate certificates (done automatically by setup.sh)
 - [ ] Review `group_vars/all/main.yml` security settings
 - [ ] Plan network segmentation
+- [ ] Configure git hooks: `make setup-hooks`
 
 ### Post-Deployment
 
@@ -340,7 +342,7 @@ All rules are deployed to the Manager at `/var/ossec/etc/rules/` and `/var/ossec
 - [ ] Verify dashboard access with correct credentials
 - [ ] Check audit logging is active
 - [ ] Test backup and restore procedures
-- [ ] Back up `.vault_password` file securely
+- [ ] Back up `~/.config/wazuh-deployment/.vault_password` file securely
 
 ### Ongoing
 

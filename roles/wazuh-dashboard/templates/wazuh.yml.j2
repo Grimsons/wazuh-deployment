@@ -8,7 +8,7 @@
 # Define the Wazuh API endpoints that the dashboard will connect to
 hosts:
   - default:
-      url: https://{{ wazuh_manager_nodes[0].ip }}
+      url: "https://{{ wazuh_manager_nodes[0].ip }}"
       port: {{ wazuh_manager_api_port }}
       username: "{{ wazuh_api_user }}"
       password: "{{ wazuh_api_password }}"
@@ -16,7 +16,7 @@ hosts:
 {% if wazuh_manager_nodes | length > 1 %}
 {% for node in wazuh_manager_nodes[1:] %}
   - {{ node.name }}:
-      url: https://{{ node.ip }}
+      url: "https://{{ node.ip }}"
       port: {{ wazuh_manager_api_port }}
       username: "{{ wazuh_api_user }}"
       password: "{{ wazuh_api_password }}"
@@ -28,7 +28,7 @@ hosts:
 # Index Pattern Settings
 # ═══════════════════════════════════════════════════════════════════════════════
 # Default index pattern for alerts
-pattern: {{ wazuh_dashboard_pattern | default('wazuh-alerts-*') }}
+pattern: "{{ wazuh_dashboard_pattern | default('wazuh-alerts-*') }}"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Timeout Settings
@@ -49,7 +49,7 @@ api.selector: {{ wazuh_dashboard_api_selector | default(true) | lower }}
 # Alert Sample Settings
 # ═══════════════════════════════════════════════════════════════════════════════
 # Prefix for sample alert indices
-alerts.sample.prefix: {{ wazuh_dashboard_sample_prefix | default('wazuh-alerts-4.x-') }}
+alerts.sample.prefix: "{{ wazuh_dashboard_sample_prefix | default('wazuh-alerts-4.x-') }}"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Monitoring Settings
@@ -68,10 +68,10 @@ wazuh.monitoring.shards: {{ wazuh_dashboard_monitoring_shards | default(1) }}
 wazuh.monitoring.replicas: {{ wazuh_dashboard_monitoring_replicas | default(0) }}
 
 # Monitoring index creation interval (h=hourly, d=daily, w=weekly, m=monthly)
-wazuh.monitoring.creation: {{ wazuh_dashboard_monitoring_creation | default('w') }}
+wazuh.monitoring.creation: "{{ wazuh_dashboard_monitoring_creation | default('w') }}"
 
 # Monitoring index pattern
-wazuh.monitoring.pattern: {{ wazuh_dashboard_monitoring_pattern | default('wazuh-monitoring-*') }}
+wazuh.monitoring.pattern: "{{ wazuh_dashboard_monitoring_pattern | default('wazuh-monitoring-*') }}"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Statistics Settings
@@ -80,16 +80,16 @@ wazuh.monitoring.pattern: {{ wazuh_dashboard_monitoring_pattern | default('wazuh
 cron.statistics.status: {{ wazuh_dashboard_statistics_enabled | default(true) | lower }}
 
 # Statistics APIs to collect
-cron.statistics.apis: {{ wazuh_dashboard_statistics_apis | default([]) | to_json }}
+cron.statistics.apis: "{{ wazuh_dashboard_statistics_apis | default([]) | to_json }}"
 
 # Statistics index interval (h=hourly, d=daily, w=weekly, m=monthly)
-cron.statistics.interval: {{ wazuh_dashboard_statistics_interval | default('0 0 * * * *') }}
+cron.statistics.interval: "{{ wazuh_dashboard_statistics_interval | default('0 0 * * * *') }}"
 
 # Statistics index name
-cron.statistics.index.name: {{ wazuh_dashboard_statistics_index | default('statistics') }}
+cron.statistics.index.name: "{{ wazuh_dashboard_statistics_index | default('statistics') }}"
 
 # Statistics index creation (h=hourly, d=daily, w=weekly, m=monthly)
-cron.statistics.index.creation: {{ wazuh_dashboard_statistics_creation | default('w') }}
+cron.statistics.index.creation: "{{ wazuh_dashboard_statistics_creation | default('w') }}"
 
 # Statistics index shards
 cron.statistics.shards: {{ wazuh_dashboard_statistics_shards | default(1) }}
@@ -115,9 +115,9 @@ checks.timeFilter: {{ wazuh_dashboard_check_timefilter | default(true) | lower }
 # ═══════════════════════════════════════════════════════════════════════════════
 # DNS/IP for agent enrollment (shown in dashboard)
 {% if wazuh_dashboard_enrollment_dns is defined and wazuh_dashboard_enrollment_dns %}
-enrollment.dns: {{ wazuh_dashboard_enrollment_dns }}
+enrollment.dns: "{{ wazuh_dashboard_enrollment_dns }}"
 {% else %}
-enrollment.dns: {{ wazuh_manager_nodes[0].ip }}
+enrollment.dns: "{{ wazuh_manager_nodes[0].ip }}"
 {% endif %}
 
 # Enrollment password (shown in dashboard for agent registration)
@@ -130,26 +130,26 @@ enrollment.password: "{{ wazuh_agent_enrollment_password | default('') }}"
 # ═══════════════════════════════════════════════════════════════════════════════
 {% if wazuh_dashboard_custom_logo is defined and wazuh_dashboard_custom_logo %}
 # Custom logo (path relative to /usr/share/wazuh-dashboard/plugins/wazuh/public/assets/)
-customization.logo.app: {{ wazuh_dashboard_custom_logo }}
+customization.logo.app: "{{ wazuh_dashboard_custom_logo }}"
 {% endif %}
 
 {% if wazuh_dashboard_custom_logo_sidebar is defined and wazuh_dashboard_custom_logo_sidebar %}
-customization.logo.sidebar: {{ wazuh_dashboard_custom_logo_sidebar }}
+customization.logo.sidebar: "{{ wazuh_dashboard_custom_logo_sidebar }}"
 {% endif %}
 
 {% if wazuh_dashboard_custom_logo_healthcheck is defined and wazuh_dashboard_custom_logo_healthcheck %}
-customization.logo.healthcheck: {{ wazuh_dashboard_custom_logo_healthcheck }}
+customization.logo.healthcheck: "{{ wazuh_dashboard_custom_logo_healthcheck }}"
 {% endif %}
 
 {% if wazuh_dashboard_custom_logo_reports is defined and wazuh_dashboard_custom_logo_reports %}
-customization.logo.reports: {{ wazuh_dashboard_custom_logo_reports }}
+customization.logo.reports: "{{ wazuh_dashboard_custom_logo_reports }}"
 {% endif %}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Logging Settings
 # ═══════════════════════════════════════════════════════════════════════════════
 # Log level: info, debug, error
-logs.level: {{ wazuh_dashboard_log_level | default('info') }}
+logs.level: "{{ wazuh_dashboard_log_level | default('info') }}"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Hide Manager Alerts
@@ -164,7 +164,7 @@ hideManagerAlerts: {{ wazuh_dashboard_hide_manager_alerts | default(false) | low
 ip.selector: {{ wazuh_dashboard_ip_selector | default(true) | lower }}
 
 # Ignore list for IP selector (list of agent IDs to exclude)
-ip.ignore: {{ wazuh_dashboard_ip_ignore | default([]) | to_json }}
+ip.ignore: "{{ wazuh_dashboard_ip_ignore | default([]) | to_json }}"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Configuration on Demand

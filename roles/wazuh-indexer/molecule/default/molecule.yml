@@ -1,0 +1,44 @@
+---
+dependency:
+  name: galaxy
+  options:
+    requirements-file: ../../../../requirements.yml
+
+driver:
+  name: docker
+
+platforms:
+  - name: wazuh-indexer-ubuntu
+    image: geerlingguy/docker-ubuntu2404-ansible:latest
+    pre_build_image: true
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    command: /lib/systemd/systemd
+
+provisioner:
+  name: ansible
+  inventory:
+    group_vars:
+      all:
+        wazuh_version: "4.14.5"
+        wazuh_indexer_nodes:
+          - name: indexer-1
+            ip: 127.0.0.1
+        wazuh_indexer_admin_password: "{{ vault_wazuh_indexer_admin_password }}"
+        wazuh_ssl_verify_certificates: false
+        wazuh_configure_firewall: false
+        wazuh_indexer_heap_size: "512m"
+        wazuh_indexer_memory_lock: false
+        indexer_node_name: "indexer-1"
+        indexer_cluster_initial_master: true
+        wazuh_cert_country: "US"
+        wazuh_cert_state: "California"
+        wazuh_cert_location: "San Jose"
+        wazuh_cert_org: "Wazuh Deployment"
+        wazuh_cert_ou: "Security Operations"
+        wazuh_node_ip: "127.0.0.1"
+
+verifier:
+  name: ansible

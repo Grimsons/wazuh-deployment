@@ -41,9 +41,38 @@ generate_password() {
     password="${password}${upper}${lower}${number}${symbol}"
 
     # Shuffle the password to distribute special chars
-    password=$(echo "$password" | fold -w1 | shuf | tr -d '\n')
+    password=$(echo "$password" | fold -w1 | shuf --random-source=/dev/urandom | tr -d '\n')
 
     echo "$password"
+}
+
+# Generate YAML-safe password (excludes characters that break YAML/Ansible Vault parsing)
+# Avoids: ! # $ { } [ ] : , & * ? | > ' " ` %
+generate_yaml_safe_password() {
+    local length="${1:-24}"
+    local password
+    password=$(LC_ALL=C tr -dc 'A-Za-z0-9@^_+=-' < /dev/urandom | head -c "$((length - 4))")
+    local upper lower number symbol symbols symbol_idx
+    upper=$(LC_ALL=C tr -dc 'A-Z' < /dev/urandom | head -c 1)
+    lower=$(LC_ALL=C tr -dc 'a-z' < /dev/urandom | head -c 1)
+    number=$(LC_ALL=C tr -dc '0-9' < /dev/urandom | head -c 1)
+    symbols='@^_+-='
+    symbol_idx=$(head -c 4 /dev/urandom | od -An -tu4 | tr -d ' ')
+    symbol="${symbols:$((symbol_idx % ${#symbols})):1}"
+    password="${password}${upper}${lower}${number}${symbol}"
+    echo "$password" | fold -w1 | shuf --random-source=/dev/urandom | tr -d '\n'
+}
+
+# Escape a string for safe inclusion in a YAML double-quoted scalar.
+# Handles backslashes and double quotes. Newlines are converted to \n and
+# carriage returns are removed.
+yaml_escape() {
+    local str="$1"
+    str="${str//\\/\\\\}"
+    str="${str//\"/\\\"}"
+    str="${str//$'\n'/\\n}"
+    str="${str//$'\r'/}"
+    printf '%s' "$str"
 }
 
 # Generate hex key (for cluster keys)

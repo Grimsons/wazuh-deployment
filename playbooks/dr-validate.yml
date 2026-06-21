@@ -96,7 +96,7 @@
 
     - name: Calculate backup size
       ansible.builtin.shell: |
-        du -sh "{{ backup_dir }}/{{ selected_backup }}" | cut -f1
+        du -sh {{ backup_dir | quote }}/{{ selected_backup | quote }} | cut -f1
       register: backup_size
       changed_when: false
 
@@ -174,7 +174,7 @@
 
     - name: Verify archive integrity
       ansible.builtin.shell: |
-        gzip -t "{{ item.path }}" 2>&1 && echo "OK" || echo "CORRUPTED"
+        gzip -t {{ item.path | quote }} 2>&1 && echo "OK" || echo "CORRUPTED"
       loop: "{{ archives.files }}"
       loop_control:
         label: "{{ item.path | basename }}"
@@ -301,7 +301,7 @@
 
     - name: Validate configuration syntax (Manager)
       ansible.builtin.shell: |
-        xmllint --noout "{{ test_restore_dir }}/manager/ossec.conf" 2>&1 && echo "VALID" || echo "INVALID"
+        xmllint --noout {{ test_restore_dir | quote }}/manager/ossec.conf 2>&1 && echo "VALID" || echo "INVALID"
       register: manager_syntax
       changed_when: false
       failed_when: false

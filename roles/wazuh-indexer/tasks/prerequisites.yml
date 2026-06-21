@@ -25,9 +25,9 @@
 - name: Install required packages (RHEL/CentOS)
   ansible.builtin.dnf:
     name:
-      - curl
+      - curl-minimal
       - gnupg2
-      - coreutils
+      - coreutils-single
     state: present
   become: true
   when: ansible_os_family == 'RedHat'
@@ -51,12 +51,13 @@
     - "{{ wazuh_indexer_config_path }}"
     - "{{ wazuh_indexer_data_path }}"
     - "{{ wazuh_indexer_log_path }}"
-    - "{{ wazuh_indexer_certs_path }}"
+  register: indexer_directories
 
 - name: Disable swap (required for Indexer performance)
   ansible.builtin.command: swapoff -a
   become: true
   changed_when: false
+  when: ansible_swaptotal_mb != 0
   ignore_errors: true
 
 - name: Remove swap from fstab

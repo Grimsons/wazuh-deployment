@@ -20,6 +20,11 @@ prompt_with_default() {
     local validator="${5:-}"
     local value=""
 
+    # Skip prompt if variable already has a value (set by profile or env)
+    if [[ -n "${!var_name+defined}" ]]; then
+        return 0
+    fi
+
     while true; do
         if [ "$is_password" = "true" ]; then
             read -rsp "$(echo -e "${CYAN}$prompt ${NC}[${YELLOW}hidden${NC}]: ")" value
@@ -51,6 +56,11 @@ prompt_yes_no() {
     local default="$2"
     local var_name="$3"
     local value=""
+
+    # Skip prompt if variable already has a value (set by profile or env)
+    if [[ -n "${!var_name+defined}" ]]; then
+        return 0
+    fi
 
     while true; do
         read -erp "$(echo -e "${CYAN}$prompt ${NC}[${YELLOW}$default${NC}]: ")" value

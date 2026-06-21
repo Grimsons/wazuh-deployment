@@ -89,7 +89,7 @@ The maintenance cron playbook configures `scripts/run-scheduled-backup.sh` to ru
 
 #### Credentials
 - `./group_vars/all/vault.yml` (encrypted - all passwords)
-- `./.vault_password` (vault decryption key - BACKUP THIS!)
+- `~/.config/wazuh-deployment/.vault_password` (vault decryption key - BACKUP THIS!)
 
 ### Backup Locations
 
@@ -380,7 +380,7 @@ ansible-playbook playbooks/dr-validate.yml -e "dr_test_mode=true"
 ```bash
 # Backup commands
 ansible-playbook playbooks/backup.yml                              # Full backup
-ansible-playbook playbooks/backup.yml -e "include_indices=true"    # Include index snapshot
+ansible-playbook playbooks/backup.yml -e "backup_indexer_data=true"    # Include index snapshot
 
 # Restore commands
 ansible-playbook playbooks/restore.yml -e "restore_from=20260115_020000"

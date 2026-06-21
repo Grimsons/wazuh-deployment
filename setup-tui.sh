@@ -15,6 +15,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VAULT_PASSWORD_DIR="${HOME}/.config/wazuh-deployment"
+VAULT_PASSWORD_FILE="$VAULT_PASSWORD_DIR/.vault_password"
 
 # ═══════════════════════════════════════════════════════════════
 # Check for gum installation
@@ -287,6 +289,7 @@ select_profile() {
         --selected "production" \
         "minimal     │ Single-node for testing (localhost)" \
         "production  │ Multi-node HA with all features [recommended]" \
+        "docker      │ Docker container environment" \
         "custom      │ Full interactive configuration")
 
     # Extract profile name
@@ -299,7 +302,7 @@ select_profile() {
 configure_general() {
     section "General Settings"
 
-    WAZUH_VERSION=$(gum input --prompt "Wazuh Version: " --value "4.14.1" --placeholder "4.14.1")
+    WAZUH_VERSION=$(gum input --prompt "Wazuh Version: " --value "4.14.5" --placeholder "4.14.5")
     success "Version: $WAZUH_VERSION"
 
     ENVIRONMENT=$(gum choose --header "Environment" "production" "staging" "development")
@@ -602,13 +605,13 @@ generate_config() {
 [defaults]
 inventory = inventory/hosts.yml
 roles_path = roles
-host_key_checking = False
+host_key_checking = True
 retry_files_enabled = False
 gathering = smart
 fact_caching = jsonfile
-fact_caching_connection = /tmp/ansible_facts_cache
+fact_caching_connection = ${HOME}/.cache/ansible/facts
 fact_caching_timeout = 3600
-vault_password_file = .vault_password
+vault_password_file = ~/.config/wazuh-deployment/.vault_password
 
 [privilege_escalation]
 become = ${USE_BECOME:-true}
@@ -617,7 +620,7 @@ become_user = root
 
 [ssh_connection]
 pipelining = True
-ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o UserKnownHostsFile=/dev/null
+ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o StrictHostKeyChecking=accept-new
 EOF
 
     success "Created: ansible.cfg"
@@ -680,8 +683,11 @@ EOF
       hosts:
 EOF
 
-    for node in "${DASHBOARD_NODES_ARRAY[@]}"; do
+    for i in "${!DASHBOARD_NODES_ARRAY[@]}"; do
+        node="${DASHBOARD_NODES_ARRAY[$i]}"
+        node_name="dashboard-$((i+1))"
         echo "        ${node}:" >> "$SCRIPT_DIR/inventory/hosts.yml"
+        echo "          dashboard_node_name: ${node_name}" >> "$SCRIPT_DIR/inventory/hosts.yml"
     done
 
     if [[ "$DEPLOY_AGENTS" == "true" ]] && [[ -n "${AGENT_NODES:-}" ]]; then
@@ -903,7 +909,9 @@ EOF
 # ═══════════════════════════════════════════════════════════════
 wazuh_use_external_ca: ${EXTERNAL_CA:-false}
 wazuh_certs_path: "files/certs"
-wazuh_ssl_verify_certificates: ${EXTERNAL_CA:-false}
+# TLS verification is ON by default. root-ca.pem is distributed to all nodes.
+# Set to false only if you cannot use trusted certificates.
+wazuh_ssl_verify_certificates: ${EXTERNAL_CA:-true}
 
 # ═══════════════════════════════════════════════════════════════
 # Security Features
@@ -968,6 +976,21 @@ wazuh_bootstrap_user: "${INITIAL_SSH_USER:-root}"
 # Post-Deployment Security
 # ═══════════════════════════════════════════════════════════════
 wazuh_lockdown_deploy_user: true
+
+# ═══════════════════════════════════════════════════════════════
+# Version-Derived Variables (evaluated from wazuh_version above)
+# ═══════════════════════════════════════════════════════════════
+wazuh_is_5x: "{{ wazuh_version.split('.')[0] == '5' }}"
+wazuh_is_prerelease: "{{ '-' in wazuh_version }}"
+wazuh_direct_download: "{{ wazuh_is_prerelease }}"
+wazuh_manager_install_path: "{{ '/var/wazuh-manager' if wazuh_is_5x else '/var/ossec' }}"
+wazuh_manager_config_file: "{{ wazuh_manager_install_path }}/etc/{{ 'wazuh-manager.conf' if wazuh_is_5x else 'ossec.conf' }}"
+wazuh_manager_certs_path: "{{ wazuh_manager_install_path }}/etc/certs"
+wazuh_manager_log_path: "{{ wazuh_manager_install_path }}/logs"
+wazuh_manager_owner: "{{ 'wazuh-manager' if wazuh_is_5x else 'wazuh' }}"
+wazuh_manager_group: "{{ 'wazuh-manager' if wazuh_is_5x else 'wazuh' }}"
+wazuh_use_filebeat: "{{ false if wazuh_is_5x else true }}"
+wazuh_manager_cert_name: "{{ manager_node_name | default('server') }}"
 EOF
 
     success "Created: group_vars/all/main.yml"
@@ -995,7 +1018,7 @@ EOF
     GENERATED_API_PASSWORD=""
 
     if [[ -f "$SCRIPT_DIR/scripts/manage-vault.sh" ]]; then
-        if [[ ! -f "$SCRIPT_DIR/.vault_password" ]]; then
+        if [[ ! -f "$VAULT_PASSWORD_FILE" ]]; then
             bash "$SCRIPT_DIR/scripts/manage-vault.sh" init 2>/dev/null || true
         fi
 
@@ -1013,6 +1036,9 @@ EOF
 
         VAULT_INDEXER_PASSWORD="$GENERATED_INDEXER_PASSWORD" \
         VAULT_API_PASSWORD="$GENERATED_API_PASSWORD" \
+        VAULT_ENROLLMENT_PASSWORD="${GENERATED_ENROLLMENT_PASSWORD:-}" \
+        VAULT_DASHBOARD_ADMIN_PASSWORD="" \
+        VAULT_GRAFANA_API_KEY="" \
         VAULT_CLUSTER_KEY="${MANAGER_CLUSTER_KEY:-}" \
         VAULT_CONNECTION_PASSWORD="${DEFAULT_SSH_PASS:-}" \
         VAULT_ANSIBLE_USER="${ANSIBLE_USER:-wazuh-deploy}" \
@@ -1104,16 +1130,18 @@ EOF
         echo ""
     fi
 
-    if [[ -f "$SCRIPT_DIR/.vault_password" ]]; then
+    if [[ -f "$VAULT_PASSWORD_FILE" ]]; then
         gum style \
             --border rounded \
             --border-foreground "#FF6B6B" \
             --padding "1 2" \
-            "⚠️  SAVE YOUR VAULT PASSWORD!
+            "SAVE YOUR VAULT PASSWORD FILE!
 
-$(cat "$SCRIPT_DIR/.vault_password")
+Vault password file location: $VAULT_PASSWORD_FILE
 
-Store this securely - you'll need it for deployment!"
+The password is NOT displayed here for security reasons.
+Store this file in a password manager or secure vault.
+You will need it to view credentials and redeploy."
     fi
 }
 
@@ -1139,13 +1167,14 @@ main() {
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
                 echo "Options:"
-                echo "  --profile, -p PROFILE   Set deployment profile (minimal|production|custom)"
+                echo "  --profile, -p PROFILE   Set deployment profile (minimal|production|docker|custom)"
                 echo "  --check, -c             Validate gum installation and exit"
                 echo "  --help, -h              Show this help message"
                 echo ""
                 echo "Examples:"
                 echo "  $0                      # Interactive TUI mode"
                 echo "  $0 --profile minimal    # Quick setup with minimal profile"
+                echo "  $0 --profile docker     # Setup for Docker containers"
                 echo "  $0 --check              # Verify gum is properly installed"
                 exit 0
                 ;;

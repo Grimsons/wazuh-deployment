@@ -5,11 +5,14 @@
 [defaults]
 inventory = inventory/hosts.yml
 roles_path = roles
-host_key_checking = False
+# SECURITY: Verify SSH host keys on first connection (prevents MITM attacks)
+# Set up known_hosts via: ssh-keyscan <hosts> >> .known_hosts
+# Or use 'accept-new' for automated deploys: ssh_args = -o StrictHostKeyChecking=accept-new -o ControlMaster=auto -o ControlPersist=60s
+host_key_checking = True
 retry_files_enabled = False
 gathering = smart
 fact_caching = jsonfile
-fact_caching_connection = /tmp/ansible_facts_cache
+fact_caching_connection = .ansible_facts_cache
 fact_caching_timeout = 3600
 
 # Increase timeout for slow connections
@@ -22,6 +25,9 @@ forks = 10
 stdout_callback = yaml
 # callback_whitelist = profile_tasks
 
+# Vault password file — set this or export ANSIBLE_VAULT_PASSWORD_FILE=.vault_password
+# vault_password_file = .vault_password
+
 [privilege_escalation]
 become = True
 become_method = sudo
@@ -30,7 +36,7 @@ become_user = root
 
 [ssh_connection]
 pipelining = True
-ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no
+ssh_args = -o ControlMaster=auto -o ControlPersist=60s
 
 # For slow connections, increase these:
 # control_path_dir = /tmp/ansible-ssh-%%h-%%p-%%r

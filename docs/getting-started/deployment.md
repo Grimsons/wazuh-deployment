@@ -50,6 +50,7 @@ The TUI provides a visual experience with [gum](https://github.com/charmbracelet
 **Deployment Profiles:**
 - **Minimal**: Single-node development/testing deployment
 - **Production**: Multi-node cluster with high availability
+- **Docker**: Pre-configured for local Docker test environment (4 containers)
 - **Custom**: Full control over every setting
 
 Install gum first:
@@ -66,7 +67,7 @@ brew install gum
 #### CLI Setup (setup.sh)
 
 The traditional wizard guides you through:
-- Wazuh version selection (default: 4.14.2)
+- Wazuh version selection (default: 4.14.5)
 - Node IP addresses (indexer, manager, dashboard)
 - Agent hosts (optional)
 - Security features (vulnerability detection, FIM, SCA, etc.)
@@ -82,11 +83,9 @@ Both setup methods generate:
 - `inventory/bootstrap.yml` - Bootstrap inventory (connects as root)
 - `group_vars/all/main.yml` - Configuration variables
 - `group_vars/all/vault.yml` - Encrypted credentials (Ansible Vault)
-- `.vault_password` - Vault encryption key (keep secure!)
-- `ansible.cfg` - Ansible settings (includes vault_password_file path)
-- `keys/wazuh_ansible_key` - SSH keypair for deployment
-- `client-prep/` - Host preparation package
-- `wazuh-client-prep.sh` - Self-extracting installer
+- `~/.config/wazuh-deployment/.vault_password` - Vault decryption key (keep secure!)
+
+> **Note:** The vault password is stored outside the repo under `~/.config/wazuh-deployment/.vault_password` (mode `600`). The Makefile passes `--vault-password-file ~/.config/wazuh-deployment/.vault_password` on all playbook calls. For manual `ansible-playbook` runs, include the same flag.
 
 ### 2. Deploy (First Time - Bootstrap + Full Deploy)
 
@@ -97,26 +96,33 @@ For first-time deployments, use the **bootstrap** workflow. This:
 4. Deploys the complete Wazuh stack
 
 ```bash
-# If using password authentication for initial root access:
-ansible-playbook site.yml --tags bootstrap,all --ask-pass
+# Via Makefile (recommended):
+make deploy-bootstrap
 
-# If root already has your SSH key:
-ansible-playbook site.yml --tags bootstrap,all
+# Or manually (password auth):
+ansible-playbook site.yml --tags bootstrap,all --ask-pass --vault-password-file ~/.config/wazuh-deployment/.vault_password
+
+# Or manually (SSH key):
+ansible-playbook site.yml --tags bootstrap,all --vault-password-file ~/.config/wazuh-deployment/.vault_password
 ```
 
 The bootstrap play runs first, then continues with the full deployment using the newly created `wazuh-deploy` user.
 
-> **Note:** You do not need to pass `--vault-password-file` manually. The generated `ansible.cfg` already sets `vault_password_file = .vault_password`, so Ansible picks it up automatically.
+> **Note:** Always pass `--vault-password-file ~/.config/wazuh-deployment/.vault_password` when running `ansible-playbook` manually. The Makefile handles this automatically.
 
 ### 3. Deploy (Subsequent Runs)
 
 After the initial bootstrap, subsequent deployments use `wazuh-deploy` automatically:
 
 ```bash
-ansible-playbook site.yml
+# Via Makefile (recommended):
+make deploy
+
+# Or manually:
+ansible-playbook site.yml --vault-password-file ~/.config/wazuh-deployment/.vault_password
 ```
 
-No bootstrap needed -- just run the playbook.
+No bootstrap needed -- just run the deploy.
 
 ### Alternative: Manual Host Preparation
 
@@ -185,6 +191,36 @@ ansible-playbook wazuh-distributed.yml
 >
 > **For production deployments, always use `setup.sh` or `setup-tui.sh` followed by `site.yml`.**
 
+### 5a. Docker Test Environment (Optional)
+
+For local development and testing, a Docker-based environment is available:
+
+```bash
+# Prerequisites check
+make check-docker
+
+# Quick setup with Docker defaults (requires running containers)
+make setup-docker
+
+# Full automated setup (containers + config + deploy)
+make docker-setup
+```
+
+This starts 4 systemd-capable containers (indexer-1, manager-1, dashboard-1, agent-1) via `docker-compose.yml`, generates configuration with the Docker profile, bootstraps SSH access, and deploys the full stack. Dashboard is available at `https://localhost:443`.
+
+**Prerequisites:** Docker, `yq`, and Ansible 2.12+.
+
+### 5b. Configure Git Hooks (Recommended)
+
+After setup, configure pre-commit hooks that prevent committing unencrypted vault files:
+
+```bash
+make setup-hooks
+# (Runs automatically on make check)
+```
+
+This installs a pre-commit hook (`.githooks/pre-commit`) that rejects commits if `group_vars/all/vault.yml` is not encrypted.
+
 ### 5. Access the Dashboard
 
 After setup completes, credentials are displayed on screen and stored encrypted in Ansible Vault. To view them later:
@@ -244,6 +280,7 @@ all:
     wazuh_dashboards:
       hosts:
         dashboard-host:
+          dashboard_node_name: dashboard-1
     wazuh_agents:
       hosts:
         agent-host-1:
@@ -254,7 +291,7 @@ all:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `wazuh_version` | Wazuh version to install | 4.14.2 |
+| `wazuh_version` | Wazuh version to install | 4.14.5 |
 | `wazuh_indexer_http_port` | Indexer HTTP port | 9200 |
 | `wazuh_manager_api_port` | Manager API port | 55000 |
 | `wazuh_dashboard_port` | Dashboard HTTPS port | 443 |
@@ -411,10 +448,11 @@ If MITRE technique aggregations fail in the dashboard:
 
 ## Security Considerations
 
-1. Back up `.vault_password` securely -- required to decrypt credentials
+1. Back up `~/.config/wazuh-deployment/.vault_password` securely -- required to decrypt credentials
 2. Use external CA certificates for production environments
 3. Restrict network access to management ports
 4. Enable firewall rules (`wazuh_configure_firewall: true`)
 5. Keep deployment user locked down between deployments
-6. Rotate credentials regularly (`./scripts/manage-vault.sh rotate`)
+6. Rotate credentials regularly (`make vault-rotate` or `./scripts/manage-vault.sh rotate`)
 7. Enable audit logging for compliance
+8. Configure git hooks to prevent accidental vault exposure: `make setup-hooks`

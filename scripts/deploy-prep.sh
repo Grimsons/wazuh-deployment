@@ -313,9 +313,10 @@ prompt_credentials() {
         fi
     fi
 
-    # Export for use in subshells
+    # Export SSH_PASSWORD for sshpass (used in run_ssh via SSHPASS env var).
+    # BECOME_PASSWORD is NOT exported — it is piped directly to sudo -S stdin,
+    # so it never appears in process environment or remote cmdline.
     export SSH_PASSWORD
-    export BECOME_PASSWORD
 }
 
 # Check prerequisites
@@ -391,7 +392,7 @@ build_ssh_opts() {
 
     if [ "$INSECURE_SSH" = "true" ]; then
         # Insecure mode - disable host key checking (NOT recommended)
-        opts="$opts -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+        opts="$opts -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null"
     else
         # Secure mode - use project-local known_hosts
         touch "$KNOWN_HOSTS_FILE" 2>/dev/null || true
@@ -483,27 +484,41 @@ deploy_to_host() {
 
     # Build the sudo command based on authentication mode
     local exec_cmd
+    local escaped_prep
+    printf -v escaped_prep '%q' "$prep_cmd"
     if [ "$REMOTE_USER" = "root" ]; then
         # Running as root, no sudo needed
-        exec_cmd="bash -c '$prep_cmd'"
+        exec_cmd="bash -c $escaped_prep"
     elif [ "$ASK_BECOME_PASS" = "true" ] && [ -n "$BECOME_PASSWORD" ]; then
-        # Use sudo with password from stdin (base64 encode to safely handle special chars)
-        local encoded_password
-        encoded_password=$(printf '%s' "$BECOME_PASSWORD" | base64)
-        exec_cmd="printf '%s' '${encoded_password}' | base64 -d | sudo -S bash -c '$prep_cmd'"
+        # Pass the sudo password via stdin to avoid exposure in remote process argv.
+        # The password is never part of the SSH command string or remote argv.
+        exec_cmd="sudo -S bash -c $escaped_prep"
     else
         # Use sudo without password (assumes NOPASSWD or already root)
-        exec_cmd="sudo bash -c '$prep_cmd'"
+        exec_cmd="sudo bash -c $escaped_prep"
     fi
 
-    if timeout "$SSH_TIMEOUT" run_ssh "$host" "$exec_cmd" 2>&1; then
-        print_success "[$host] Preparation complete"
-        echo "SUCCESS" > "$result_file"
-        return 0
+    if [ "$ASK_BECOME_PASS" = "true" ] && [ -n "$BECOME_PASSWORD" ]; then
+        # Pipe the sudo password on stdin; never in argv or environment
+        if printf '%s\n' "$BECOME_PASSWORD" | timeout "$SSH_TIMEOUT" run_ssh "$host" "$exec_cmd" 2>&1; then
+            print_success "[$host] Preparation complete"
+            echo "SUCCESS" > "$result_file"
+            return 0
+        else
+            print_error "[$host] Preparation failed"
+            echo "FAILED: Script execution failed" > "$result_file"
+            return 1
+        fi
     else
-        print_error "[$host] Preparation failed"
-        echo "FAILED: Script execution failed" > "$result_file"
-        return 1
+        if timeout "$SSH_TIMEOUT" run_ssh "$host" "$exec_cmd" 2>&1; then
+            print_success "[$host] Preparation complete"
+            echo "SUCCESS" > "$result_file"
+            return 0
+        else
+            print_error "[$host] Preparation failed"
+            echo "FAILED: Script execution failed" > "$result_file"
+            return 1
+        fi
     fi
 }
 
@@ -572,7 +587,8 @@ verify_deployment() {
     for host in "${HOSTS[@]}"; do
         print_info "Testing: $host"
 
-        local ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -p $SSH_PORT"
+        local known_hosts="${KNOWN_HOSTS_FILE:-/dev/null}"
+        local ssh_opts="-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$known_hosts -o ConnectTimeout=10 -p $SSH_PORT"
 
         # Test with new Ansible user and key
         if ssh $ssh_opts -i "$SSH_KEY" "${ANSIBLE_USER}@${host}" "echo 'Ansible user OK'" &>/dev/null; then

@@ -26,11 +26,11 @@
   post_tasks:
     - name: Verify Wazuh Indexer is running
       ansible.builtin.uri:
-        url: "https://{{ ansible_default_ipv4.address }}:{{ wazuh_indexer_http_port }}/_cluster/health"
+        url: "https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port }}/_cluster/health"
         user: "{{ wazuh_indexer_admin_user }}"
         password: "{{ wazuh_indexer_admin_password }}"
         force_basic_auth: true
-        validate_certs: "{{ wazuh_ssl_verify_certificates | default(false) }}"
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
         return_content: true
       register: indexer_health_check
       failed_when: indexer_health_check.status != 200

@@ -1,21 +1,71 @@
 ---
 # Wazuh Indexer - Installation
 
-- name: Install Wazuh Indexer (Debian/Ubuntu)
+- name: Download and install Wazuh Indexer via .deb (pre-release)
+  when:
+    - ansible_os_family == 'Debian'
+    - wazuh_direct_download | default(false)
+  become: true
+  block:
+    - name: Create temp directory for packages
+      ansible.builtin.file:
+        path: /tmp/wazuh-packages
+        state: directory
+        mode: '0755'
+
+    - name: Download Wazuh Indexer .deb package
+      ansible.builtin.get_url:
+        url: "{{ wazuh_repo_url_apt }}pool/main/w/wazuh-indexer/wazuh-indexer_{{ wazuh_version }}_amd64.deb"
+        dest: /tmp/wazuh-packages/wazuh-indexer.deb
+
+    - name: Install .deb package
+      ansible.builtin.apt:
+        deb: /tmp/wazuh-packages/wazuh-indexer.deb
+      notify: restart wazuh-indexer
+
+- name: Install Wazuh Indexer via apt repository (production)
   ansible.builtin.apt:
     name: "wazuh-indexer={{ wazuh_version }}-*"
     state: present
     update_cache: true
   become: true
-  when: ansible_os_family == 'Debian'
+  when:
+    - ansible_os_family == 'Debian'
+    - not (wazuh_direct_download | default(false))
   notify: restart wazuh-indexer
 
-- name: Install Wazuh Indexer (RHEL/CentOS)
+- name: Download and install Wazuh Indexer via .rpm (pre-release)
+  when:
+    - ansible_os_family == 'RedHat'
+    - wazuh_direct_download | default(false)
+  become: true
+  block:
+    - name: Create temp directory for packages
+      ansible.builtin.file:
+        path: /tmp/wazuh-packages
+        state: directory
+        mode: '0755'
+
+    - name: Download Wazuh Indexer .rpm package
+      ansible.builtin.get_url:
+        url: "{{ wazuh_repo_url_yum }}wazuh-indexer-{{ wazuh_version }}.x86_64.rpm"
+        dest: /tmp/wazuh-packages/wazuh-indexer.rpm
+
+    - name: Install .rpm package
+      ansible.builtin.dnf:
+        name: /tmp/wazuh-packages/wazuh-indexer.rpm
+        state: present
+        disable_gpg_check: true
+      notify: restart wazuh-indexer
+
+- name: Install Wazuh Indexer via dnf repository (production)
   ansible.builtin.dnf:
     name: "wazuh-indexer-{{ wazuh_version }}"
     state: present
   become: true
-  when: ansible_os_family == 'RedHat'
+  when:
+    - ansible_os_family == 'RedHat'
+    - not (wazuh_direct_download | default(false))
   notify: restart wazuh-indexer
 
 - name: Reload systemd daemon

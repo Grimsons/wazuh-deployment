@@ -1,0 +1,13 @@
+/etc/profile:
+/etc/bash.bashrc:
+/etc/bash.bash_logout:
+/home/%:/.bashrc:
+/home/%:/.bash_profile:
+/home/%:/.bash_logout:
+/home/%:/.profile:
+/home/%:/.zshrc:
+/home/%:/.zprofile:
+/root/.bashrc:
+/root/.bash_profile:
+/root/.profile:
+/root/.zshrc:

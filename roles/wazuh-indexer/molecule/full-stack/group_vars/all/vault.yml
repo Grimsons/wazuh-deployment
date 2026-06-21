@@ -1,0 +1,5 @@
+---
+vault_wazuh_indexer_admin_password: "AdminPass123456789!"
+vault_wazuh_api_password: "ApiPass456!"
+vault_wazuh_agent_enrollment_password: "EnrollPass789!"
+vault_wazuh_manager_cluster_key: "c1ust3rK3y0123456789abcdef0123456"

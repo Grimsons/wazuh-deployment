@@ -9,6 +9,8 @@ keys/
 
 # Generated credentials (SENSITIVE - never commit!)
 credentials/
+files/certs/*-key.pem
+files/certs/root-ca-key.pem
 
 # Client preparation package (contains SSH public key)
 client-prep/
@@ -18,8 +20,6 @@ wazuh-client-prep.sh
 # Generated configuration files (may contain passwords/secrets)
 inventory/hosts.yml
 inventory/bootstrap.yml
-group_vars/all.yml
-group_vars/vault.yml
 group_vars/all/main.yml
 group_vars/all/vault.yml
 ansible.cfg
@@ -33,6 +33,8 @@ files/certs/*.crt
 files/certs/*.csr
 files/certs/*.srl
 files/certs/backup/
+**/files/certs/*.pem
+**/files/certs/*-key.pem
 /certs/
 *.crt
 *.csr
@@ -42,10 +44,11 @@ files/certs/backup/
 *.retry
 .ansible_facts_cache/
 /tmp/ansible_facts_cache/
+.ansible/
 
 # Ansible vault password file
-.vault_pass
 .vault_password
+.vault_password_molecule
 vault_password_file
 
 # IDE and Editor files
@@ -79,7 +82,37 @@ venv/
 .env
 .venv/
 
-# Claude Code working files
+# Claude Code / opencode working files
 CLAUDE.md
 improvements.md
 .claude/
+.opencode/
+
+# OS metadata files
+Thumbs.db
+.DS_Store
+.directory
+.desktop.ini
+
+# IDE and editor files
+.project
+.settings/
+*.sublime-project
+*.sublime-workspace
+*.iml
+.fleet/
+
+# Merge/patch artifacts
+*.orig
+*.rej
+*.diff
+*.patch
+*.bak
+
+# Python packaging
+*.egg-info/
+MANIFEST
+pip-wheel-metadata/
+
+# Generated documentation
+docs/book/

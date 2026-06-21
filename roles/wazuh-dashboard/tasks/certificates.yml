@@ -22,8 +22,8 @@
 
 - name: Copy dashboard certificate
   ansible.builtin.copy:
-    src: "{{ wazuh_certs_path | default('files/certs') }}/dashboard.pem"
-    dest: "{{ wazuh_dashboard_certs_path }}/dashboard.pem"
+    src: "{{ wazuh_certs_path | default('files/certs') }}/{{ dashboard_node_name | default('dashboard-1') }}.pem"
+    dest: "{{ wazuh_dashboard_certs_path }}/{{ dashboard_node_name | default('dashboard-1') }}.pem"
     owner: wazuh-dashboard
     group: wazuh-dashboard
     mode: '0400'
@@ -32,10 +32,29 @@
 
 - name: Copy dashboard private key
   ansible.builtin.copy:
-    src: "{{ wazuh_certs_path | default('files/certs') }}/dashboard-key.pem"
-    dest: "{{ wazuh_dashboard_certs_path }}/dashboard-key.pem"
+    src: "{{ wazuh_certs_path | default('files/certs') }}/{{ dashboard_node_name | default('dashboard-1') }}-key.pem"
+    dest: "{{ wazuh_dashboard_certs_path }}/{{ dashboard_node_name | default('dashboard-1') }}-key.pem"
     owner: wazuh-dashboard
     group: wazuh-dashboard
     mode: '0400'
   become: true
+  no_log: true
   notify: restart wazuh-dashboard
+
+- name: Verify dashboard certificate has correct common name
+  ansible.builtin.shell: |
+    set -o pipefail
+    CERT_NAME="{{ dashboard_node_name | default('dashboard-1') }}"
+    CERT_FILE="{{ wazuh_dashboard_certs_path }}/${CERT_NAME}.pem"
+    ACTUAL=$(openssl x509 -in "$CERT_FILE" -subject -noout -nameopt RFC2253 2>/dev/null | sed 's/^subject=CN=//;s/,.*//')
+    if [ "$ACTUAL" != "$CERT_NAME" ]; then
+      echo "FAIL: Dashboard cert CN='$ACTUAL', expected '$CERT_NAME'"
+      echo "Re-copy certs from control machine: ansible-playbook site.yml --tags dashboard"
+      exit 1
+    fi
+    echo "PASS: Dashboard cert CN='$ACTUAL'"
+  args:
+    executable: /bin/bash
+  register: dsb_cert_check
+  changed_when: false
+  become: true

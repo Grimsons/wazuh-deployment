@@ -17,7 +17,7 @@
 - name: Get default network interface info
   ansible.builtin.set_fact:
     default_interface: "{{ ansible_default_ipv4.interface | default('eth0') }}"
-    default_ip: "{{ ansible_default_ipv4.address | default('0.0.0.0') }}"
+    default_ip: "{{ wazuh_node_ip | default('0.0.0.0') }}"
     default_netmask: "{{ ansible_default_ipv4.netmask | default('255.255.255.0') }}"
     default_network: "{{ ansible_default_ipv4.network | default('0.0.0.0') }}"
 
@@ -80,7 +80,9 @@
   register: ufw_status
   changed_when: false
   failed_when: false
-  when: ufw_check.rc == 0
+  when:
+    - ansible_os_family == 'Debian'
+    - ufw_check.rc == 0
   become: true
 
 # Allow SSH first before enabling UFW to prevent lockout
@@ -92,6 +94,7 @@
     jump: ACCEPT
   become: true
   when:
+    - ansible_os_family == 'Debian'
     - ufw_check.rc == 0
     - ufw_status.stdout is defined
     - "'inactive' in ufw_status.stdout.lower()"
@@ -104,6 +107,7 @@
     direction: incoming
   become: true
   when:
+    - ansible_os_family == 'Debian'
     - ufw_check.rc == 0
     - ufw_status.stdout is defined
     - "'inactive' in ufw_status.stdout.lower()"
@@ -114,6 +118,7 @@
     direction: outgoing
   become: true
   when:
+    - ansible_os_family == 'Debian'
     - ufw_check.rc == 0
 
 - name: Re-check UFW status after enabling
@@ -121,12 +126,15 @@
   register: ufw_status
   changed_when: false
   failed_when: false
-  when: ufw_check.rc == 0
+  when:
+    - ansible_os_family == 'Debian'
+    - ufw_check.rc == 0
   become: true
 
 # UFW (Debian/Ubuntu)
 - name: Configure UFW rules
   when:
+    - ansible_os_family == 'Debian'
     - ufw_check.rc == 0
     - ufw_status.stdout is defined
     - "'active' in ufw_status.stdout.lower()"
@@ -149,7 +157,7 @@
       loop: "{{ effective_agent_networks }}"
       when: not allow_agents_from_any
 
-    # Agent communication - allow from auto-detected/configured agent subnets (UDP)
+    # Agent communication - allow from agent networks (UDP - legacy non-TLS only)
     - name: Allow Wazuh agent communication (1514/udp) from agent networks
       community.general.ufw:
         rule: allow
@@ -158,7 +166,9 @@
         from_ip: "{{ item }}"
       become: true
       loop: "{{ effective_agent_networks }}"
-      when: not allow_agents_from_any
+      when:
+        - not allow_agents_from_any
+        - wazuh_manager_firewall_agent_udp_enabled | default(false)
 
     # Agent registration - allow from agent subnets
     - name: Allow Wazuh agent registration (1515/tcp) from agent networks
@@ -241,40 +251,90 @@
         state: enabled
       become: true
 
-    - name: Allow Wazuh Manager agent communication port (1514/tcp)
+    # Agent communication - allow from anywhere when wazuh_allow_agents_from_any is true
+    - name: Allow Wazuh agent communication (1514/tcp) from anywhere
       ansible.posix.firewalld:
         port: "{{ wazuh_manager_agent_port | default(1514) }}/tcp"
         permanent: true
         state: enabled
       become: true
+      when: allow_agents_from_any
 
-    - name: Allow Wazuh Manager agent communication port (1514/udp)
+    - name: Allow Wazuh agent communication (1514/udp) from anywhere
       ansible.posix.firewalld:
         port: "{{ wazuh_manager_agent_port | default(1514) }}/udp"
         permanent: true
         state: enabled
       become: true
+      when:
+        - allow_agents_from_any
+        - wazuh_manager_firewall_agent_udp_enabled | default(false)
 
-    - name: Allow Wazuh Manager registration port (1515)
+    - name: Allow Wazuh agent registration (1515/tcp) from anywhere
       ansible.posix.firewalld:
         port: "1515/tcp"
         permanent: true
         state: enabled
       become: true
+      when: allow_agents_from_any
 
-    - name: Allow Wazuh API port
+    # Agent communication - restrict to configured subnets when not allowing from any
+    - name: Allow Wazuh agent communication (1514/tcp) from agent networks
       ansible.posix.firewalld:
-        port: "{{ wazuh_manager_api_port }}/tcp"
+        rich_rule: >-
+          rule family="ipv4" source address="{{ item }}"
+          port port="{{ wazuh_manager_agent_port | default(1514) }}" protocol="tcp" accept
         permanent: true
         state: enabled
       become: true
+      loop: "{{ effective_agent_networks }}"
+      when: not allow_agents_from_any
 
-    - name: Allow Wazuh cluster port (for multi-node)
+    - name: Allow Wazuh agent communication (1514/udp) from agent networks
       ansible.posix.firewalld:
-        port: "{{ wazuh_manager_cluster_port | default(1516) }}/tcp"
+        rich_rule: >-
+          rule family="ipv4" source address="{{ item }}"
+          port port="{{ wazuh_manager_agent_port | default(1514) }}" protocol="udp" accept
         permanent: true
         state: enabled
       become: true
+      loop: "{{ effective_agent_networks }}"
+      when:
+        - not allow_agents_from_any
+        - wazuh_manager_firewall_agent_udp_enabled | default(false)
+
+    - name: Allow Wazuh agent registration (1515/tcp) from agent networks
+      ansible.posix.firewalld:
+        rich_rule: >-
+          rule family="ipv4" source address="{{ item }}"
+          port port="1515" protocol="tcp" accept
+        permanent: true
+        state: enabled
+      become: true
+      loop: "{{ effective_agent_networks }}"
+      when: not allow_agents_from_any
+
+    # API - always restrict to cluster networks (dashboard, other managers)
+    - name: Allow Wazuh API port from cluster networks
+      ansible.posix.firewalld:
+        rich_rule: >-
+          rule family="ipv4" source address="{{ item }}"
+          port port="{{ wazuh_manager_api_port }}" protocol="tcp" accept
+        permanent: true
+        state: enabled
+      become: true
+      loop: "{{ effective_cluster_networks }}"
+
+    # Cluster communication - only if clustering enabled
+    - name: Allow Wazuh cluster port from cluster networks (multi-node)
+      ansible.posix.firewalld:
+        rich_rule: >-
+          rule family="ipv4" source address="{{ item }}"
+          port port="{{ wazuh_manager_cluster_port | default(1516) }}" protocol="tcp" accept
+        permanent: true
+        state: enabled
+      become: true
+      loop: "{{ effective_cluster_networks }}"
       when: wazuh_manager_cluster_enabled | default(false)
 
     - name: Reload firewalld

@@ -8,17 +8,13 @@
     no_block: true
   become: true
 
-- name: restart wazuh-agent-windows
-  ansible.windows.win_service:
-    name: WazuhSvc
-    state: restarted
-
 - name: restart wazuh-agent-macos
   ansible.builtin.command: /Library/Ossec/bin/wazuh-control restart
   become: true
-  changed_when: false
+  changed_when: true
 
 - name: restart auditd
   ansible.builtin.command: service auditd restart
   become: true
   changed_when: true
+  ignore_errors: true

@@ -20,6 +20,7 @@
     mode: '0640'
     backup: true
   become: true
+  no_log: true
   notify: restart wazuh-dashboard
 
 - name: Ensure dashboard data directory exists
@@ -57,6 +58,7 @@
     group: wazuh-dashboard
     mode: '0640'
   become: true
+  no_log: true
   notify: restart wazuh-dashboard
 
 - name: Set correct ownership on wazuh plugin data directory
@@ -80,5 +82,5 @@
 - name: Allow Dashboard to bind to privileged port (if < 1024)
   ansible.builtin.command: setcap 'cap_net_bind_service=+ep' /usr/share/wazuh-dashboard/node/bin/node
   become: true
-  changed_when: true
+  changed_when: false
   when: wazuh_dashboard_port | int < 1024

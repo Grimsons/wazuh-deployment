@@ -23,11 +23,12 @@
 - name: Create authd.pass file for agent enrollment
   ansible.builtin.copy:
     content: "{{ wazuh_agent_enrollment_password }}"
-    dest: /var/ossec/etc/authd.pass
-    owner: wazuh
-    group: wazuh
+    dest: "{{ wazuh_manager_install_path }}/etc/authd.pass"
+    owner: "{{ wazuh_manager_owner }}"
+    group: "{{ wazuh_manager_group }}"
     mode: '0640'
   become: true
+  no_log: true
   notify: restart wazuh-manager
   when:
     - wazuh_authd_use_password | default(true)
@@ -36,7 +37,7 @@
 
 - name: Verify authd.pass file exists
   ansible.builtin.stat:
-    path: /var/ossec/etc/authd.pass
+    path: "{{ wazuh_manager_install_path }}/etc/authd.pass"
   become: true
   register: authd_pass_file
   when: wazuh_authd_use_password | default(true)
@@ -45,7 +46,7 @@
   ansible.builtin.fail:
     msg: |
       Agent enrollment password is enabled (wazuh_authd_use_password=true) but
-      the password file /var/ossec/etc/authd.pass could not be created.
+      the password file {{ wazuh_manager_install_path }}/etc/authd.pass could not be created.
       Please check permissions and ensure wazuh_agent_enrollment_password is set in vault.
   when:
     - wazuh_authd_use_password | default(true)
@@ -57,11 +58,11 @@
       ═══════════════════════════════════════════════════════════════
       Agent Enrollment Password configured!
 
-      Password file: /var/ossec/etc/authd.pass (on manager)
+      Password file: {{ wazuh_manager_install_path }}/etc/authd.pass (on manager)
       Password source: Ansible Vault (wazuh_agent_enrollment_password)
 
       To enroll agents manually, use:
-        WAZUH_MANAGER='{{ ansible_default_ipv4.address }}' \
+        WAZUH_MANAGER='{{ wazuh_node_ip }}' \
         WAZUH_REGISTRATION_PASSWORD='<password-from-vault>' \
         apt install wazuh-agent
 

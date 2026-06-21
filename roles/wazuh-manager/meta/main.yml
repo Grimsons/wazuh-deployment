@@ -1,0 +1,30 @@
+---
+dependencies: []
+
+galaxy_info:
+  role_name: manager
+  author: wazuh
+  description: Deploy and configure Wazuh manager nodes
+  company: Wazuh
+  license: Apache-2.0
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - focal
+        - jammy
+        - noble
+    - name: Debian
+      versions:
+        - bullseye
+        - bookworm
+    - name: EL
+      versions:
+        - "8"
+        - "9"
+  galaxy_tags:
+    - wazuh
+    - security
+    - siem
+    - xdr
+    - manager
