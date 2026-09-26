@@ -1,5 +1,16 @@
 ---
 
 source: "production"
-package_urls_file_uri: "packages.wazuh.com/{{ wazuh_major_minor_version }}/artifact_urls.yml"
-package_urls_file_uri_prerelease: "packages-dev.wazuh.com/{{ wazuh_major_minor_version }}/artifact_urls.yml"
+
+# Artifact manifest layout changed between majors.  5.0 publishes a
+# per-version manifest of exact package files under production/<major>.x/;
+# 4.x published one artifact_urls.yml per major.minor release.  Both paths
+# follow the effective version, not the VERSION.json pin, so an overridden
+# wazuh_version cannot resolve a manifest from the wrong major.
+wazuh_artifact_urls_uri_4x: "packages.wazuh.com/{{ wazuh_effective_major_minor }}/artifact_urls.yml"
+wazuh_artifact_urls_uri_4x_prerelease: "packages-dev.wazuh.com/{{ wazuh_effective_major_minor }}/artifact_urls.yml"
+wazuh_artifact_urls_uri_5x: "packages.wazuh.com/production/{{ wazuh_repository_major }}/artifact-urls/artifact_urls_{{ wazuh_effective_version }}.yaml"  # noqa: yaml[line-length]
+wazuh_artifact_urls_uri_5x_prerelease: "packages-staging.xdrsiem.wazuh.info/pre-release/{{ wazuh_repository_major }}/artifact-urls/artifact_urls_{{ wazuh_effective_version }}-{{ wazuh_stage }}.yaml"  # noqa: yaml[line-length]
+
+package_urls_file_uri: "{{ wazuh_artifact_urls_uri_5x if (wazuh_is_5x | default(false) | bool) else wazuh_artifact_urls_uri_4x }}"
+package_urls_file_uri_prerelease: "{{ wazuh_artifact_urls_uri_5x_prerelease if (wazuh_is_5x | default(false) | bool) else wazuh_artifact_urls_uri_4x_prerelease }}"

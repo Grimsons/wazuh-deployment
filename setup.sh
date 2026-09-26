@@ -1697,20 +1697,7 @@ wazuh_log_rotation_max_size: "100M"
 wazuh_log_rotation_compress: true
 EOF
 
-# ═══════════════════════════════════════════════════════════════
-# Version-Derived Variables (evaluated from wazuh_version above)
-# ═══════════════════════════════════════════════════════════════
-wazuh_is_5x: "{{ wazuh_version.split('.')[0] == '5' }}"
-wazuh_is_prerelease: "{{ '-' in wazuh_version }}"
-wazuh_direct_download: "{{ wazuh_is_prerelease }}"
-wazuh_manager_install_path: "{{ '/var/wazuh-manager' if wazuh_is_5x else '/var/ossec' }}"
-wazuh_manager_config_file: "{{ wazuh_manager_install_path }}/etc/{{ 'wazuh-manager.conf' if wazuh_is_5x else 'ossec.conf' }}"
-wazuh_manager_certs_path: "{{ wazuh_manager_install_path }}/etc/certs"
-wazuh_manager_log_path: "{{ wazuh_manager_install_path }}/logs"
-wazuh_manager_owner: "{{ 'wazuh-manager' if wazuh_is_5x else 'wazuh' }}"
-wazuh_manager_group: "{{ 'wazuh-manager' if wazuh_is_5x else 'wazuh' }}"
-wazuh_use_filebeat: "{{ false if wazuh_is_5x else true }}"
-wazuh_manager_cert_name: "{{ manager_node_name | default('server') }}"
+    emit_version_contract >> "$SCRIPT_DIR/group_vars/all/main.yml"
 
     print_success "Group variables created: group_vars/all/main.yml"
 

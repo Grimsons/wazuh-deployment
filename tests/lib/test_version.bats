@@ -71,3 +71,53 @@ setup() {
     run grep -n "wazuh_use_filebeat.*default(true).*bool" "$LIB_DIR/../playbooks/system-update.yml"
     [ "$status" -eq 0 ]
 }
+
+@test "the version contract is emitted from one shared function" {
+    for consumer in \
+        "$LIB_DIR/../setup.sh" \
+        "$LIB_DIR/../setup-tui.sh" \
+        "$LIB_DIR/../scripts/migrate-from-main.sh"; do
+        run grep -n "emit_version_contract >>" "$consumer"
+        [ "$status" -eq 0 ]
+    done
+}
+
+@test "generators do not carry their own copy of the version contract" {
+    # Any of these literals in a generator means the contract was re-inlined
+    # and can drift from lib/version.sh and roles/vars/main.yml.
+    run grep -n "/var/wazuh-manager\|wazuh-manager.conf\|wazuh_is_5x:\|wazuh_use_filebeat:\|wazuh_manager_install_path:" \
+        "$LIB_DIR/../setup.sh" \
+        "$LIB_DIR/../setup-tui.sh" \
+        "$LIB_DIR/../scripts/migrate-from-main.sh"
+    [ "$status" -eq 1 ]
+}
+
+@test "the emitted version contract is valid YAML with the expected keys" {
+    command -v python3 >/dev/null 2>&1 || skip "python3 not installed"
+
+    emit_version_contract > "$BATS_TEST_TMPDIR/contract.yml"
+    run python3 -c '
+import sys, yaml
+doc = yaml.safe_load(open(sys.argv[1]))
+expected = {
+    "wazuh_is_5x", "wazuh_is_prerelease", "wazuh_direct_download",
+    "wazuh_manager_install_path", "wazuh_manager_config_file",
+    "wazuh_manager_certs_path", "wazuh_manager_log_path",
+    "wazuh_manager_owner", "wazuh_manager_group", "wazuh_use_filebeat",
+    "wazuh_manager_cert_name",
+}
+missing = expected - set(doc)
+if missing:
+    sys.exit("missing keys: %s" % sorted(missing))
+' "$BATS_TEST_TMPDIR/contract.yml"
+    [ "$status" -eq 0 ]
+}
+
+@test "the emitted version contract performs no shell expansion" {
+    # The fragment is Jinja evaluated by Ansible at deploy time, so any '$'
+    # would have been eaten by the emitting shell.
+    emit_version_contract > "$BATS_TEST_TMPDIR/contract.yml"
+    run grep -c '\$' "$BATS_TEST_TMPDIR/contract.yml"
+    [ "$output" = "0" ]
+}
+

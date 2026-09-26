@@ -42,6 +42,16 @@ OLD_ALL_YML="$PROJECT_DIR/group_vars/all.yml"
 NEW_MAIN_YML="$VAULT_DIR/main.yml"
 TIMESTAMP="$(date +%Y%m%d%H%M%S)"
 
+# Shared release contract (single source of truth for generated group_vars).
+# shellcheck source-path=SCRIPTDIR
+if [[ -f "$PROJECT_DIR/lib/version.sh" ]]; then
+    # shellcheck source=../lib/version.sh
+    source "$PROJECT_DIR/lib/version.sh"
+else
+    echo -e "${RED}[ERROR]${NC} Missing $PROJECT_DIR/lib/version.sh" >&2
+    exit 1
+fi
+
 print_header() {
     echo -e "\n${CYAN}═══════════════════════════════════════════════════════════════${NC}"
     echo -e "${CYAN}  $1${NC}"
@@ -574,22 +584,9 @@ wazuh_log_rotation_enabled: true
 wazuh_log_rotation_keep_days: 30
 wazuh_log_rotation_max_size: "100M"
 wazuh_log_rotation_compress: true
-
-# ═══════════════════════════════════════════════════════════════
-# Version-Derived Variables (evaluated from wazuh_version above)
-# ═══════════════════════════════════════════════════════════════
-wazuh_is_5x: "{{ wazuh_version.split('.')[0] == '5' }}"
-wazuh_is_prerelease: "{{ '-' in wazuh_version }}"
-wazuh_direct_download: "{{ wazuh_is_prerelease }}"
-wazuh_manager_install_path: "{{ '/var/wazuh-manager' if wazuh_is_5x else '/var/ossec' }}"
-wazuh_manager_config_file: "{{ wazuh_manager_install_path }}/etc/{{ 'wazuh-manager.conf' if wazuh_is_5x else 'ossec.conf' }}"
-wazuh_manager_certs_path: "{{ wazuh_manager_install_path }}/etc/certs"
-wazuh_manager_log_path: "{{ wazuh_manager_install_path }}/logs"
-wazuh_manager_owner: "{{ 'wazuh-manager' if wazuh_is_5x else 'wazuh' }}"
-wazuh_manager_group: "{{ 'wazuh-manager' if wazuh_is_5x else 'wazuh' }}"
-wazuh_use_filebeat: "{{ false if wazuh_is_5x else true }}"
-wazuh_manager_cert_name: "{{ manager_node_name | default('server') }}"
 EOF
+
+emit_version_contract >> "$NEW_MAIN_YML"
 
 print_success "Created: group_vars/all/main.yml"
 

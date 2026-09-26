@@ -3,14 +3,29 @@ wazuh_full_version: "{{ wazuh_version_data.version }}"
 wazuh_major_minor_version: "{{ wazuh_version_data.version.split('.')[0:2] | join('.') }}"
 wazuh_major_version: "{{ wazuh_version_data.version.split('.')[0] }}.x"
 wazuh_package_revision: "1"
+# Release stage from VERSION.json (e.g. stable, rc1, beta2).  5.0 pre-release
+# artifact manifests are published per stage, so this selects the manifest.
+wazuh_stage: "{{ wazuh_version_data.stage | default('stable') }}"
 
-# Derived release contract shared by every role.  Keep the pinned version in
-# group_vars (or pass -e wazuh_version=...), then derive behavior from it.
-wazuh_is_5x: "{{ wazuh_version is defined and (wazuh_version.split('.')[0] | int) >= 5 }}"
-wazuh_release_channel: "{{ 'pre-release' if (wazuh_version is defined and (wazuh_version is search('-'))) else 'stable' }}"
-wazuh_repository_major: "{{ (wazuh_version | default(wazuh_full_version)).split('.')[0] }}.x"
+# Derived release contract shared by every role.  This file is the single
+# source of truth: keep the pinned version in VERSION.json (optionally
+# overridden with -e wazuh_version=...), then derive everything from it.
+# Do not re-derive these in role defaults or the setup generators.
+wazuh_effective_version: "{{ wazuh_version | default(wazuh_full_version) }}"
+wazuh_effective_major_minor: "{{ wazuh_effective_version.split('.')[0:2] | join('.') }}"
+wazuh_is_5x: "{{ (wazuh_effective_version.split('.')[0] | int) >= 5 }}"
+wazuh_is_prerelease: "{{ '-' in wazuh_effective_version }}"
+wazuh_release_channel: "{{ 'pre-release' if (wazuh_is_prerelease | bool) else 'stable' }}"
+wazuh_repository_major: "{{ wazuh_effective_version.split('.')[0] }}.x"
+
+# Wazuh 5.0 removed Filebeat as the log-shipping component; events ship over
+# native server -> indexer connectivity via indexer-connector.
 wazuh_filebeat_enabled_by_version: "{{ not (wazuh_is_5x | bool) }}"
+
+# 5.0 publishes an artifact manifest of exact package files; 4.x also shipped
+# one, at a different path and with a .yml extension.
+wazuh_artifact_urls_basename: "{{ 'artifact_urls.yaml' if (wazuh_is_5x | bool) else 'artifact_urls.yml' }}"
 
 local_configs_path: "{{ playbook_dir }}/deployment-config-files"
 
-urls_file: "artifact_urls.yml"
+urls_file: "{{ wazuh_artifact_urls_basename }}"
