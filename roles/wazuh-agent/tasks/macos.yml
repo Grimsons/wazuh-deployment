@@ -23,7 +23,7 @@
 
 - name: Download Wazuh Agent PKG installer
   ansible.builtin.get_url:
-    url: "https://packages.wazuh.com/4.x/macos/wazuh-agent-{{ wazuh_version }}-1.pkg"
+    url: "https://packages.wazuh.com/{{ wazuh_repository_major }}/macos/wazuh-agent-{{ wazuh_version }}-1.pkg"
     dest: /tmp/wazuh/wazuh-agent.pkg
     checksum: "{{ wazuh_agent_macos_sha256 }}"
     mode: '0644'

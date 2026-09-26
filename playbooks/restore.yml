@@ -136,6 +136,7 @@
   become: true
   vars:
     backup_source_path: "{{ hostvars['localhost']['backup_source_path'] }}"
+    manager_install_path: "{{ wazuh_manager_install_path | default('/var/ossec') }}"
   tasks:
     - name: Restore manager configuration
       when: restore_manager | default(true) | bool
@@ -208,7 +209,7 @@
         - name: Restore agent keys
           ansible.builtin.copy:
             src: "{{ backup_source_path }}/manager/{{ inventory_hostname }}/client.keys"
-            dest: /var/ossec/etc/client.keys
+            dest: "{{ manager_install_path }}/etc/client.keys"
             owner: wazuh
             group: wazuh
             mode: '0640'
@@ -224,7 +225,7 @@
         - name: Restore RBAC database
           ansible.builtin.copy:
             src: "{{ backup_source_path }}/manager/{{ inventory_hostname }}/rbac.db"
-            dest: /var/ossec/api/configuration/security/rbac.db
+            dest: "{{ manager_install_path }}/api/configuration/security/rbac.db"
             owner: wazuh
             group: wazuh
             mode: '0640'
@@ -237,15 +238,15 @@
             group: wazuh
             recurse: true
           loop:
-            - /var/ossec/etc/shared
-            - /var/ossec/etc/decoders
-            - /var/ossec/etc/rules
-            - /var/ossec/etc/lists
-            - /var/ossec/logs
-            - /var/ossec/queue
-            - /var/ossec/var
-            - /var/ossec/tmp
-            - /var/ossec/stats
+            - "{{ manager_install_path }}/etc/shared"
+            - "{{ manager_install_path }}/etc/decoders"
+            - "{{ manager_install_path }}/etc/rules"
+            - "{{ manager_install_path }}/etc/lists"
+            - "{{ manager_install_path }}/logs"
+            - "{{ manager_install_path }}/queue"
+            - "{{ manager_install_path }}/var"
+            - "{{ manager_install_path }}/tmp"
+            - "{{ manager_install_path }}/stats"
           when: manager_backup_check.stat.exists
 
         - name: Restore root ownership on manager config files post-restore
@@ -255,7 +256,7 @@
             group: wazuh
             mode: '0640'
           loop:
-            - /var/ossec/etc/ossec.conf
+            - "{{ manager_install_path }}/etc/ossec.conf"
           when: manager_backup_check.stat.exists
           failed_when: false
 
@@ -266,8 +267,8 @@
             group: wazuh
             recurse: true
           loop:
-            - /var/ossec/bin
-            - /var/ossec/lib
+            - "{{ manager_install_path }}/bin"
+            - "{{ manager_install_path }}/lib"
           when: manager_backup_check.stat.exists
 
         - name: Cleanup restore files

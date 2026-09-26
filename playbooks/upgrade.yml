@@ -152,7 +152,7 @@
 
     - name: Get current Manager version
       ansible.builtin.shell: |
-        /var/ossec/bin/wazuh-control info 2>/dev/null | grep "WAZUH_VERSION" | cut -d'"' -f2 || echo "not_installed"
+        {{ wazuh_manager_install_path | default('/var/ossec') }}/bin/wazuh-control info 2>/dev/null | grep "WAZUH_VERSION" | cut -d'"' -f2 || echo "not_installed"
       register: current_manager_version
       changed_when: false
       failed_when: false
@@ -565,7 +565,7 @@
       when: manager_needs_upgrade
 
     - name: Check cluster status (if clustered)
-      ansible.builtin.shell: /var/ossec/bin/cluster_control -l
+      ansible.builtin.shell: "{{ wazuh_manager_install_path | default('/var/ossec') }}/bin/cluster_control -l"
       register: cluster_status
       changed_when: false
       failed_when: false
@@ -582,11 +582,13 @@
 
     - name: Stop Filebeat service
       ansible.builtin.systemd:
-        name: filebeat
+        name: "{{ wazuh_filebeat_service_name | default('filebeat') }}"
         state: stopped
       become: true
       failed_when: false
-      when: manager_needs_upgrade
+      when:
+        - manager_needs_upgrade
+        - wazuh_use_filebeat | default(true) | bool
 
     - name: Upgrade Wazuh Manager package (Debian/Ubuntu)
       ansible.builtin.apt:
@@ -628,12 +630,14 @@
 
     - name: Start Filebeat service
       ansible.builtin.systemd:
-        name: filebeat
+        name: "{{ wazuh_filebeat_service_name | default('filebeat') }}"
         state: started
         enabled: true
       become: true
       failed_when: false
-      when: manager_needs_upgrade
+      when:
+        - manager_needs_upgrade
+        - wazuh_use_filebeat | default(true) | bool
 
     - name: Wait for Manager API to be ready
       ansible.builtin.uri:
@@ -651,7 +655,7 @@
     - name: Wait for cluster to synchronize (if clustered)
       ansible.builtin.shell: |
         sleep 30
-        /var/ossec/bin/cluster_control -l | grep -c "connected"
+        {{ wazuh_manager_install_path | default('/var/ossec') }}/bin/cluster_control -l | grep -c "connected"
       register: cluster_connected
       until: (cluster_connected.stdout | int) == (groups['wazuh_managers'] | length)
       retries: 12
@@ -664,7 +668,7 @@
 
     - name: Verify upgraded version
       ansible.builtin.shell: |
-        /var/ossec/bin/wazuh-control info 2>/dev/null | grep "WAZUH_VERSION" | cut -d'"' -f2
+        {{ wazuh_manager_install_path | default('/var/ossec') }}/bin/wazuh-control info 2>/dev/null | grep "WAZUH_VERSION" | cut -d'"' -f2
       register: new_manager_version
       changed_when: false
       when: manager_needs_upgrade
@@ -793,7 +797,7 @@
 
     - name: Get current Agent version
       ansible.builtin.shell: |
-        /var/ossec/bin/wazuh-control info 2>/dev/null | grep "WAZUH_VERSION" | cut -d'"' -f2 || echo "not_installed"
+        {{ wazuh_manager_install_path | default('/var/ossec') }}/bin/wazuh-control info 2>/dev/null | grep "WAZUH_VERSION" | cut -d'"' -f2 || echo "not_installed"
       register: current_agent_version
       changed_when: false
       when: upgrade_agents | bool
@@ -865,7 +869,7 @@
     - name: Wait for Agent to reconnect to Manager
       ansible.builtin.shell: |
         sleep 10
-        /var/ossec/bin/wazuh-control status | grep -q "wazuh-agentd is running"
+        {{ wazuh_manager_install_path | default('/var/ossec') }}/bin/wazuh-control status | grep -q "wazuh-agentd is running"
       register: agent_status
       until: agent_status.rc == 0
       retries: 6

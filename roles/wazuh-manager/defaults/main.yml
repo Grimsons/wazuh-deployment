@@ -4,6 +4,7 @@
 # Package settings
 wazuh_manager_package_name: "wazuh-manager"
 wazuh_manager_service_name: "wazuh-manager"
+wazuh_filebeat_service_name: "filebeat"
 
 # Binary prefix for Wazuh binaries (e.g. "wazuh-"). All Wazuh 4.x and 5.x
 # manager binaries use this prefix (wazuh-analysisd, wazuh-keystore, etc.)
@@ -26,13 +27,13 @@ wazuh_repo_url_yum: >-
      else 'https://packages.wazuh.com/' + (wazuh_version.split('.')[0] + '.x') + '/yum/' }}
 
 # Manager configuration
-wazuh_manager_install_path: "/var/ossec"
-wazuh_manager_config_file: "{{ wazuh_manager_install_path }}/etc/ossec.conf"
-wazuh_manager_config_path: /var/ossec/etc/ossec.conf
+wazuh_manager_install_path: "{{ '/var/wazuh-manager' if (wazuh_is_5x | default(false) | bool) else '/var/ossec' }}"
+wazuh_manager_config_file: "{{ wazuh_manager_install_path }}/etc/{{ 'wazuh-manager.conf' if (wazuh_is_5x | default(false) | bool) else 'ossec.conf' }}"
+wazuh_manager_config_path: "{{ wazuh_manager_config_file }}"
 wazuh_manager_certs_path: "{{ wazuh_manager_install_path }}/etc/certs"
-wazuh_manager_log_path: /var/ossec/logs
-wazuh_manager_owner: "wazuh"
-wazuh_manager_group: "wazuh"
+wazuh_manager_log_path: "{{ wazuh_manager_install_path }}/logs"
+wazuh_manager_owner: "{{ 'wazuh-manager' if (wazuh_is_5x | default(false) | bool) else 'wazuh' }}"
+wazuh_manager_group: "{{ 'wazuh-manager' if (wazuh_is_5x | default(false) | bool) else 'wazuh' }}"
 wazuh_manager_cert_name: "{{ manager_node_name | default('server') }}"
 
 # Indexer connection (shared with indexer role)
@@ -43,7 +44,7 @@ wazuh_indexer_admin_user: "admin"
 wazuh_api_user: "wazuh"
 
 # Filebeat management (4.x uses Filebeat, 5.x does not)
-wazuh_use_filebeat: true
+wazuh_use_filebeat: "{{ wazuh_filebeat_enabled_by_version | default(not (wazuh_is_5x | default(false) | bool)) | bool }}"
 
 # Agent communication port (shared across roles, default: 1514)
 wazuh_manager_agent_port: 1514
@@ -507,7 +508,7 @@ wazuh_archives_alias: "wazuh-archives"
 wazuh_indexer_connection_enabled: true
 
 # Filebeat settings (for alert forwarding to indexer)
-wazuh_filebeat_enabled: true
+wazuh_filebeat_enabled: "{{ wazuh_use_filebeat | bool }}"
 wazuh_filebeat_archives_enabled: false
 # Filebeat version - should be compatible with Wazuh version
 # See: https://documentation.wazuh.com/current/installation-guide/wazuh-indexer/step-by-step.html
@@ -521,6 +522,8 @@ wazuh_filebeat_module_sha256: "sha256:b0683f1d5d7c5d076ea3a565b0aa7ca92e6483f8a1
 # VERIFY before use: download wazuh-template.json for the pinned wazuh_version and run sha256sum
 # Update this value whenever wazuh_version changes
 wazuh_filebeat_template_sha256: "sha256:c6e30822c67c10f7e777cb51926e261d8b2c3a941c4ffcf83325f700c1c8802f"
+# Elasticsearch template layout can be overridden for a release candidate.
+wazuh_filebeat_template_path: "7.x"
 
 # ═══════════════════════════════════════════════════════════════
 # Default Agent Groups

@@ -5,6 +5,7 @@
 # Source dependencies (use local var to avoid overwriting parent's SCRIPT_DIR)
 _LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -z "$NC" ]] && source "$_LIB_DIR/colors.sh"
+source "$_LIB_DIR/version.sh"
 
 # Available profiles
 declare -A PROFILES
@@ -16,7 +17,15 @@ PROFILES["custom"]="Full interactive configuration"
 # Get profile description
 get_profile_description() {
     local profile="$1"
-    echo "${PROFILES[$profile]:-Unknown profile}"
+    # Keep this lookup independent of Bash associative-array state.  The
+    # function is also used by non-interactive callers and Bats subprocesses.
+    case "$profile" in
+        minimal) echo "Single-node setup for testing/development" ;;
+        production) echo "Multi-node HA setup with all security features" ;;
+        docker) echo "Docker container environment (single or Swarm)" ;;
+        custom) echo "Full interactive configuration" ;;
+        *) echo "Unknown profile" ;;
+    esac
 }
 
 # List available profiles
@@ -42,7 +51,7 @@ apply_profile_minimal() {
     DEPLOY_AGENTS="false"
 
     # Basic settings
-    WAZUH_VERSION="${WAZUH_VERSION:-4.14.5}"
+    set_default_wazuh_version
     ENVIRONMENT="development"
     ORG_NAME="TestOrg"
 
@@ -110,7 +119,7 @@ apply_profile_production() {
     AGENT_NODES=""
 
     # Production settings
-    WAZUH_VERSION="${WAZUH_VERSION:-4.14.5}"
+    set_default_wazuh_version
     ENVIRONMENT="production"
     ORG_NAME="${ORG_NAME:-MyOrganization}"
 
@@ -181,7 +190,7 @@ apply_profile_docker() {
     DEPLOY_AGENTS="${DEPLOY_AGENTS:-true}"
 
     # Basic settings
-    WAZUH_VERSION="${WAZUH_VERSION:-4.14.5}"
+    set_default_wazuh_version
     ENVIRONMENT="${ENVIRONMENT:-development}"
     ORG_NAME="${ORG_NAME:-DockerTestOrg}"
 

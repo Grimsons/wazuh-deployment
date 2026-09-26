@@ -416,7 +416,7 @@ cat > "$NEW_MAIN_YML" << EOF
 # ═══════════════════════════════════════════════════════════════
 # General Settings
 # ═══════════════════════════════════════════════════════════════
-wazuh_version: "${WAZUH_VERSION:-4.14.5}"
+wazuh_version: "${WAZUH_VERSION:-$(python3 -c "import json; print(json.load(open('${PROJECT_DIR}/VERSION.json'))['version'])")}"
 environment_name: "${ENVIRONMENT_NAME:-production}"
 organization_name: "${ORGANIZATION_NAME:-MyOrganization}"
 

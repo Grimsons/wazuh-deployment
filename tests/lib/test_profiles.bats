@@ -20,15 +20,17 @@ setup() {
 # ─── get_profile_description ──────────────────────────────────────────────────
 
 @test "get_profile_description: returns description for minimal" {
-    run get_profile_description "minimal"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"testing"* || "$output" == *"development"* ]]
+    get_profile_description "minimal" > "$BATS_TEST_TMPDIR/minimal-description"
+    description="$(<"$BATS_TEST_TMPDIR/minimal-description")"
+    [ "$description" != "Unknown profile" ]
+    [[ "$description" == *"testing"* || "$description" == *"development"* ]]
 }
 
 @test "get_profile_description: returns description for production" {
-    run get_profile_description "production"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"HA"* || "$output" == *"multi-node"* || "$output" == *"security"* ]]
+    get_profile_description "production" > "$BATS_TEST_TMPDIR/production-description"
+    description="$(<"$BATS_TEST_TMPDIR/production-description")"
+    [ "$description" != "Unknown profile" ]
+    [[ "$description" == *"HA"* || "$description" == *"multi-node"* || "$description" == *"security"* ]]
 }
 
 @test "get_profile_description: returns fallback for unknown profile" {

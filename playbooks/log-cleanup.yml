@@ -28,7 +28,7 @@
     cleanup_ossec_logs: true
     cleanup_firewall_logs: true
     dry_run: false
-    ossec_log_path: /var/ossec/logs
+    ossec_log_path: "{{ wazuh_manager_log_path | default((wazuh_manager_install_path | default('/var/ossec')) + '/logs') }}"
 
   tasks:
     - name: Display cleanup configuration

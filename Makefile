@@ -331,7 +331,7 @@ docker-setup: check-docker ## Full Docker environment (containers + deploy)
 	GENERATE_SSH_KEY="true" \
 	ANSIBLE_USER="wazuh-deploy" \
 	SAME_SSH_CREDS="true" \
-	WAZUH_VERSION="${WAZUH_VERSION:-4.14.5}" \
+	WAZUH_VERSION="$${WAZUH_VERSION:-$$(awk -F'"' '/"version"[[:space:]]*:/ {print $$4; exit}' VERSION.json)}" \
 	./setup.sh --profile docker --quiet; \
 	echo ""; \
 	echo "$(CYAN)Bootstrapping containers (SSH + deploy user)...$(RESET)"; \

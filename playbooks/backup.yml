@@ -169,6 +169,7 @@
   vars:
     backup_timestamp: "{{ hostvars['localhost']['backup_timestamp'] }}"
     backup_base_path: "{{ hostvars['localhost']['backup_base_path'] }}"
+    manager_install_path: "{{ wazuh_manager_install_path | default('/var/ossec') }}"
   tasks:
     - name: Backup manager configuration
       when: backup_manager | default(true) | bool
@@ -190,11 +191,11 @@
         - name: Backup manager configuration
           community.general.archive:
             path:
-              - /var/ossec/etc/ossec.conf
-              - /var/ossec/etc/rules/
-              - /var/ossec/etc/decoders/
-              - /var/ossec/etc/lists/
-              - /var/ossec/etc/shared/
+              - "{{ manager_install_path }}/etc/ossec.conf"
+              - "{{ manager_install_path }}/etc/rules/"
+              - "{{ manager_install_path }}/etc/decoders/"
+              - "{{ manager_install_path }}/etc/lists/"
+              - "{{ manager_install_path }}/etc/shared/"
             dest: /tmp/wazuh-backup-{{ backup_timestamp }}/manager-config.tar.gz
             format: gz
             mode: '0600'
@@ -202,14 +203,14 @@
         - name: Backup manager API configuration
           community.general.archive:
             path:
-              - /var/ossec/api/configuration/
+              - "{{ manager_install_path }}/api/configuration/"
             dest: /tmp/wazuh-backup-{{ backup_timestamp }}/manager-api.tar.gz
             format: gz
             mode: '0600'
 
         - name: Backup manager certificates
           community.general.archive:
-            path: /var/ossec/etc/certs/
+            path: "{{ manager_install_path }}/etc/certs/"
             dest: /tmp/wazuh-backup-{{ backup_timestamp }}/manager-certs.tar.gz
             format: gz
             mode: '0600'
@@ -217,7 +218,7 @@
 
         - name: Backup agent keys
           ansible.builtin.copy:
-            src: /var/ossec/etc/client.keys
+            src: "{{ manager_install_path }}/etc/client.keys"
             dest: /tmp/wazuh-backup-{{ backup_timestamp }}/client.keys
             remote_src: true
             mode: '0600'
@@ -225,7 +226,7 @@
 
         - name: Backup RBAC database
           ansible.builtin.copy:
-            src: /var/ossec/api/configuration/security/rbac.db
+            src: "{{ manager_install_path }}/api/configuration/security/rbac.db"
             dest: /tmp/wazuh-backup-{{ backup_timestamp }}/rbac.db
             remote_src: true
             mode: '0600'

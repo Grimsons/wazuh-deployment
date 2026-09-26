@@ -2,6 +2,29 @@
 
 This document describes how to upgrade Wazuh deployments using the rolling upgrade playbook.
 
+## Wazuh 5.0 compatibility boundary
+
+The `upgrade/wazuh-5.0` branch is an isolated migration handoff; `main` remains
+the verified 4.14.x baseline. Set `wazuh_version` or `target_version` explicitly
+when testing a 5.0 release candidate. The release contract derives the major
+repository path, manager installation path, manager config filename, service
+account, and Filebeat behavior from that version.
+
+The following 5.0 assumptions are intentionally unsupported until validated
+against the target build and release notes:
+
+- Filebeat alert forwarding and the legacy Elasticsearch template/module path;
+  5.x deployments disable Filebeat by default.
+- In-place migration of indexer mappings, dashboard saved objects, and custom
+  rules/decoders/CDB lists without a tested export/import or rollback.
+- Automatic conversion of existing `/var/ossec` data into `/var/wazuh-manager`.
+- Package URLs, checksums, certificate layouts, and API/cluster behavior for a
+  beta or staging build unless their artifacts have been independently verified.
+
+Run the pre-flight, backup, and post-upgrade validation stages in a disposable
+environment before production. A successful syntax check is not evidence that
+the 5.0 package or schema migration is supported.
+
 ## Overview
 
 The upgrade playbook (`playbooks/upgrade.yml`) performs rolling upgrades with:
