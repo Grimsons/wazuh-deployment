@@ -9,6 +9,9 @@ validate_ip() {
     [[ ${#octets[@]} -eq 4 ]] || return 1
     for octet in "${octets[@]}"; do
         [[ "$octet" =~ ^[0-9]+$ ]] || return 1
+        # Keep the accepted form canonical; leading zeroes are ambiguous to
+        # consumers that parse IPv4 octets as octal integers.
+        [[ "$octet" == "0" || "$octet" != 0* ]] || return 1
         (( octet >= 0 && octet <= 255 )) || return 1
     done
     return 0

@@ -45,8 +45,11 @@ echo
 # ── URLs ──────────────────────────────────────────────────────────────────────
 
 FILEBEAT_DEB_URL="https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-oss-${FILEBEAT_VERSION}-amd64.deb"
-FILEBEAT_MODULE_URL="https://packages.wazuh.com/4.x/filebeat/wazuh-filebeat-0.4.tar.gz"
-WAZUH_TEMPLATE_URL="https://raw.githubusercontent.com/wazuh/wazuh/v${WAZUH_VERSION}/extensions/elasticsearch/7.x/wazuh-template.json"
+WAZUH_MAJOR="$(printf '%s' "$WAZUH_VERSION" | cut -d. -f1).x"
+FILEBEAT_MODULE_URL="https://packages.wazuh.com/${WAZUH_MAJOR}/filebeat/wazuh-filebeat-0.4.tar.gz"
+WAZUH_TEMPLATE_PATH="$(grep '^wazuh_filebeat_template_path:' "$DEFAULTS_FILE" | awk '{print $2}' | tr -d '\"')"
+WAZUH_TEMPLATE_PATH="${WAZUH_TEMPLATE_PATH:-7.x}"
+WAZUH_TEMPLATE_URL="https://raw.githubusercontent.com/wazuh/wazuh/v${WAZUH_VERSION}/extensions/elasticsearch/${WAZUH_TEMPLATE_PATH}/wazuh-template.json"
 
 # ── GPG key import ────────────────────────────────────────────────────────────
 
@@ -113,7 +116,7 @@ fetch_sha256() {
 }
 
 FILEBEAT_SHA512_URL="https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-oss-${FILEBEAT_VERSION}-amd64.deb.sha512"
-MODULE_SHA512_URL="https://packages.wazuh.com/4.x/filebeat/wazuh-filebeat-0.4.tar.gz.sha512"
+MODULE_SHA512_URL="https://packages.wazuh.com/${WAZUH_MAJOR}/filebeat/wazuh-filebeat-0.4.tar.gz.sha512"
 
 DEB_HASH="$(fetch_sha256    "filebeat-oss-${FILEBEAT_VERSION}-amd64.deb" "$FILEBEAT_DEB_URL"    "$FILEBEAT_SHA512_URL" "$ELASTIC_GPG_OK")"
 MODULE_HASH="$(fetch_sha256 "wazuh-filebeat-0.4.tar.gz"                  "$FILEBEAT_MODULE_URL" "$MODULE_SHA512_URL"   "$WAZUH_GPG_OK")"

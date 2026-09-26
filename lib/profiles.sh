@@ -5,6 +5,7 @@
 # Source dependencies (use local var to avoid overwriting parent's SCRIPT_DIR)
 _LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -z "$NC" ]] && source "$_LIB_DIR/colors.sh"
+source "$_LIB_DIR/version.sh"
 
 # Available profiles
 declare -A PROFILES
@@ -42,7 +43,7 @@ apply_profile_minimal() {
     DEPLOY_AGENTS="false"
 
     # Basic settings
-    WAZUH_VERSION="${WAZUH_VERSION:-4.14.5}"
+    set_default_wazuh_version
     ENVIRONMENT="development"
     ORG_NAME="TestOrg"
 
@@ -110,7 +111,7 @@ apply_profile_production() {
     AGENT_NODES=""
 
     # Production settings
-    WAZUH_VERSION="${WAZUH_VERSION:-4.14.5}"
+    set_default_wazuh_version
     ENVIRONMENT="production"
     ORG_NAME="${ORG_NAME:-MyOrganization}"
 
@@ -181,7 +182,7 @@ apply_profile_docker() {
     DEPLOY_AGENTS="${DEPLOY_AGENTS:-true}"
 
     # Basic settings
-    WAZUH_VERSION="${WAZUH_VERSION:-4.14.5}"
+    set_default_wazuh_version
     ENVIRONMENT="${ENVIRONMENT:-development}"
     ORG_NAME="${ORG_NAME:-DockerTestOrg}"
 

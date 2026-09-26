@@ -32,6 +32,7 @@ VAULT_PASSWORD_FILE="$VAULT_PASSWORD_DIR/.vault_password"
 # ═══════════════════════════════════════════════════════════════
 if [[ -f "$SCRIPT_DIR/lib/colors.sh" ]]; then
     source "$SCRIPT_DIR/lib/colors.sh"
+    source "$SCRIPT_DIR/lib/version.sh"
     source "$SCRIPT_DIR/lib/validation.sh"
     source "$SCRIPT_DIR/lib/prompts.sh"
     source "$SCRIPT_DIR/lib/generators.sh"
@@ -155,7 +156,7 @@ if [[ -n "$SELECTED_PROFILE" ]]; then
 fi
 
 # Default values
-DEFAULT_WAZUH_VERSION="4.14.5"
+DEFAULT_WAZUH_VERSION="$(default_wazuh_version)"
 DEFAULT_INDEXER_HTTP_PORT="9200"
 DEFAULT_INDEXER_TRANSPORT_PORT="9300"
 DEFAULT_DASHBOARD_PORT="443"

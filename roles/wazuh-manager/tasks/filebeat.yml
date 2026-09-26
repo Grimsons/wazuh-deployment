@@ -90,7 +90,7 @@
 
 - name: Download Wazuh Filebeat module
   ansible.builtin.get_url:
-    url: "https://packages.wazuh.com/4.x/filebeat/wazuh-filebeat-0.4.tar.gz"
+    url: "https://packages.wazuh.com/{{ wazuh_repository_major }}/filebeat/wazuh-filebeat-0.4.tar.gz"
     dest: "/tmp/wazuh-filebeat-0.4.tar.gz"
     checksum: "{{ wazuh_filebeat_module_sha256 }}"
     mode: '0644'
@@ -117,7 +117,7 @@
 
 - name: Download Wazuh alerts template
   ansible.builtin.get_url:
-    url: "https://raw.githubusercontent.com/wazuh/wazuh/v{{ wazuh_version }}/extensions/elasticsearch/7.x/wazuh-template.json"
+    url: "https://raw.githubusercontent.com/wazuh/wazuh/v{{ wazuh_version }}/extensions/elasticsearch/{{ wazuh_filebeat_template_path | default('7.x') }}/wazuh-template.json"
     dest: /etc/filebeat/wazuh-template.json
     checksum: "{{ wazuh_filebeat_template_sha256 }}"
     mode: '0644'

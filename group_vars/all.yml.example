@@ -7,7 +7,7 @@
 # ═══════════════════════════════════════════════════════════════
 # General Settings
 # ═══════════════════════════════════════════════════════════════
-wazuh_version: "4.14.5"
+wazuh_version: "{{ (lookup('file', playbook_dir + '/../VERSION.json') | from_json).version }}"
 environment_name: "production"
 organization_name: "MyOrganization"
 

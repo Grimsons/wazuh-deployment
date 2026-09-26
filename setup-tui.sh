@@ -15,6 +15,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/version.sh"
 VAULT_PASSWORD_DIR="${HOME}/.config/wazuh-deployment"
 VAULT_PASSWORD_FILE="$VAULT_PASSWORD_DIR/.vault_password"
 
@@ -302,7 +303,9 @@ select_profile() {
 configure_general() {
     section "General Settings"
 
-    WAZUH_VERSION=$(gum input --prompt "Wazuh Version: " --value "4.14.5" --placeholder "4.14.5")
+    local default_version
+    default_version="$(default_wazuh_version)"
+    WAZUH_VERSION=$(gum input --prompt "Wazuh Version: " --value "$default_version" --placeholder "$default_version")
     success "Version: $WAZUH_VERSION"
 
     ENVIRONMENT=$(gum choose --header "Environment" "production" "staging" "development")

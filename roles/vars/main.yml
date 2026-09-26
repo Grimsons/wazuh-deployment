@@ -4,6 +4,13 @@ wazuh_major_minor_version: "{{ wazuh_version_data.version.split('.')[0:2] | join
 wazuh_major_version: "{{ wazuh_version_data.version.split('.')[0] }}.x"
 wazuh_package_revision: "1"
 
+# Derived release contract shared by every role.  Keep the pinned version in
+# group_vars (or pass -e wazuh_version=...), then derive behavior from it.
+wazuh_is_5x: "{{ wazuh_version is defined and (wazuh_version.split('.')[0] | int) >= 5 }}"
+wazuh_release_channel: "{{ 'pre-release' if (wazuh_version is defined and (wazuh_version is search('-'))) else 'stable' }}"
+wazuh_repository_major: "{{ (wazuh_version | default(wazuh_full_version)).split('.')[0] }}.x"
+wazuh_filebeat_enabled_by_version: "{{ not (wazuh_is_5x | bool) }}"
+
 local_configs_path: "{{ playbook_dir }}/deployment-config-files"
 
 urls_file: "artifact_urls.yml"
