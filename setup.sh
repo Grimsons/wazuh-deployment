@@ -33,6 +33,7 @@ VAULT_PASSWORD_FILE="$VAULT_PASSWORD_DIR/.vault_password"
 if [[ -f "$SCRIPT_DIR/lib/colors.sh" ]]; then
     source "$SCRIPT_DIR/lib/colors.sh"
     source "$SCRIPT_DIR/lib/version.sh"
+    source "$SCRIPT_DIR/lib/config.sh"
     source "$SCRIPT_DIR/lib/validation.sh"
     source "$SCRIPT_DIR/lib/prompts.sh"
     source "$SCRIPT_DIR/lib/generators.sh"
@@ -65,6 +66,7 @@ trap cleanup EXIT INT TERM
 # CLI Argument Parsing
 # ═══════════════════════════════════════════════════════════════
 SELECTED_PROFILE=""
+CONFIG_FILE=""
 EDIT_MODE=false
 SHOW_HELP=false
 QUIET_MODE=false
@@ -78,6 +80,7 @@ ${YELLOW}Usage:${NC}
 
 ${YELLOW}Options:${NC}
   -p, --profile PROFILE   Use deployment profile (minimal|production|custom)
+  -c, --config FILE       Load shared deployment values from FILE
   -e, --edit              Edit existing configuration
   -q, --quiet             Reduce output verbosity
   -h, --help              Show this help message
@@ -122,6 +125,15 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             ;;
+        -c|--config)
+            if [[ -n "${2:-}" ]]; then
+                CONFIG_FILE="$2"
+                shift 2
+            else
+                echo -e "${RED}Error: --config requires a file${NC}"
+                exit 1
+            fi
+            ;;
         -e|--edit)
             EDIT_MODE=true
             shift
@@ -141,6 +153,14 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [[ -n "$CONFIG_FILE" ]]; then
+    load_deployment_config "$CONFIG_FILE"
+fi
+
+if [[ -z "$SELECTED_PROFILE" ]]; then
+    SELECTED_PROFILE="${DEPLOYMENT_PROFILE:-}"
+fi
 
 # Validate profile if specified
 if [[ -n "$SELECTED_PROFILE" ]]; then
@@ -1675,6 +1695,7 @@ wazuh_log_rotation_enabled: true
 wazuh_log_rotation_keep_days: 30
 wazuh_log_rotation_max_size: "100M"
 wazuh_log_rotation_compress: true
+EOF
 
 # ═══════════════════════════════════════════════════════════════
 # Version-Derived Variables (evaluated from wazuh_version above)
@@ -1690,7 +1711,6 @@ wazuh_manager_owner: "{{ 'wazuh-manager' if wazuh_is_5x else 'wazuh' }}"
 wazuh_manager_group: "{{ 'wazuh-manager' if wazuh_is_5x else 'wazuh' }}"
 wazuh_use_filebeat: "{{ false if wazuh_is_5x else true }}"
 wazuh_manager_cert_name: "{{ manager_node_name | default('server') }}"
-EOF
 
     print_success "Group variables created: group_vars/all/main.yml"
 

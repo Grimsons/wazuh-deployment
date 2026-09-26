@@ -16,6 +16,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/version.sh"
+source "$SCRIPT_DIR/lib/config.sh"
 VAULT_PASSWORD_DIR="${HOME}/.config/wazuh-deployment"
 VAULT_PASSWORD_FILE="$VAULT_PASSWORD_DIR/.vault_password"
 
@@ -306,7 +307,9 @@ configure_general() {
 
     local default_version
     default_version="$(default_wazuh_version)"
-    WAZUH_VERSION=$(gum input --prompt "Wazuh Version: " --value "$default_version" --placeholder "$default_version")
+    if [[ -z "${WAZUH_VERSION:-}" ]]; then
+        WAZUH_VERSION=$(gum input --prompt "Wazuh Version: " --value "$default_version" --placeholder "$default_version")
+    fi
     success "Version: $WAZUH_VERSION"
 
     ENVIRONMENT=$(gum choose --header "Environment" "production" "staging" "development")
@@ -980,6 +983,7 @@ wazuh_bootstrap_user: "${INITIAL_SSH_USER:-root}"
 # Post-Deployment Security
 # ═══════════════════════════════════════════════════════════════
 wazuh_lockdown_deploy_user: true
+EOF
 
 # ═══════════════════════════════════════════════════════════════
 # Version-Derived Variables (evaluated from wazuh_version above)
@@ -995,7 +999,6 @@ wazuh_manager_owner: "{{ 'wazuh-manager' if wazuh_is_5x else 'wazuh' }}"
 wazuh_manager_group: "{{ 'wazuh-manager' if wazuh_is_5x else 'wazuh' }}"
 wazuh_use_filebeat: "{{ false if wazuh_is_5x else true }}"
 wazuh_manager_cert_name: "{{ manager_node_name | default('server') }}"
-EOF
 
     success "Created: group_vars/all/main.yml"
 
@@ -1155,6 +1158,7 @@ You will need it to view credentials and redeploy."
 main() {
     # Parse arguments first (before gum check, so --check can run without gum)
     SELECTED_PROFILE=""
+    CONFIG_FILE=""
     local do_check="false"
 
     while [[ $# -gt 0 ]]; do
@@ -1163,7 +1167,11 @@ main() {
                 SELECTED_PROFILE="$2"
                 shift 2
                 ;;
-            --check|-c)
+            --config|-c)
+                CONFIG_FILE="$2"
+                shift 2
+                ;;
+            --check)
                 do_check="true"
                 shift
                 ;;
@@ -1172,7 +1180,8 @@ main() {
                 echo ""
                 echo "Options:"
                 echo "  --profile, -p PROFILE   Set deployment profile (minimal|production|docker|custom)"
-                echo "  --check, -c             Validate gum installation and exit"
+                echo "  --config, -c FILE       Load shared deployment values from FILE"
+                echo "  --check                 Validate gum installation and exit"
                 echo "  --help, -h              Show this help message"
                 echo ""
                 echo "Examples:"
@@ -1187,6 +1196,13 @@ main() {
                 ;;
         esac
     done
+
+    if [[ -n "$CONFIG_FILE" ]]; then
+        load_deployment_config "$CONFIG_FILE"
+    fi
+    if [[ -z "$SELECTED_PROFILE" ]]; then
+        SELECTED_PROFILE="${DEPLOYMENT_PROFILE:-}"
+    fi
 
     # Handle --check flag
     if [[ "$do_check" == "true" ]]; then

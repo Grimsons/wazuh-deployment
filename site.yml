@@ -561,6 +561,7 @@
         name: filebeat
       register: smoke_filebeat_svc
       failed_when: false
+      when: wazuh_use_filebeat | default(true) | bool
 
     - name: Check manager API
       ansible.builtin.uri:
@@ -584,6 +585,7 @@
       register: smoke_filebeat_output
       changed_when: false
       failed_when: false
+      when: wazuh_use_filebeat | default(true) | bool
 
     - name: Check indexer cluster health
       ansible.builtin.uri:
@@ -613,9 +615,9 @@
       ansible.builtin.set_fact:
         smoke_results:
           manager_service: "{{ 'PASS' if (smoke_manager_svc.status.ActiveState | default('')) == 'active' else 'FAIL' }}"
-          filebeat_service: "{{ 'PASS' if (smoke_filebeat_svc.status.ActiveState | default('')) == 'active' else 'FAIL' }}"
+          filebeat_service: "{{ 'PASS' if (smoke_filebeat_svc.status.ActiveState | default('')) == 'active' else 'FAIL' if (wazuh_use_filebeat | default(true) | bool) else 'N/A (5.x)' }}"
           manager_api: "{{ 'PASS' if (smoke_manager_api.status | default(0)) in [200, 401] else 'FAIL' }}"
-          filebeat_output: "{{ 'PASS' if smoke_filebeat_output.rc | default(1) == 0 else 'FAIL' }}"
+          filebeat_output: "{{ 'PASS' if smoke_filebeat_output.rc | default(1) == 0 else 'FAIL' if (wazuh_use_filebeat | default(true) | bool) else 'N/A (5.x)' }}"
           indexer_health: "{{ smoke_indexer_health.json.status | default('UNREACHABLE') | upper }}"
           alert_count: "{{ smoke_alert_count.json.count | default('N/A') }}"
 

@@ -427,9 +427,7 @@
       ansible.builtin.systemd:
         name: "{{ item }}"
         state: stopped
-      loop:
-        - filebeat
-        - wazuh-manager
+      loop: "{{ (['filebeat'] if (wazuh_use_filebeat | default(true) | bool) else []) + ['wazuh-manager'] }}"
       failed_when: false
 
     - name: Apply updates (Debian/Ubuntu)
@@ -504,9 +502,7 @@
         name: "{{ item }}"
         state: started
         enabled: true
-      loop:
-        - wazuh-manager
-        - filebeat
+      loop: "{{ (['filebeat'] if (wazuh_use_filebeat | default(true) | bool) else []) + ['wazuh-manager'] }}"
 
     - name: Wait for Manager API to be ready
       ansible.builtin.uri:

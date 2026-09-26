@@ -1,0 +1,11 @@
+# Optional shared input for setup.sh and setup-tui.sh.
+# Copy to deployment.conf, then pass it with --config deployment.conf.
+# Values are plain KEY=VALUE pairs, not shell code.
+
+# Select the release and flow without changing either setup script.
+WAZUH_VERSION=4.14.5
+DEPLOYMENT_PROFILE=production
+
+# Any other setup variable can be supplied here to prefill/skip its prompt.
+# ENVIRONMENT=production
+# ORGANIZATION=MyOrg
