@@ -85,7 +85,8 @@ validate_gum() {
         echo "⚠ Not running in interactive terminal (some features may not work)"
     fi
 
-    # Test gum commands work
+    # Validate command availability without invoking interactive widgets. The
+    # widgets require a real terminal and make --check fail in CI/SSH probes.
     if gum style "test" >/dev/null 2>&1; then
         [[ "$verbose" == "true" ]] && echo "✓ gum style works"
     else
@@ -93,17 +94,17 @@ validate_gum() {
         ((errors++))
     fi
 
-    if echo "test" | gum choose --limit 1 >/dev/null 2>&1; then
-        [[ "$verbose" == "true" ]] && echo "✓ gum choose works"
+    if gum choose --help >/dev/null 2>&1; then
+        [[ "$verbose" == "true" ]] && echo "✓ gum choose is available"
     else
-        echo "✗ gum choose command failed"
+        echo "✗ gum choose command is unavailable"
         ((errors++))
     fi
 
-    if gum input --value "test" >/dev/null 2>&1 </dev/null; then
-        [[ "$verbose" == "true" ]] && echo "✓ gum input works"
+    if gum input --help >/dev/null 2>&1; then
+        [[ "$verbose" == "true" ]] && echo "✓ gum input is available"
     else
-        echo "✗ gum input command failed"
+        echo "✗ gum input command is unavailable"
         ((errors++))
     fi
 
