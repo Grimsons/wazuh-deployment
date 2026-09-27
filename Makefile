@@ -351,6 +351,9 @@ docker-setup: check-docker ## Full Docker environment (containers + deploy)
 # Development
 #═══════════════════════════════════════════════════════════════════════════════
 
+ga-gate: ## Check whether Wazuh has published a GA release + packages (gates the VERSION.json pin flip)
+	@./scripts/check-ga-gate.sh
+
 test: bats ## Run all tests (BATS shell tests + Ansible syntax check + lint)
 	@echo "$(CYAN)Running Ansible syntax check...$(RESET)"
 	ansible-playbook site.yml --syntax-check

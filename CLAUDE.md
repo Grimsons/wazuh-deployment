@@ -19,6 +19,10 @@ make check
 make lint
 make test        # syntax check + lint
 
+# Check whether Wazuh has published a GA release + checksummed packages
+# for a version. Only an open gate authorises moving the VERSION.json pin.
+make ga-gate
+
 # Dry-run deployment (no changes made)
 make deploy-check
 

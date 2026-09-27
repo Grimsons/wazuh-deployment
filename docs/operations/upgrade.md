@@ -6,7 +6,7 @@ This document describes how to upgrade Wazuh deployments using the rolling upgra
 
 The `upgrade/wazuh-5.0` branch is an isolated migration handoff; `main` remains
 the verified 4.14.x baseline. Set `wazuh_version` or `target_version` explicitly
-when testing a 5.0 release candidate. The release contract derives the major
+when testing the Wazuh 5.0.0-beta5 source and package contract. The release contract derives the major
 repository path, manager installation path, manager config filename, service
 account, and Filebeat behavior from that version.
 
@@ -18,12 +18,44 @@ against the target build and release notes:
 - In-place migration of indexer mappings, dashboard saved objects, and custom
   rules/decoders/CDB lists without a tested export/import or rollback.
 - Automatic conversion of existing `/var/ossec` data into `/var/wazuh-manager`.
-- Package URLs, checksums, certificate layouts, and API/cluster behavior for a
-  beta or staging build unless their artifacts have been independently verified.
+- Package URLs, checksums, certificate layouts, and API/cluster behavior for
+  beta5 unless the corresponding staged artifacts have been independently
+  verified. The source reference for this work is the
+  [Wazuh v5.0.0-beta5 tarball](https://github.com/wazuh/wazuh/archive/refs/tags/v5.0.0-beta5.tar.gz);
+  it is not itself an install package or checksum manifest.
 
 Run the pre-flight, backup, and post-upgrade validation stages in a disposable
 environment before production. A successful syntax check is not evidence that
 the 5.0 package or schema migration is supported.
+
+## The GA gate on the default pin
+
+The default `VERSION.json` pin is the only thing in this repository that
+asserts a Wazuh version is supported, and it must not move to a major line
+until Wazuh has actually published that line. The release-notes index is not a
+substitute for that check: it is prose that changes without a commit, and it
+does not say whether the package channel an install would fetch exists or
+carries checksums.
+
+```bash
+make ga-gate                        # gate 5.0.0 (the default target)
+./scripts/check-ga-gate.sh --target 5.1.0
+```
+
+The gate opens only when all three of these hold:
+
+1. a published, non-draft, non-prerelease release exists for the exact target
+   version;
+2. the stable apt channel for that major line serves an index carrying
+   SHA256/SHA512 digests;
+3. the target version is present in that channel for the manager, indexer,
+   dashboard and agent packages.
+
+Only an open gate authorises editing `VERSION.json`. A network failure, a 403
+channel, or a pre-release-only upstream all report `GATE CLOSED` — a gate that
+cannot be evaluated must not open a pin flip. See
+[Wazuh 5.0 GA gate](wazuh-5-ga-gate.md) for the checks, the recorded verdict
+and the residual risks.
 
 ## Overview
 

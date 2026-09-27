@@ -4,6 +4,37 @@ All notable changes to this fork will be documented in this file.
 
 For upstream wazuh-ansible changes, see the [wazuh-ansible releases](https://github.com/wazuh/wazuh-ansible/releases).
 
+## [Unreleased] — Wazuh 5.0 upgrade (branch `upgrade/wazuh-5.0`)
+
+### Added
+
+- **Machine-checkable GA gate** — `make ga-gate` / `scripts/check-ga-gate.sh` decides
+  whether the default `VERSION.json` pin may move to a Wazuh version. It requires a
+  published non-prerelease release for the exact tag, a stable apt channel for that
+  major line carrying SHA256/SHA512 digests, and the target version present in that
+  channel for the manager, indexer, dashboard and agent packages. Transport failures,
+  a 403 channel and pre-release-only upstream all report `GATE CLOSED`; the gate fails
+  closed rather than authorising a pin flip it could not evaluate.
+- **`lib/ga_gate.sh`** — the gate predicates as pure functions of already-fetched
+  bodies, so open and closed verdicts are both reproducible offline.
+- **`docs/operations/wazuh-5-ga-gate.md`** — the checks, the recorded verdict for
+  2026-09-26, and the residual-risk list of 5.0 assumptions that cannot be verified
+  until a GA artifact exists.
+- **`tests/lib/test_ga_gate.bats`** — 28 network-free tests covering the GA-release,
+  checksum and package-index predicates plus the CLI driven from fixtures.
+
+### Changed
+
+- **`docs/operations/upgrade.md`** — documents the GA gate as the only thing that
+  authorises editing the `VERSION.json` pin, and how to run it.
+
+### Not changed (deliberately)
+
+- `VERSION.json` stays pinned to the 4.14.x line. Wazuh 5.0 is not GA: the
+  `v5.0.0` release tag returns 404, the newest 5.0 artifact is `v5.0.0-beta5`, and
+  `packages.wazuh.com/5.x/apt/dists/stable/Release` returns 403 while the 4.x control
+  returns 200.
+
 ## [1.2.0] - Docker Environment, Certificate Fixes, and Keystore Management
 
 ### Added
