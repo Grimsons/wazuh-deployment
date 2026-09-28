@@ -1,9 +1,16 @@
 ---
 # Wazuh Indexer - Certificate Configuration
+#
+# Certificate destinations come from certificate_paths.yml, which parses them
+# out of the rendered opensearch.yml so this file cannot drift from the config
+# it is deploying for.
+
+- name: Resolve certificate paths from the indexer config
+  ansible.builtin.include_tasks: certificate_paths.yml
 
 - name: Create certificates directory
   ansible.builtin.file:
-    path: "{{ wazuh_indexer_certs_path }}"
+    path: "{{ wazuh_indexer_cert_paths.node_cert | dirname }}"
     state: directory
     owner: wazuh-indexer
     group: wazuh-indexer
@@ -13,7 +20,7 @@
 - name: Copy root CA certificate
   ansible.builtin.copy:
     src: "{{ wazuh_certs_path | default('files/certs') }}/root-ca.pem"
-    dest: "{{ wazuh_indexer_certs_path }}/root-ca.pem"
+    dest: "{{ wazuh_indexer_cert_paths.root_ca }}"
     owner: wazuh-indexer
     group: wazuh-indexer
     mode: '0400'
@@ -23,7 +30,7 @@
 - name: Copy indexer node certificate
   ansible.builtin.copy:
     src: "{{ wazuh_certs_path | default('files/certs') }}/{{ indexer_node_name | default('indexer-1') }}.pem"
-    dest: "{{ wazuh_indexer_certs_path }}/indexer.pem"
+    dest: "{{ wazuh_indexer_cert_paths.node_cert }}"
     owner: wazuh-indexer
     group: wazuh-indexer
     mode: '0400'
@@ -33,7 +40,7 @@
 - name: Copy indexer node private key
   ansible.builtin.copy:
     src: "{{ wazuh_certs_path | default('files/certs') }}/{{ indexer_node_name | default('indexer-1') }}-key.pem"
-    dest: "{{ wazuh_indexer_certs_path }}/indexer-key.pem"
+    dest: "{{ wazuh_indexer_cert_paths.node_key }}"
     owner: wazuh-indexer
     group: wazuh-indexer
     mode: '0400'
@@ -44,7 +51,7 @@
 - name: Copy admin certificate
   ansible.builtin.copy:
     src: "{{ wazuh_certs_path | default('files/certs') }}/admin.pem"
-    dest: "{{ wazuh_indexer_certs_path }}/admin.pem"
+    dest: "{{ wazuh_indexer_cert_paths.http_cert }}"
     owner: wazuh-indexer
     group: wazuh-indexer
     mode: '0400'
@@ -54,7 +61,7 @@
 - name: Copy admin private key
   ansible.builtin.copy:
     src: "{{ wazuh_certs_path | default('files/certs') }}/admin-key.pem"
-    dest: "{{ wazuh_indexer_certs_path }}/admin-key.pem"
+    dest: "{{ wazuh_indexer_cert_paths.http_key }}"
     owner: wazuh-indexer
     group: wazuh-indexer
     mode: '0400'
@@ -62,10 +69,23 @@
   no_log: true
   notify: restart wazuh-indexer
 
+# The HTTP and transport layers must present the same identity, or a client
+# trusting the admin CA and a node-to-node client disagree about who this is.
+- name: Verify HTTP and transport layers use the same certificate and key
+  ansible.builtin.assert:
+    that:
+      - wazuh_indexer_cert_paths.node_cert == wazuh_indexer_cert_paths.http_cert
+      - wazuh_indexer_cert_paths.node_key == wazuh_indexer_cert_paths.http_key
+    fail_msg: >-
+      opensearch.yml points the HTTP and transport layers at different
+      certificates ({{ wazuh_indexer_cert_paths.node_cert }} vs
+      {{ wazuh_indexer_cert_paths.http_cert }}).
+      Refusing to deploy a split identity.
+
 - name: Verify indexer certificate has correct common name
   ansible.builtin.shell: |
     set -o pipefail
-    ACTUAL=$(openssl x509 -in {{ wazuh_indexer_certs_path }}/indexer.pem -subject -noout -nameopt RFC2253 2>/dev/null | sed 's/^subject=CN=//;s/,.*//')
+    ACTUAL=$(openssl x509 -in {{ wazuh_indexer_cert_paths.node_cert | quote }} -subject -noout -nameopt RFC2253 2>/dev/null | sed 's/^subject=CN=//;s/,.*//')
     EXPECTED="{{ indexer_node_name | default('indexer-1') }}"
     if [ "$ACTUAL" != "$EXPECTED" ]; then
       echo "FAIL: Indexer cert CN='$ACTUAL', expected '$EXPECTED'"

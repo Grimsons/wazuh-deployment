@@ -22,6 +22,22 @@
           - python3-venv
         state: present
 
+    - name: Verify the Python runtime for Wazuh 5.x exporters
+      ansible.builtin.command: python3 --version
+      register: monitoring_python_version
+      changed_when: false
+      when: wazuh_is_5x | default(false) | bool
+
+    - name: Refuse an unsupported Python runtime for Wazuh 5.x exporters
+      ansible.builtin.assert:
+        that:
+          - monitoring_python_version.stdout is match('^Python 3\\.(1[2-9]|[2-9][0-9])')
+        fail_msg: >-
+          Wazuh 5.x monitoring exporters require bundled Python 3.12 or newer;
+          found {{ monitoring_python_version.stdout | default('unknown') }}.
+          Do not run the exporter with the removed Python 3.10 runtime.
+      when: wazuh_is_5x | default(false) | bool
+
     - name: Create exporter directory
       ansible.builtin.file:
         path: "{{ wazuh_exporter_install_dir }}"

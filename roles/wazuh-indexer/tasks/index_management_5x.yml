@@ -1,0 +1,291 @@
+---
+# Wazuh Indexer - 5.x index management (OpenSearch 3.x)
+#
+# The four 4.x families (alerts, archives, monitoring, statistics) are replaced
+# in 5.x by four disjoint families with new schemas: wazuh-events-v5*,
+# wazuh-states-*, wazuh-metrics-* and wazuh-agent-*. See
+# roles/wazuh-indexer/defaults/main.yml (wazuh_indexer_5x_families) for the
+# mapping and the per-family retention.
+#
+# Two things this file deliberately does not do:
+#
+#   1. It does not redeclare the v5 field mappings. The 5.x indexer ships
+#      templates and mappings for its own schemas; a standalone template with
+#      the same index pattern would outrank them (only the highest-priority
+#      matching template is applied) and the shipped mappings would be lost.
+#      So the rollover template below is composed on top of whatever the
+#      indexer shipped for that pattern.
+#   2. It does not attempt to remap existing 4.x indices. That is not
+#      possible: 4.x documents cannot be losslessly transformed into the v5
+#      schema, and the only supported path for historical data is the
+#      read-only 4.x cluster described in docs/operations/indexer-cutover-5x.md.
+#
+# The policy bodies themselves are built in index_management_5x_policies.yml.
+
+- name: Build the 5.x ISM policy bodies
+  ansible.builtin.include_tasks: index_management_5x_policies.yml
+
+# ═══════════════════════════════════════════════════════════════
+# Apply the ISM policies
+# ═══════════════════════════════════════════════════════════════
+# Updates carry if_seq_no/if_primary_term so a policy changed by another run
+# cannot be silently overwritten. A 409 means the sequence moved between the
+# read and the write, so the policy is re-read and retried once.
+- name: Apply each 5.x ISM policy
+  block:
+    - name: "Read current {{ item.policy_id }}"
+      ansible.builtin.uri:
+        url: >-
+          https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port
+          }}/_plugins/_ism/policies/{{ item.policy_id }}
+        method: GET
+        user: "{{ wazuh_indexer_admin_user }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        status_code: [200, 404]
+        return_content: true
+      no_log: true
+      register: ism_current
+
+    - name: "Write {{ item.policy_id }}"
+      ansible.builtin.uri:
+        url: >-
+          https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port
+          }}/_plugins/_ism/policies/{{ item.policy_id }}{{ concurrency
+          }}
+        method: PUT
+        user: "{{ wazuh_indexer_admin_user }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        body_format: json
+        body: "{{ item.body }}"
+        status_code: [200, 201, 409]
+        headers:
+          Content-Type: "application/json"
+      no_log: true
+      register: ism_written
+      vars:
+        concurrency: >-
+          {{ '?if_seq_no=' ~ ism_current.json._seq_no
+             ~ '&if_primary_term=' ~ ism_current.json._primary_term
+             if ism_current.status == 200 else '' }}
+      failed_when: false
+
+    - name: "Reconcile {{ item.policy_id }} after a concurrent update"
+      when: ism_written.status == 409
+      block:
+        - name: "Re-read {{ item.policy_id }}"
+          ansible.builtin.uri:
+            url: >-
+              https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port
+              }}/_plugins/_ism/policies/{{ item.policy_id }}
+            method: GET
+            user: "{{ wazuh_indexer_admin_user }}"
+            password: "{{ wazuh_indexer_admin_password }}"
+            force_basic_auth: true
+            validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+            status_code: [200]
+            return_content: true
+          no_log: true
+          register: ism_retry_read
+
+        - name: "Rewrite {{ item.policy_id }}"
+          ansible.builtin.uri:
+            url: >-
+              https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port
+              }}/_plugins/_ism/policies/{{ item.policy_id
+              }}?if_seq_no={{ ism_retry_read.json._seq_no
+              }}&if_primary_term={{ ism_retry_read.json._primary_term }}
+            method: PUT
+            user: "{{ wazuh_indexer_admin_user }}"
+            password: "{{ wazuh_indexer_admin_password }}"
+            force_basic_auth: true
+            validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+            body_format: json
+            body: "{{ item.body }}"
+            status_code: [200, 201]
+            headers:
+              Content-Type: "application/json"
+          no_log: true
+
+    - name: "Verify {{ item.policy_id }} is healthy"
+      ansible.builtin.uri:
+        url: >-
+          https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port
+          }}/_plugins/_ism/policies/{{ item.policy_id }}
+        method: GET
+        user: "{{ wazuh_indexer_admin_user }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        status_code: [200]
+        return_content: true
+      no_log: true
+      register: ism_verify
+      # ISM reports a policy as failed if any action is unknown to this build.
+      # A policy that exists but is not enabled means the state machine never
+      # ran, so treat it as a hard failure rather than a warning.
+      failed_when:
+        - ism_verify.json.policy.state.phase != 'open'
+          or ism_verify.json.policy.state.enabled != true
+
+  loop: "{{ wazuh_5x_ism_bodies | default([]) }}"
+  loop_control:
+    label: "{{ item.policy_id }}"
+  when: wazuh_retention_enabled | default(true)
+
+# ═══════════════════════════════════════════════════════════════
+# Rollover index templates
+# ═══════════════════════════════════════════════════════════════
+# Only number_of_* and the rollover alias are set here. The v5 mappings stay
+# with the template the indexer shipped, which this one composes with.
+- name: List the index templates the indexer ships
+  ansible.builtin.uri:
+    url: >-
+      https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port }}/_index_template
+    method: GET
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    status_code: [200]
+    return_content: true
+  no_log: true
+  register: shipped_templates
+  when: wazuh_rollover_enabled | default(true)
+
+# Built from the family table rather than from the ISM bodies: rollover must
+# still be configured when retention management is switched off.
+- name: Resolve the shipped templates each family composes with
+  ansible.builtin.set_fact:
+    wazuh_5x_rollover_templates: >-
+      {{ (wazuh_5x_rollover_templates | default([])) + [{
+           'family': family.key,
+           'index': family.value.alias ~ '-000001',
+           'pattern': family.value.pattern,
+           'alias': family.value.alias,
+           'primary_shards': family.value.primary_shards,
+           'replica_shards': family.value.replica_shards,
+           'composed_of': shipped_templates.json.index_templates
+                          | wazuh_matching_index_templates(family.value.alias ~ '-000001'),
+           'specific_matches': shipped_templates.json.index_templates
+                               | wazuh_matching_index_templates(family.value.alias ~ '-000001',
+                                                                include_catch_all=False),
+         }] }}
+  loop: "{{ wazuh_indexer_5x_families | dict2items }}"
+  loop_control:
+    loop_var: family
+    label: "{{ family.key }}"
+  when: wazuh_rollover_enabled | default(true)
+
+# An unmatched pattern means the indexer shipped no template for that family.
+# Creating a standalone one would then be correct, but it would also mean the
+# family is created without the mappings the 5.x dashboards expect, and we
+# have no live 5.x cluster here to confirm what would be missing. Refuse
+# instead of writing a template we cannot stand behind.
+- name: Refuse to shadow a 5.x mapping set that is not present
+  ansible.builtin.assert:
+    that:
+      - item.composed_of | length > 0
+      - item.specific_matches | length > 0
+    fail_msg: >-
+      No index template shipped by the 5.x indexer owns the bootstrap index
+      '{{ item.index }}' (family '{{ item.family }}', pattern
+      '{{ item.pattern }}'). Matching templates were
+      {{ item.composed_of | default([]) | join(', ') | default('none', true) }},
+      of which none declares a pattern specific to this family. Refusing to
+      create a standalone template: it would become the highest-priority match
+      for this pattern and the shipped v5 mappings would never be applied.
+      Either the family is wrong for this cluster, or a plugin that owns this
+      pattern is missing. Set wazuh_indexer_5x_require_shipped_template=false
+      to override.
+    success_msg: "{{ item.family }} composes with {{ item.specific_matches | join(', ') }}"
+  loop: "{{ wazuh_5x_rollover_templates | default([]) }}"
+  loop_control:
+    label: "{{ item.family }}"
+  when:
+    - wazuh_rollover_enabled | default(true)
+    - wazuh_indexer_5x_require_shipped_template | default(true)
+
+- name: Create the rollover index template for each family
+  ansible.builtin.uri:
+    url: >-
+      https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port
+      }}/_index_template/wazuh-{{ item.family }}-rollover
+    method: PUT
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    body_format: json
+    body: >-
+      {{ {
+           'index_patterns': [item.pattern],
+           'composed_of': item.composed_of,
+           'template': {'settings': {
+             'number_of_shards': item.primary_shards,
+             'number_of_replicas': item.replica_shards,
+             'index.refresh_interval': '5s',
+             'plugins.index_state_management.rollover_alias': item.alias}},
+           'priority': 200
+         } }}
+    status_code: [200]
+    headers:
+      Content-Type: "application/json"
+  no_log: true
+  # Declared at 200 so it composes on top of the shipped template rather than
+  # competing with it. Templates are additive when they declare composed_of.
+  changed_when: false
+  loop: "{{ wazuh_5x_rollover_templates | default([]) }}"
+  loop_control:
+    label: "{{ item.family }}"
+  when: wazuh_rollover_enabled | default(true)
+
+# ═══════════════════════════════════════════════════════════════
+# Bootstrap the -000001 index behind each write alias
+# ═══════════════════════════════════════════════════════════════
+# ISM rollover only fires on an index that already has the alias, so each
+# family needs one index to start from. The suffix matters: rollover numbering
+# continues from -000001.
+- name: Check whether the bootstrap index exists
+  ansible.builtin.uri:
+    url: >-
+      https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port
+      }}/{{ item.alias }}-000001
+    method: HEAD
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    status_code: [200, 404]
+  no_log: true
+  register: bootstrap_check
+  loop: "{{ wazuh_5x_rollover_templates | default([]) }}"
+  loop_control:
+    label: "{{ item.family }}"
+  when: wazuh_rollover_enabled | default(true)
+
+- name: Create the bootstrap index with its write alias
+  ansible.builtin.uri:
+    url: >-
+      https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port
+      }}/{{ item.item.alias }}-000001
+    method: PUT
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    body_format: json
+    body: "{{ {'aliases': {item.item.alias: {'is_write_index': true}}} }}"
+    status_code: [200]
+    headers:
+      Content-Type: "application/json"
+  no_log: true
+  loop: "{{ bootstrap_check.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.family }}"
+  when:
+    - wazuh_rollover_enabled | default(true)
+    - item.status == 404

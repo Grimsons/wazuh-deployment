@@ -185,7 +185,22 @@ ansible-playbook playbooks/health-check.yml
 
 ## Index Snapshots
 
-For recovering historical alert data, use OpenSearch snapshots:
+For recovering historical alert data, use OpenSearch snapshots.
+
+> **Snapshots do not cross a major version.**
+>
+> A snapshot taken on Wazuh indexer 4.x cannot be restored on 5.x, and one taken
+> on 5.x cannot be restored on 4.x. The two majors run different OpenSearch
+> engines and different index schemas; the older shards fall outside the
+> supported Lucene segment range, and `_reindex` cannot transform the document
+> shape. Restoring across the boundary leaves indices that stay closed and
+> unsearchable.
+>
+> Treat a snapshot repository as belonging to one major. Keep 4.x snapshots on
+> the 4.x cluster, which is what the parallel read-only 4.x environment in
+> `docs/operations/indexer-cutover-5x.md` is for. The `wazuh-alerts-*` patterns
+> below are 4.x names; on 5.x the equivalent families are `wazuh-events-v5*`,
+> `wazuh-states-*`, `wazuh-metrics-*` and `wazuh-agent-*`.
 
 ### Configure Snapshot Repository
 
@@ -221,6 +236,8 @@ curl -X GET "https://<indexer-ip>:9200/_snapshot/backup_repo/_all" -u admin:<you
 ```
 
 ### Restore Snapshot
+
+Same major only. Check which major both ends are before running this.
 
 ```bash
 curl -X POST "https://<indexer-ip>:9200/_snapshot/backup_repo/snapshot_20260115/_restore" \

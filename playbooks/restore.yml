@@ -9,6 +9,8 @@
 #
 # Optional variables:
 #   -e "backup_dest=/path/to/backups"  - Custom backup source location
+#   -e "restore_legacy_4x=true"        - Restore only from the isolated
+#                                         backup_dest/legacy-4x archive path
 #   -e "restore_indexer=false"         - Skip indexer restore
 #   -e "restore_manager=false"         - Skip manager restore
 #   -e "restore_dashboard=false"       - Skip dashboard restore
@@ -25,7 +27,36 @@
 
     - name: Set backup source path
       ansible.builtin.set_fact:
-        backup_source_path: "{{ backup_dest | default(playbook_dir + '/../backups') }}/{{ restore_from }}"
+        backup_source_path: >-
+          {{ (legacy_4x_backup_dest |
+              default((backup_dest | default(playbook_dir + '/../backups')) + '/legacy-4x'))
+             + '/' + restore_from
+             if (restore_legacy_4x | default(false) | bool)
+            else ((backup_dest | default(playbook_dir + '/../backups')) + '/' + restore_from) }}
+
+    - name: Resolve the effective target version
+      ansible.builtin.set_fact:
+        restore_effective_version: "{{ wazuh_effective_version | default(wazuh_version | default(''), true) }}"
+
+    - name: Refuse an invalid or missing target version before restore
+      ansible.builtin.fail:
+        msg: >-
+          Cannot safely restore without a valid target Wazuh version. The
+          effective version contract must provide a semantic version such as
+          4.14.5 or 5.0.0-beta5; refusing to inspect or overwrite any backup.
+          Set wazuh_version (or load the generated version contract) and retry.
+      when: restore_effective_version is not match('^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$')
+
+    - name: Refuse the legacy archive path on a Wazuh 5.x target
+      ansible.builtin.fail:
+        msg: >-
+          Refusing restore_legacy_4x=true on Wazuh {{ restore_effective_version }}. A 4.x
+          archive cannot be restored into 5.x: there is no in-place upgrade,
+          snapshot restore, or _reindex across the OpenSearch 2.x to 3.x
+          boundary. Provision a 5.x cluster and use the indexer cutover runbook.
+      when:
+        - restore_legacy_4x | default(false) | bool
+        - restore_effective_version is match('^5\\.')
 
     - name: Verify backup exists
       ansible.builtin.stat:
@@ -36,6 +67,87 @@
       ansible.builtin.fail:
         msg: "Backup not found at {{ backup_source_path }}"
       when: not backup_check.stat.exists
+
+    # ── Cross-major guard ──────────────────────────────────────────────
+    # A Wazuh indexer configuration archive is not portable across a major
+    # boundary. 4.x is OpenSearch 2.x and 5.x is OpenSearch 3.x: the cluster
+    # bootstrap key was renamed, compatibility.override_main_response_version
+    # was removed (a 5.x node that still defines it does not boot), the
+    # security tree changed, and indexed data cannot move at all. Restoring a
+    # 4.x archive over a 5.x node therefore leaves an unbootable node rather
+    # than an error worth reading.
+    #
+    # This runs before the first destructive task so the failure costs nothing.
+    - name: Determine the major this restore targets
+      ansible.builtin.set_fact:
+        restore_target_major: "{{ restore_effective_version.split('.')[0] }}"
+
+    - name: Check whether the backup holds any indexer content
+      ansible.builtin.stat:
+        path: "{{ backup_source_path }}/indexer"
+      register: indexer_backup_root
+
+    - name: Locate the indexer major markers in the backup
+      ansible.builtin.find:
+        paths: "{{ backup_source_path }}/indexer"
+        patterns: indexer-major
+        recurse: true
+      register: indexer_major_markers
+      when: indexer_backup_root.stat.exists | default(false)
+
+    - name: Read the indexer major markers
+      ansible.builtin.slurp:
+        src: "{{ item.path }}"
+      loop: "{{ indexer_major_markers.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path | dirname | basename }}"
+      register: indexer_major_contents
+      when: indexer_backup_root.stat.exists | default(false)
+
+    - name: Report which majors the backup holds
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.source | default('unknown') }} recorded as
+          {{ item.content | b64decode | regex_findall('(?m)^major=(\d+)')
+          | first | default('unrecorded', true) }}
+      loop: "{{ indexer_major_contents.results | default([]) }}"
+      loop_control:
+        label: "{{ item.source | default('') }}"
+
+    # A backup with no marker predates the marker, and every backup taken
+    # before markers existed was taken on 4.x, because 5.x is what introduced
+    # the boundary. So an unmarked backup counts as 4.x. There is no safe
+    # default in the other direction: on a 5.x target an unmarked backup is
+    # treated as 4.x and refused, because guessing that it was 5.x would mean
+    # writing a 4.x config onto a 5.x node and losing the cluster.
+    - name: Refuse a cross-major indexer restore
+      ansible.builtin.fail:
+        msg: >-
+          Refusing to restore indexer configuration across a major version. The
+          backup at {{ backup_source_path }} was taken on Wazuh
+          {{ restore_source_majors | join(', ') | default('unrecorded', true) }}.x
+          and this run targets Wazuh {{ restore_target_major }}.x.
+          A 4.x indexer cannot be upgraded in place: there is no in-place
+          upgrade, no snapshot restore and no _reindex, and a 4.x
+          opensearch.yml on a 5.x node leaves a node that will not start
+          (it carries cluster.initial_master_nodes and
+          compatibility.override_main_response_version, both gone in
+          OpenSearch 3.x).
+          To move to 5.x, stand up a new 5.x cluster and follow
+          docs/operations/indexer-cutover-5x.md. To stay on 4.x, restore a
+          backup whose indexer was also 4.x.
+      vars:
+        restore_source_majors: >-
+          {{ (indexer_major_contents.results | default([])
+              | map(attribute='content') | map('b64decode')
+              | map('regex_findall', '(?m)^major=(\d+)') | map('first')
+              | map('default', '4', true) | list)
+             if (indexer_major_contents.results | default([]) | length) > 0
+             else ['4'] }}
+      when:
+        - restore_indexer | default(true) | bool
+        - indexer_backup_root.stat.exists | default(false)
+        - (restore_source_majors | unique | sort) != [restore_target_major]
 
     - name: Display restore warning
       ansible.builtin.debug:

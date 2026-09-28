@@ -5,6 +5,16 @@
 wazuh_agent_package_name: "wazuh-agent"
 wazuh_agent_service_name: "wazuh-agent"
 
+# 5.x packages are resolved from the artifact manifest rather than a distro
+# repository.  The 4.x repository path remains the default for 4.x pins.
+wazuh_direct_download: "{{ wazuh_is_prerelease | default(false) | bool }}"
+wazuh_agent_package_download_path: "/tmp/wazuh-agent"
+# 5.x artifact packages are installed directly; 4.x retains repository
+# installation. Keep this role self-contained for targeted agent playbooks.
+wazuh_package_install_mode: >-
+  {{ 'direct-download' if (wazuh_is_5x | default(false) | bool)
+     else 'repository' }}
+
 # Repository settings (version-aware)
 # Production releases (e.g. 4.14.5) use packages.wazuh.com
 # Pre-release versions (e.g. 5.0.0-beta2) use packages-staging.xdrsiem.wazuh.info
@@ -35,11 +45,103 @@ wazuh_agent_enrollment_enabled: true
 wazuh_agent_enrollment_delay: 30
 
 # Communication settings
+# NOTE: 5.0 moves agent->manager to HTTPS on 1517 and 1514 becomes legacy.
+# roles/vars/main.yml owns that mapping; the two values below are the 4.x
+# defaults and are only read when the resolved contract is not 5.x.
 wazuh_manager_agent_port: 1514
 wazuh_agent_protocol: tcp
 wazuh_agent_notify_time: 10
 wazuh_agent_time_reconnect: 60
 wazuh_agent_auto_restart: true
+
+# ═══════════════════════════════════════════════════════════════
+# Wazuh 5.0 agent contract
+# ═══════════════════════════════════════════════════════════════
+# Every setting below is inert on 4.14.5. See docs/wazuh-5-agent-migration.md
+# for the verified-against / known-risk register behind each one.
+
+# Upgrade-path enforcement. 5.0.0 cannot be installed over an agent older than
+# 4.14.0; the package installer aborts with an opaque message. We check the
+# installed version first and fail with the required 4.X -> 4.14.X -> 5.0.0
+# path spelled out. Set to false to bypass (not recommended).
+wazuh_agent_upgrade_path_enforced: true
+
+# TLS 1.3 ciphersuite list offered to the manager and to enrollment.
+# Must be a colon-separated list of TLS 1.3 ciphersuite names; the 5.0 manager
+# rejects an OpenSSL cipher string. Rendered as <agent><ssl><ciphers>.
+wazuh_agent_tls_ciphers: "{{ wazuh_agent_tls13_ciphersuites | default('TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256') }}"
+
+# How the agent verifies the manager certificate on 5.0.
+#   full        - verify against the CA and check the manager hostname
+#   certificate - verify against the CA, skip the hostname check
+#   system      - verify against the OS trust store
+#   none        - no verification (insecure)
+# Empty means "let the agent resolve it": placing a CA at the trust-anchor path
+# (etc/certs/root-ca.pem) promotes the agent to `full` with no config change,
+# which is what our certificates.yml deploys. We never emit `system`
+# together with <certificate_authorities> - the agent fails closed with (4120).
+wazuh_agent_verification_mode: ""
+
+# 5.0 removed <client_buffer>; buffering and pacing moved to the HTTPS
+# transport's accumulator under <agent><batch>. Ignored on 4.x.
+wazuh_agent_batch_size: "1MB"
+wazuh_agent_batch_interval: "10s"
+
+# Enrollment on 5.0. A fresh 5.0 install never creates etc/authd.pass and
+# WAZUH_REGISTRATION_PASSWORD is accepted but ignored, so the documented 5.0
+# path is a single-use enrollment token delivered at install time. The token
+# is consumed and deleted by the agent on first start.
+#
+# Supply it one of these ways (in precedence order):
+#   1. wazuh_agent_enrollment_token in the vault / host_vars
+#   2. a WAZUH_ENROLLMENT_TOKEN environment variable on the target
+#   3. an already-enrolled agent (client.keys present) - no token needed
+wazuh_agent_enrollment_token: ""
+wazuh_agent_enrollment_token_path: /var/ossec/etc/enrollment_token
+
+# 5.0 deletes the compiled default authd.pass at package-upgrade time, but a
+# path configured explicitly here is operator-owned and is never touched. We
+# therefore use a non-default path when password enrollment is still wanted,
+# for example for a fleet mid-migration to tokens.
+wazuh_agent_authorization_pass_path: /var/ossec/etc/enrollment-auth.pass
+
+# 5.0 pre-install validation aborts the upgrade when the OS trust store does
+# not verify the manager AND no CA is present at the default drop-in path.
+# On-prem manager certificates are issued by the deployment's own CA, so the
+# anchor has to be in place *before* the WPK/package upgrade runs.
+# One path per platform, and the single source for both the deployed file
+# (certificates.yml) and <agent><ssl><certificate_authorities> in the templates,
+# so the two can never disagree.
+wazuh_agent_trust_anchor_path: >-
+  {{ '/var/ossec/etc/certs/root-ca.pem'
+     if ansible_system | default('Linux') == 'Linux'
+     else '/Library/Ossec/etc/certs/root-ca.pem'
+     if ansible_system | default('Linux') == 'Darwin'
+     else 'C:\Program Files (x86)\ossec-agent\certs\root-ca.pem' }}
+wazuh_agent_trust_anchor_prestage: true
+
+# 5.0 dropped remoted.guess_agent_group: an agent declares its group during
+# enrollment and the manager refuses the whole enrollment if the group does
+# not exist. Verify the group against the manager API before upgrading.
+wazuh_agent_enrollment_group_check_enabled: true
+wazuh_agent_enrollment_groups: []
+
+# 5.0 ships <anti_tampering>; 4.x has no equivalent block.
+wazuh_agent_anti_tampering_enabled: false
+wazuh_agent_anti_tampering_package_uninstallation: yes
+
+# IT Hygiene is the 4.14+/5.0 name for the Syscollector inventory module and
+# is what replaces the removed osquery wodle. Categories below are the ones
+# that carry the data osquery packs used to collect.
+wazuh_agent_it_hygiene_enabled: true
+wazuh_agent_it_hygiene_users: true
+wazuh_agent_it_hygiene_groups: true
+wazuh_agent_it_hygiene_services: true
+wazuh_agent_it_hygiene_browser_extensions: true
+wazuh_agent_it_hygiene_synchronization_enabled: false
+wazuh_agent_it_hygiene_synchronization_interval: 5m
+wazuh_agent_it_hygiene_synchronization_max_eps: 75
+wazuh_agent_it_hygiene_synchronization_integrity_interval: 24h
 
 # TLS encryption for agent→manager communication (ON by default)
 # Disable with wazuh_agent_tls_enabled: false for environments without PKI
@@ -100,7 +202,21 @@ wazuh_agent_syscollector_enabled: true
 wazuh_agent_syscollector_interval: 1h
 
 # Security configuration analysis
+# On 5.0 SCA is what the removed cis-cat and open-scap wodles migrate to.
 wazuh_agent_sca_enabled: true
+wazuh_agent_sca_interval: 12h
+wazuh_agent_sca_scan_on_start: true
+# Explicit policy list. Empty means "load the bundled policies for this
+# platform", which is the correct default and the only safe one for a fresh
+# 5.0 agent: ruleset/sca contents are replaced on package upgrade, so
+# stock policies must never be copied into an admin-managed path.
+wazuh_agent_sca_policies: []
+# Custom policies live outside ruleset/sca (package upgrades replace that
+# tree). A path containing etc/shared/ is treated as manager-distributed, and
+# command rules in such a policy only run with sca.remote_commands=1.
+# wazuh_agent_sca_policies:
+#   - /opt/wazuh-sca/custom_linux.yml
+#   - etc/shared/default/sca/custom_linux.yml
 
 # Active response
 wazuh_agent_active_response_disabled: false

@@ -1,0 +1,324 @@
+---
+# Wazuh Indexer 4.x → 5.x cutover validation
+#
+# Read-only. Every task here inspects the cluster and reports; nothing mutates
+# it. Run it against a 5.x cluster to check that the cutover candidate is fit
+# to receive traffic, then follow docs/operations/indexer-cutover-5x.md.
+#
+# Usage:
+#   # Validate the 5.x cluster only
+#   ansible-playbook playbooks/indexer-cutover.yml -i inventory/hosts.yml \
+#     --tags validate-blue
+#
+#   # Validate the 5.x cluster and confirm the 4.x legacy cluster is read-only
+#   ansible-playbook playbooks/indexer-cutover.yml -i inventory/hosts.yml \
+#     --tags validate-blue,validate-legacy
+#
+#   # Report on shard counts and document reads (slow on a large cluster)
+#   ansible-playbook playbooks/indexer-cutover.yml -i inventory/hosts.yml \
+#     -e "cutover_count_docs=true" --tags validate-blue
+
+- name: Validate the 5.x cluster
+  hosts: wazuh_indexers
+  become: true
+  gather_facts: false
+  tags: [validate-blue]
+  tasks:
+    - name: Confirm this is a 5.x cluster
+      ansible.builtin.assert:
+        that:
+          - wazuh_is_5x | bool
+        fail_msg: >-
+          This run targets Wazuh {{ wazuh_version }}, not 5.x. A 4.x cluster
+          cannot pass these checks: it has no v5 schemas, no content-manager
+          plugins and a different set of built-in users.
+
+    - name: Read the cluster version
+      ansible.builtin.uri:
+        url: "https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port }}/"
+        method: GET
+        user: "{{ wazuh_indexer_admin_user }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        return_content: true
+      register: root
+      no_log: true
+
+    - name: Report the running engine version
+      ansible.builtin.debug:
+        msg: >-
+          {{ root.json.version.number }}
+          (cluster {{ root.json.cluster_name }},
+          distribution {{ root.json.version.distribution | default('unknown') }})
+      when: root.json.version.distribution | default('') | length > 0
+
+    # OpenSearch 3.x is the 5.x base. A 5.x indexer reporting 2.x means the
+    # packages and the configuration came from different majors.
+    - name: Confirm the engine is OpenSearch 3.x
+      ansible.builtin.assert:
+        that:
+          - root.json.version.number is match('^3\.')
+        fail_msg: >-
+          Wazuh indexer 5.x is built on OpenSearch 3.x, but this node reports
+          {{ root.json.version.number }}. Do not proceed with the cutover: the
+          cluster is not a 5.x indexer.
+        success_msg: "OpenSearch {{ root.json.version.number }}"
+
+    - name: Wait for the cluster to leave the red state
+      ansible.builtin.uri:
+        url: >-
+          https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port }}/_cluster/health
+        method: GET
+        user: "{{ wazuh_indexer_admin_user }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        return_content: true
+      register: health
+      until: health.json.status | default('') in ['green', 'yellow']
+      retries: 30
+      delay: 10
+      failed_when: health.json.status | default('red') not in ['green', 'yellow']
+      no_log: true
+
+    - name: Report cluster health
+      ansible.builtin.debug:
+        msg: >-
+          status={{ health.json.status }}
+          nodes={{ health.json.number_of_nodes }}
+          shards={{ health.json.active_shards }}/{{ health.json.total_shards }}
+          unassigned={{ health.json.unassigned_shards }}
+          relocating={{ health.json.relocating_shards }}
+
+    - name: List the security plugin
+      ansible.builtin.uri:
+        url: >-
+          https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port }}/_plugins/_security/api/account
+        method: GET
+        user: "{{ wazuh_indexer_admin_user }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        return_content: true
+      register: security_account
+      no_log: true
+
+    - name: Confirm the security index is readable
+      ansible.builtin.assert:
+        that:
+          - security_account.status == 200
+        fail_msg: >-
+          The security plugin did not authenticate {{ wazuh_indexer_admin_user }}
+          (HTTP {{ security_account.status }}). Do not repoint ingest or the
+          dashboard: without a working security index nothing can be written.
+        success_msg: "Security index is readable as {{ wazuh_indexer_admin_user }}"
+
+    # The security configuration lives in this index. An index that merely
+    # exists can be empty or a leftover from a failed init, and the symptom is
+    # authentication succeeding against the wrong configuration.
+    - name: List the mounted security index
+      ansible.builtin.uri:
+        url: >-
+          https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port
+          }}/_cat/indices/.opendistro_security?format=json&h=index,docs.count,health,status
+        method: GET
+        user: "{{ wazuh_indexer_admin_user }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        return_content: true
+      register: security_index
+      no_log: true
+
+    - name: Report the security index state
+      ansible.builtin.debug:
+        var: security_index.json | map(attribute='index') | list
+
+    - name: List the ISM policies
+      ansible.builtin.uri:
+        url: >-
+          https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port
+          }}/_plugins/_ism/policies?filter_path=policies.*.policy.id,policies.*.policy.state
+        method: GET
+        user: "{{ wazuh_indexer_admin_user }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        return_content: true
+      register: ism_policies
+      no_log: true
+
+    - name: Report ISM policy state
+      ansible.builtin.debug:
+        msg: "{{ ism_policies.json.policies | default([]) | map(attribute='policy.id') | list }}"
+
+    # ISM reports a policy as failed when it cannot parse or run an action. An
+    # unknown action in OpenSearch 3.x is exactly the failure a 5.x upgrade
+    # introduces, and it is invisible until the policy tries to roll an index.
+    - name: Fail if any ISM policy is in a failed state
+      ansible.builtin.assert:
+        that:
+          - item.policy.state.phase | default('open') == 'open'
+        fail_msg: >-
+          ISM policy '{{ item.policy.id }}' is in phase
+          '{{ item.policy.state.phase | default("unknown") }}', not 'open'. The
+          policy is not managing indices: rollover and retention have stopped
+          for whichever family it covers.
+        success_msg: "ISM policy {{ item.policy.id }} is open"
+      loop: "{{ ism_policies.json.policies | default([]) }}"
+      loop_control:
+        label: "{{ item.policy.id | default('?') }}"
+
+    - name: List the index templates
+      ansible.builtin.uri:
+        url: >-
+          https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port
+          }}/_index_template?filter_path=index_templates.name
+        method: GET
+        user: "{{ wazuh_indexer_admin_user }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        return_content: true
+      register: index_templates
+      no_log: true
+
+    - name: Report the index templates present
+      ansible.builtin.debug:
+        msg: "{{ index_templates.json.index_templates | default([]) | map(attribute='name') | list }}"
+
+    # Every 5.x family the role manages must have a policy. A missing one means
+    # that family will grow until it hits the 1000 open index limit and starts
+    # failing writes.
+    - name: Confirm every managed 5.x family has an ISM policy
+      ansible.builtin.assert:
+        that:
+          - >-
+            {{ 'wazuh-' ~ item.key ~ '-policy' in
+               (ism_policies.json.policies | default([])
+                | map(attribute='policy.id') | list) }}
+        fail_msg: >-
+          No ISM policy named 'wazuh-{{ item.key }}-policy'. The {{ item.key }}
+          family ({{ item.value.pattern }}) would never roll over or be
+          deleted, and will eventually reach the open index limit.
+        success_msg: "wazuh-{{ item.key }}-policy exists"
+      loop: "{{ wazuh_indexer_5x_families | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Report shard counts per index
+      ansible.builtin.uri:
+        url: >-
+          https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port
+          }}/_cat/shards?format=json&h=index,shard,prirep,state,docs
+        method: GET
+        user: "{{ wazuh_indexer_admin_user }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        return_content: true
+      register: shards
+      no_log: true
+
+    # Replica shards that never get assigned are the usual cause of a cluster
+    # stuck in yellow. Expected on a single-node 5.x cluster with
+    # number_of_replicas: 0, and a problem on a multi-node one.
+    - name: Count unassigned shard copies
+      ansible.builtin.set_fact:
+        unassigned_copies: >-
+          {{ shards.json | default([]) | selectattr('state', 'ne', 'STARTED')
+             | list | length }}
+
+    - name: Report unassigned shard copies
+      ansible.builtin.debug:
+        msg: >-
+          {{ unassigned_copies }} shard copy/copies are not STARTED.
+          {{ 'Expected on a single-node cluster with number_of_replicas: 0.'
+             if unassigned_copies | int == 0
+             else 'Set wazuh_indexer_5x_families[*].replica_shards to at least 1 on a multi-node cluster.' }}
+
+    - name: Search every managed family
+      ansible.builtin.uri:
+        url: >-
+          https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port
+          }}/{{ item.value.pattern }}/_search?size=0&track_total_hits=true
+        method: GET
+        user: "{{ wazuh_indexer_admin_user }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        return_content: true
+        # 404 means the family has no index yet, which is a valid state on a
+        # cluster that has just been cut over.
+        status_code: [200, 404]
+      loop: "{{ wazuh_indexer_5x_families | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      register: family_search
+      when: cutover_count_docs | default(false) | bool
+
+    - name: Report documents readable per family
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.item.key }} ({{ item.item.value.pattern }}):
+          {{ item.json.hits.total.value | default(0) }} documents
+      loop: "{{ family_search.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.key | default('?') }}"
+      when:
+        - cutover_count_docs | default(false) | bool
+        - item.status is defined
+        - item.status == 200
+
+- name: Validate the legacy 4.x cluster is read-only
+  hosts: wazuh_legacy_indexers
+  become: true
+  gather_facts: false
+  tags: [validate-legacy]
+  tasks:
+    # wazuh_legacy_indexers is the 4.x cluster kept alongside the new one. It
+    # holds the history that cannot be migrated, so the failure that matters is
+    # a write reaching it: anything writing there today is a manager still
+    # pointed at the old cluster.
+    - name: Read the legacy cluster's index block settings
+      ansible.builtin.uri:
+        url: >-
+          https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port }}/_cluster/settings?include_defaults=false&flat_settings=true
+        method: GET
+        user: "{{ wazuh_indexer_admin_user }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        return_content: true
+      register: legacy_settings
+      failed_when: false
+      no_log: true
+
+    - name: Report the legacy cluster's write state
+      ansible.builtin.debug:
+        msg: >-
+          cluster.routing.allocation.enable =
+          {{ legacy_settings.json.persistent['cluster.routing.allocation.enable']
+             | default('(unset: writes allowed)') }}
+          — {{ 'read-only as intended'
+             if legacy_settings.json.persistent['cluster.routing.allocation.enable'] | default('') == 'none'
+             else 'still writable. Confirm no manager is ingesting here, or set it read-only with: cluster.routing.allocation.enable=none' }}
+
+    - name: List the legacy cluster's indices
+      ansible.builtin.uri:
+        url: >-
+          https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port }}/_cat/indices/wazuh-*?format=json&h=index,docs.count,health
+        method: GET
+        user: "{{ wazuh_indexer_admin_user }}"
+        password: "{{ wazuh_indexer_admin_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+        return_content: true
+      register: legacy_indices
+      failed_when: false
+      no_log: true
+
+    - name: Report the history the legacy cluster still holds
+      ansible.builtin.debug:
+        var: legacy_indices.json | default([]) | map(attribute='index') | list

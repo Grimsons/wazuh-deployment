@@ -1,0 +1,292 @@
+---
+# Wazuh Dashboard - OpenSearch Dashboards 3.x (Wazuh 5.x) saved-object contract
+#
+# Wazuh 5.0 "does not provide an automatic upgrade path from 4.x"; every task in
+# docs/operations/dashboard-migration-5.0.md is manual. The 4.x dashboard role
+# created index patterns itself. It must not do that on 5.x: in 5.x the Wazuh
+# plugin provisions every default index pattern itself, as an `index-pattern`
+# saved object whose *id is the index name pattern itself*, during a health-check
+# initialization task on first start. Creating them again here would overwrite
+# plugin-owned objects with a field list this role does not own.
+#
+# So the 5.x path is: never create, always revalidate. This file is the list
+# that revalidation walks, and the only record of what 4.x left behind.
+#
+# Provenance: transcribed from
+#   wazuh/wazuh-dashboard-plugins @ v5.0.0-beta5
+#     plugins/main/common/constants.ts                 (index name constants)
+#     plugins/main/server/plugin.ts                    (INDEX_PATTERN_HEALTH_CHECK_DEFINITIONS)
+#     plugins/main/server/health-check/index-patterns.ts (id == title, time field)
+#   Regenerate with `make dashboard-saved-objects inventory-refresh` before
+#   bumping the pinned Wazuh version. tests/lib/test_dashboard_saved_objects.bats
+#   fails if this list drifts from roles/wazuh-indexer 5.x families or grows a
+#   4.x name.
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 5.x index patterns owned by the plugin
+# ═══════════════════════════════════════════════════════════════════════════
+# time_field is null where the 5.x document has no date field to sort on: an
+# agent-config document records when the agent *last reported*
+# (state.modified_at), not when an event happened, and the same applies to the
+# inventory/FIM/SCA/threat-intel state families. Do not invent a time field for
+# these; the plugin creates them without one and a "fix" here breaks the
+# pattern the plugin owns.
+wazuh_dashboard_5x_index_patterns:
+  - id: "wazuh-metrics-agents*"
+    family: metrics
+    time_field: "@timestamp"
+  - id: "wazuh-metrics-comms-v4*"
+    family: metrics
+    time_field: "@timestamp"
+  - id: "wazuh-metrics-normalization*"
+    family: metrics
+    time_field: "@timestamp"
+  - id: "wazuh-states-vulnerabilities*"
+    family: states-vulnerabilities
+    time_field: null
+  - id: "wazuh-agent-config*"
+    family: agent-config
+    time_field: null
+  - id: "wazuh-states-inventory*"
+    family: states-inventory
+    time_field: null
+  - id: "wazuh-states-inventory-groups*"
+    family: states-inventory
+    time_field: null
+  - id: "wazuh-states-inventory-hardware*"
+    family: states-inventory
+    time_field: null
+  - id: "wazuh-states-inventory-hotfixes*"
+    family: states-inventory
+    time_field: null
+  - id: "wazuh-states-inventory-interfaces*"
+    family: states-inventory
+    time_field: null
+  - id: "wazuh-states-inventory-networks*"
+    family: states-inventory
+    time_field: null
+  - id: "wazuh-states-inventory-packages*"
+    family: states-inventory
+    time_field: null
+  - id: "wazuh-states-inventory-ports*"
+    family: states-inventory
+    time_field: null
+  - id: "wazuh-states-inventory-processes*"
+    family: states-inventory
+    time_field: null
+  - id: "wazuh-states-inventory-protocols*"
+    family: states-inventory
+    time_field: null
+  - id: "wazuh-states-inventory-system*"
+    family: states-inventory
+    time_field: null
+  - id: "wazuh-states-inventory-users*"
+    family: states-inventory
+    time_field: null
+  - id: "wazuh-states-inventory-services*"
+    family: states-inventory
+    time_field: null
+  - id: "wazuh-states-inventory-browser-extensions*"
+    family: states-inventory
+    time_field: null
+  - id: "wazuh-states-fim*"
+    family: states-fim
+    time_field: null
+  - id: "wazuh-states-fim-files*"
+    family: states-fim
+    time_field: null
+  - id: "wazuh-states-fim-registry-keys*"
+    family: states-fim
+    time_field: null
+  - id: "wazuh-states-fim-registry-values*"
+    family: states-fim
+    time_field: null
+  - id: "wazuh-states-sca*"
+    family: states-sca
+    time_field: null
+  - id: "wazuh-agent-stats*"
+    family: agent-stats
+    time_field: null
+  - id: "wazuh-events-v5-system-activity*"
+    family: events
+    time_field: "@timestamp"
+  - id: "wazuh-events-v5-security*"
+    family: events
+    time_field: "@timestamp"
+  - id: "wazuh-events-v5-access-management*"
+    family: events
+    time_field: "@timestamp"
+  - id: "wazuh-events-v5-applications*"
+    family: events
+    time_field: "@timestamp"
+  - id: "wazuh-events-v5-other*"
+    family: events
+    time_field: "@timestamp"
+  - id: "wazuh-events-v5-network-activity*"
+    family: events
+    time_field: "@timestamp"
+  - id: "wazuh-events-v5-cloud-services*"
+    family: events
+    time_field: "@timestamp"
+  - id: "wazuh-events-v5*"
+    family: events
+    time_field: "@timestamp"
+  - id: "wazuh-active-responses*"
+    family: active-responses
+    time_field: "@timestamp"
+  - id: "wazuh-events-v5-unclassified*"
+    family: events
+    time_field: "@timestamp"
+  - id: "wazuh-events-raw-v5*"
+    family: events-raw
+    time_field: "@timestamp"
+  - id: "wazuh-findings-v5-system-activity*"
+    family: findings
+    time_field: "@timestamp"
+  - id: "wazuh-findings-v5-security*"
+    family: findings
+    time_field: "@timestamp"
+  - id: "wazuh-findings-v5-access-management*"
+    family: findings
+    time_field: "@timestamp"
+  - id: "wazuh-findings-v5-applications*"
+    family: findings
+    time_field: "@timestamp"
+  - id: "wazuh-findings-v5-network-activity*"
+    family: findings
+    time_field: "@timestamp"
+  - id: "wazuh-findings-v5-other*"
+    family: findings
+    time_field: "@timestamp"
+  - id: "wazuh-findings-v5-cloud-services*"
+    family: findings
+    time_field: "@timestamp"
+  - id: "wazuh-findings-v5-unclassified*"
+    family: findings
+    time_field: "@timestamp"
+  - id: "wazuh-findings-v5*"
+    family: findings
+    time_field: "@timestamp"
+  - id: "wazuh-threatintel-enrichments*"
+    family: threatintel
+    time_field: null
+
+# The plugin sets defaultIndex itself, and only when it is still null, so that
+# a user's own choice survives a restart. Setting it unconditionally on every
+# run would be a silent config change on an operator's live dashboard.
+wazuh_dashboard_5x_default_index_pattern: "wazuh-events-v5*"
+
+# Rule-based alert data. 4.x wazuh-alerts-* is this family in 5.x; the 5.x
+# docs call it "the closest equivalent to wazuh-alerts-*".
+wazuh_dashboard_5x_findings_index_pattern: "wazuh-findings-v5*"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 4.x index patterns: disposition
+# ═══════════════════════════════════════════════════════════════════════════
+# Every pattern this repository ever provisioned on 4.x, and what happened to
+# it. This is the "no pattern is left in an unverified state" record: each entry
+# is either `revalidated` (a 5.x pattern above carries its data) or `retired`
+# with a reason. The 4.x and 5.x name spaces are disjoint - no 4.x index exists
+# on a 5.x cluster - so nothing can be "carried over" by name.
+wazuh_dashboard_4x_index_pattern_disposition:
+  - id: "wazuh-alerts-*"
+    source: "roles/wazuh-dashboard/tasks/index_patterns_4x.yml"
+    disposition: retired
+    replaced_by: "wazuh-findings-v5*"
+    also_covered_by: "wazuh-events-v5*"
+    reason: >-
+      5.x splits the alert stream in two. Rule matches live in the findings
+      family (wazuh-findings-v5*); the full event stream lives in the events
+      family (wazuh-events-v5*). Custom objects that referenced wazuh-alerts-*
+      must be re-pointed and their rule.* fields renamed; see
+      wazuh_dashboard_5x_index_pattern_remap.
+  - id: "wazuh-monitoring-*"
+    source: "roles/wazuh-dashboard/tasks/index_patterns_4x.yml"
+    disposition: retired
+    replaced_by:
+      - "wazuh-metrics-agents*"
+      - "wazuh-metrics-comms-v4*"
+      - "wazuh-metrics-normalization*"
+    reason: >-
+      4.x monitoring indices were written by a dashboard-side cron and are
+      replaced by three metrics families written by the manager. There is no
+      single successor index, so the old wildcard is not re-pointable: a
+      visualization that read wazuh-monitoring-* has to be re-pointed at the
+      metrics family matching the metric it aggregated.
+  - id: "wazuh-statistics-*"
+    source: "roles/wazuh-dashboard/tasks/index_patterns_4x.yml"
+    disposition: retired
+    replaced_by:
+      - "wazuh-agent-stats*"
+      - "wazuh-agent-config*"
+    reason: >-
+      The 4.x cron.statistics index is gone in 5.x; per-agent statistics and
+      configuration are now manager-written state documents. Note neither
+      5.x successor carries a time field, so a time-ranged visualization
+      cannot be re-pointed mechanically and has to be rebuilt.
+  - id: "wazuh-archives-*"
+    source: "roles/wazuh-indexer (ISM alias; never had a dashboard pattern)"
+    disposition: retired
+    replaced_by:
+      - "wazuh-events-v5*"
+      - "wazuh-states-fim*"
+      - "wazuh-states-sca*"
+    reason: >-
+      4.x archived alert copies have no 5.x family; archived FIM/SCA data is
+      now state in the fim/sca families rather than a separate archive index.
+      Recorded here for completeness because the 4.x indexer role still creates
+      the alias - if a custom object ever referenced it, it has no wildcard to
+      move to.
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Reference remap for imported 4.x objects
+# ═══════════════════════════════════════════════════════════════════════════
+# Consumed by _resolve_import_errors. An imported visualization keeps its
+# literal reference to the 4.x pattern id, which does not exist on 5.x, so the
+# import fails with missing_references. This map is the only thing that makes
+# those objects importable at all.
+wazuh_dashboard_5x_index_pattern_remap:
+  "wazuh-alerts-*": "wazuh-findings-v5*"
+  "wazuh-monitoring-*": "wazuh-metrics-agents*"
+  "wazuh-statistics-*": "wazuh-agent-stats*"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Field renames
+# ═══════════════════════════════════════════════════════════════════════════
+# A re-pointed index pattern is not enough: the document shape changed too.
+# Renaming is NOT automated - it needs per-visualization judgement (which
+# events variant, which level buckets) - so this list drives the operator
+# checklist and the docs, not a bulk rewrite.
+wazuh_dashboard_5x_field_renames:
+  "rule.level": "wazuh.rule.level"
+  "rule.description": "wazuh.rule.title"
+  "rule.id": "wazuh.rule.id"
+  "rule.groups": "wazuh.integration.name"
+  "agent.name": "wazuh.agent.name"
+  "agent.id": "wazuh.agent.id"
+
+# rule.level also changed type, so every threshold and bucket built on the old
+# integer 0-16 scale is wrong after a pure rename. Recorded as data so the
+# runbook and the post-import checklist cannot quietly skip it.
+wazuh_dashboard_5x_field_type_changes:
+  "rule.level":
+    from: "integer 0-16"
+    to: "string (low, medium, high, critical, informational)"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Saved object types
+# ═══════════════════════════════════════════════════════════════════════════
+# Wazuh registers no saved object type of its own in 5.x; it uses the four OSD
+# core types. Anything else in a 4.x export is not a Wazuh object and is not
+# migrated by this role.
+wazuh_dashboard_saved_object_types:
+  - "dashboard"
+  - "visualization"
+  - "search"
+  - "index-pattern"
+
+# Objects whose description starts with this prefix are provisioned by the
+# 5.x plugin. Re-importing them over the provisioned copy is what the Wazuh
+# migration guide warns against: it reintroduces 4.x panels with stale pattern
+# references. They are filtered out of every export and every import here.
+wazuh_dashboard_wazuh_provided_description_prefix: "Provided by Wazuh"

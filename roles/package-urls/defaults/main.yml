@@ -10,7 +10,12 @@ source: "production"
 wazuh_artifact_urls_uri_4x: "packages.wazuh.com/{{ wazuh_effective_major_minor }}/artifact_urls.yml"
 wazuh_artifact_urls_uri_4x_prerelease: "packages-dev.wazuh.com/{{ wazuh_effective_major_minor }}/artifact_urls.yml"
 wazuh_artifact_urls_uri_5x: "packages.wazuh.com/production/{{ wazuh_repository_major }}/artifact-urls/artifact_urls_{{ wazuh_effective_version }}.yaml"  # noqa: yaml[line-length]
-wazuh_artifact_urls_uri_5x_prerelease: "packages-staging.xdrsiem.wazuh.info/pre-release/{{ wazuh_repository_major }}/artifact-urls/artifact_urls_{{ wazuh_effective_version }}-{{ wazuh_stage }}.yaml"  # noqa: yaml[line-length]
+# Beta tags already carry their stage in the version (for example
+# 5.0.0-beta5).  VERSION.json may instead represent the same release as
+# version: 5.0.0, stage: beta5, so append the stage only when it is not already
+# part of the effective version.
+wazuh_artifact_urls_prerelease_suffix: "{{ '' if wazuh_effective_version.endswith('-' ~ wazuh_stage) else '-' ~ wazuh_stage }}"
+wazuh_artifact_urls_uri_5x_prerelease: "packages-staging.xdrsiem.wazuh.info/pre-release/{{ wazuh_repository_major }}/artifact-urls/artifact_urls_{{ wazuh_effective_version }}{{ wazuh_artifact_urls_prerelease_suffix }}.yaml"  # noqa: yaml[line-length]
 
 package_urls_file_uri: "{{ wazuh_artifact_urls_uri_5x if (wazuh_is_5x | default(false) | bool) else wazuh_artifact_urls_uri_4x }}"
 package_urls_file_uri_prerelease: "{{ wazuh_artifact_urls_uri_5x_prerelease if (wazuh_is_5x | default(false) | bool) else wazuh_artifact_urls_uri_4x_prerelease }}"

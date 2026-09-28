@@ -59,3 +59,47 @@ logging.dest: /var/log/wazuh-dashboard/opensearch-dashboards.log
 # Session timeout (in milliseconds)
 opensearch_security.session.ttl: {{ (wazuh_dashboard_session_timeout | default(60)) * 60000 }}
 opensearch_security.cookie.ttl: {{ (wazuh_dashboard_session_timeout | default(60)) * 60000 }}
+{% if wazuh_is_5x | default(false) %}
+# ═══════════════════════════════════════════════════════════════════════════════
+# Wazuh 5.x Plugin Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+# Wazuh 5.0 moved every Wazuh plugin setting out of wazuh.yml and into this file
+# (wazuh_core.hosts replaces the old `hosts` block). The 4.x wazuh.yml is not
+# read at all on 5.x, so a surviving one is misleading rather than merely
+# stale - tasks/configure.yml removes it. Provenance: docs/ref/configuration.md
+# and plugins/wazuh-ai-assistant/server/wazuh-core.d.ts @ v5.0.0-beta5.
+wazuh_core.hosts:
+  - default:
+      url: "https://{{ wazuh_manager_nodes[0].ip }}"
+      port: {{ wazuh_manager_api_port }}
+      username: "{{ wazuh_api_user }}"
+      password: "{{ wazuh_api_password }}"
+      run_as: {{ wazuh_dashboard_api_run_as | default(false) | lower }}
+{% if wazuh_manager_nodes | length > 1 %}
+{% for node in wazuh_manager_nodes[1:] %}
+  - {{ node.name }}:
+      url: "https://{{ node.ip }}"
+      port: {{ wazuh_manager_api_port }}
+      username: "{{ wazuh_api_user }}"
+      password: "{{ wazuh_api_password }}"
+      run_as: {{ wazuh_dashboard_api_run_as | default(false) | lower }}
+{% endfor %}
+{% endif %}
+
+# The health check is what creates the default index patterns on 5.x, so
+# disabling it means the dashboards have no data sources at all. That is the
+# single most expensive way to break this install, which is why it is explicit
+# and defaults to on.
+healthcheck.enabled: {{ wazuh_dashboard_check_enabled | default(true) | lower }}
+healthcheck.interval: "{{ wazuh_dashboard_healthcheck_interval | default('15m') }}"
+healthcheck.retries_delay: "{{ wazuh_dashboard_healthcheck_retries_delay | default('2.5s') }}"
+healthcheck.max_retries: {{ wazuh_dashboard_healthcheck_max_retries | default(5) }}
+{% if wazuh_dashboard_check_checks_enabled is defined and wazuh_dashboard_check_checks_enabled %}
+# The 4.x checks.* booleans map onto this as a filter over health check names.
+healthcheck.checks_enabled: "{{ wazuh_dashboard_check_checks_enabled }}"
+{% endif %}
+
+# Hides the raw-event toggle from the Indexer Settings UI. The 4.x
+# alerts.sample.prefix setting has no equivalent: 5.x queries the events family.
+wazuh.disabledSettings: {{ wazuh_dashboard_disabled_settings | default([]) | to_json }}
+{% endif %}

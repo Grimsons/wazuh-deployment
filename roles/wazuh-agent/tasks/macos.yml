@@ -46,6 +46,15 @@
     wazuh_pkg_info.rc != 0 or
     wazuh_version not in (wazuh_pkg_info.stdout | default(''))
 
+- name: Resolve the macOS enrollment password path
+  # 5.0 removes the compiled default authd.pass on package upgrade, so 5.x uses
+  # an operator-owned path. One fact feeds both the file and the template.
+  ansible.builtin.set_fact:
+    wazuh_agent_authorization_pass_path: >-
+      {{ '/Library/Ossec/etc/enrollment-auth.pass'
+         if (wazuh_agent_is_5x | bool)
+         else '/Library/Ossec/etc/authd.pass' }}
+
 - name: Configure Wazuh Agent for macOS
   ansible.builtin.template:
     src: ossec-macos.conf.j2
@@ -73,7 +82,8 @@
 - name: Deploy enrollment password file to macOS agent
   ansible.builtin.copy:
     content: "{{ wazuh_agent_enrollment_password }}"
-    dest: /Library/Ossec/etc/authd.pass
+    # 5.0 removes the compiled default authd.pass on package upgrade.
+    dest: "{{ wazuh_agent_authorization_pass_path }}"
     owner: root
     group: wazuh
     mode: '0640'
@@ -83,6 +93,19 @@
     - wazuh_authd_use_password | default(true)
     - wazuh_agent_enrollment_password is defined
     - wazuh_agent_enrollment_password | length > 0
+
+- name: Deploy the 5.0 enrollment token to macOS agent
+  ansible.builtin.copy:
+    content: "{{ wazuh_agent_enrollment_token }}"
+    dest: /Library/Ossec/etc/enrollment_token
+    owner: root
+    group: wazuh
+    mode: '0600'
+  become: true
+  no_log: true
+  when:
+    - wazuh_agent_is_5x | bool
+    - wazuh_agent_enrollment_token | default('') | length > 0
 
 - name: Load Wazuh Agent service
   ansible.builtin.command: /Library/Ossec/bin/wazuh-control start

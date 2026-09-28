@@ -1,0 +1,75 @@
+---
+# Wazuh Indexer - certificate path resolution
+#
+# Produces wazuh_indexer_cert_paths, the map of logical name to absolute path
+# that the rest of the role deploys to. Kept separate from certificates.yml so
+# it can be exercised without a node; see tests/lib/test_indexer_5x.bats.
+#
+# Certificate destinations are parsed out of the rendered opensearch.yml rather
+# than hard-coded. The config is the single source of truth: if the template
+# and the deploy step disagree, the indexer starts with a config pointing at
+# files that were never placed, and the failure surfaces as an opaque TLS
+# handshake error rather than a missing file.
+#
+# opensearch.yml is parsed from the template lookup instead of from disk
+# because this runs before the config is written (see tasks/main.yml). Both
+# render from the same variables, so the paths are identical.
+
+- name: Render opensearch.yml to resolve certificate paths
+  ansible.builtin.set_fact:
+    wazuh_indexer_rendered_config: >-
+      {{ lookup('ansible.builtin.template', 'opensearch.yml.j2') }}
+
+# The logical name is used by the rest of this file; the setting is what
+# actually appears in the config. Keeping the mapping in one table means a new
+# TLS setting cannot be added to the template without this file noticing.
+- name: Extract certificate paths from the rendered config
+  ansible.builtin.set_fact:
+    wazuh_indexer_cert_matches: >-
+      {{ (wazuh_indexer_cert_matches | default([])) + [{
+           'logical': item.logical,
+           'setting': item.setting,
+           'path': (wazuh_indexer_rendered_config
+                    | regex_findall('(?m)^[ \t]*' ~ item.setting | regex_escape
+                                   ~ '[ \t]*:[ \t]*(\S+\.pem)(?:[ \t]+#.*)?$')
+                    | first | default('', true) | trim)
+         }] }}
+  loop: "{{ wazuh_indexer_cert_settings }}"
+  loop_control:
+    label: "{{ item.logical }}"
+  vars:
+    wazuh_indexer_cert_settings:
+      - { logical: node_cert,    setting: "plugins.security.ssl.transport.pemcert_filepath" }
+      - { logical: node_key,     setting: "plugins.security.ssl.transport.pemkey_filepath" }
+      - { logical: root_ca,      setting: "plugins.security.ssl.transport.pemtrustedcas_filepath" }
+      - { logical: http_cert,    setting: "plugins.security.ssl.http.pemcert_filepath" }
+      - { logical: http_key,     setting: "plugins.security.ssl.http.pemkey_filepath" }
+      - { logical: http_root_ca, setting: "plugins.security.ssl.http.pemtrustedcas_filepath" }
+
+# A setting the template dropped or renamed must fail here, where the message
+# can name the setting, not later as a node that will not start.
+- name: Refuse to continue when a certificate path could not be resolved
+  ansible.builtin.assert:
+    that:
+      - item.path | length > 0
+    fail_msg: >-
+      opensearch.yml does not contain a readable PEM path for
+      '{{ item.setting }}'. The indexer TLS layer would start with no
+      certificate to load. Check templates/opensearch.yml.j2.
+    success_msg: "{{ item.logical }} -> {{ item.path }}"
+  loop: "{{ wazuh_indexer_cert_matches }}"
+  loop_control:
+    label: "{{ item.setting }}"
+
+# OpenSearch resolves a relative PEM path against its config directory, so the
+# directory is derived rather than assumed. Both majors behave the same way.
+# Built with dict()/zip rather than combine(): combine() mutates the dict it is
+# given, which corrupts a result that is rebuilt from itself in a loop.
+- name: Resolve certificate paths against the indexer config directory
+  ansible.builtin.set_fact:
+    wazuh_indexer_cert_paths: >-
+      {{ dict(wazuh_indexer_cert_matches
+              | map(attribute='path')
+              | map('regex_replace', '^(?!/)', wazuh_indexer_config_path ~ '/')
+              | zip(wazuh_indexer_cert_matches | map(attribute='logical'))
+              | map('reverse')) }}

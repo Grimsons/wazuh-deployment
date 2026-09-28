@@ -15,7 +15,17 @@
 
 - name: Configure Wazuh repository
   ansible.builtin.include_tasks: repository.yml
-  when: not wazuh_direct_download | default(false)
+  when: (wazuh_package_install_mode | default('repository')) == 'repository'
+
+- name: Fail closed when Wazuh 5.x lacks direct-download mode
+  ansible.builtin.fail:
+    msg: >-
+      Wazuh 5.x requires wazuh_package_install_mode=direct-download. Refusing
+      to configure an apt/yum repository or install from the wrong major.
+      Integrate the shared contract in roles/vars/main.yml.
+  when:
+    - wazuh_is_5x | default(false) | bool
+    - (wazuh_package_install_mode | default('repository')) != 'direct-download'
 
 - name: Install Wazuh Dashboard
   ansible.builtin.include_tasks: install.yml

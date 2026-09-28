@@ -96,15 +96,6 @@
       failed_when: false
       when: inventory_hostname in groups.get('wazuh_managers', [])
 
-    - name: Check filebeat service
-      ansible.builtin.systemd:
-        name: filebeat
-      register: filebeat_service
-      failed_when: false
-      when:
-        - inventory_hostname in groups.get('wazuh_managers', [])
-        - wazuh_use_filebeat | default(true) | bool
-
     - name: Check manager API
       ansible.builtin.uri:
         url: "https://127.0.0.1:{{ wazuh_manager_api_port | default(55000) }}/"
@@ -135,13 +126,11 @@
         manager_health:
           host: "{{ inventory_hostname }}"
           service: "{{ manager_service.status.ActiveState | default('unknown') }}"
-          filebeat: "{{ filebeat_service.status.ActiveState | default('not-applicable') if (wazuh_use_filebeat | default(true) | bool) else 'not-applicable' }}"
           api: "{{ 'up' if manager_api.status | default(0) in [200, 401] else 'down' }}"
           disk_percent: "{{ manager_disk.stdout | default('0') | int }}"
           active_agents: "{{ active_agents.stdout | default('0') | int }}"
           status: >-
             {% if manager_service.status.ActiveState | default('') != 'active' %}CRITICAL
-            {% elif wazuh_use_filebeat | default(true) | bool and filebeat_service.status.ActiveState | default('') != 'active' %}WARNING
             {% elif manager_api.status | default(0) not in [200, 401] %}CRITICAL
             {% elif manager_disk.stdout | default('0') | int >= alert_threshold_disk_critical %}CRITICAL
             {% elif manager_disk.stdout | default('0') | int >= alert_threshold_disk_warning %}WARNING
@@ -149,7 +138,6 @@
           issues: >-
             {% set issues = [] %}
             {% if manager_service.status.ActiveState | default('') != 'active' %}{{ issues.append('Manager service not running') }}{% endif %}
-            {% if wazuh_use_filebeat | default(true) | bool and filebeat_service.status.ActiveState | default('') != 'active' %}{{ issues.append('Filebeat not running') }}{% endif %}
             {% if manager_api.status | default(0) not in [200, 401] %}{{ issues.append('API not responding') }}{% endif %}
             {% if manager_disk.stdout | default('0') | int >= alert_threshold_disk_critical %}{{ issues.append('Disk usage critical: ' + manager_disk.stdout + '%') }}{% endif %}
             {% if manager_disk.stdout | default('0') | int >= alert_threshold_disk_warning and manager_disk.stdout | default('0') | int < alert_threshold_disk_critical %}{{ issues.append('Disk usage warning: ' + manager_disk.stdout + '%') }}{% endif %}

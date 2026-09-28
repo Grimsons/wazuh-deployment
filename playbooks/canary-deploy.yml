@@ -1,6 +1,12 @@
 ---
 # Wazuh Canary/Staged Deployment Playbook
-# Performs rolling updates with health check gates between stages
+# Performs staged updates with health check gates between stages
+#
+# NOT SUPPORTED: crossing a major version on the indexer. The indexer stage
+# below updates nodes one at a time within a single major. A 4.x indexer
+# cannot be updated to 5.x this way and its data cannot be migrated across the
+# boundary; that is a blue/green replacement, see
+# docs/operations/indexer-cutover-5x.md.
 #
 # Usage:
 #   Full staged deployment:
@@ -16,15 +22,15 @@
 #     ansible-playbook playbooks/canary-deploy.yml -e "agent_batch_size=5"
 #
 # Deployment order:
-#   1. Indexers (serial: 1) with health gate
+#   1. Indexers (serial: 1, same major only) with health gate
 #   2. Managers (serial: 1) with health gate
 #   3. Dashboards (serial: 1) with health gate
 #   4. Agents (serial: batch_size) with health gate per batch
 
 # ═══════════════════════════════════════════════════════════════
-# Stage 1: Indexer Rolling Update
+# Stage 1: Indexer update, one node at a time (same major only)
 # ═══════════════════════════════════════════════════════════════
-- name: "Stage 1: Indexer Rolling Update"
+- name: "Stage 1: Indexer Update (one node at a time)"
   hosts: wazuh_indexers
   serial: 1
   become: true

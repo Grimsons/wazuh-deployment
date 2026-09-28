@@ -1,6 +1,9 @@
 ---
 # Wazuh Dashboard Role - Default Variables
 
+wazuh_direct_download: "{{ wazuh_is_prerelease | default(false) | bool }}"
+wazuh_dashboard_package_download_path: "/tmp/wazuh-dashboard"
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Wazuh API Connection (cross-role shared variables)
 # ═══════════════════════════════════════════════════════════════════════════════

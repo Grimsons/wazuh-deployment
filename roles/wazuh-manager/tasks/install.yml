@@ -1,26 +1,40 @@
 ---
 # Wazuh Manager - Installation
 
+- name: Load the artifact manifest for Wazuh 5.x
+  ansible.builtin.include_vars:
+    file: "{{ playbook_dir }}/roles/vars/{{ urls_file }}"
+  when: wazuh_is_5x | default(false) | bool
+
+- name: Install Wazuh Manager from the 5.x artifact manifest
+  ansible.builtin.include_tasks: ../../package-urls/tasks/direct-install.yml
+  vars:
+    wazuh_package_component: wazuh-manager
+    wazuh_package_notify_handler: restart wazuh-manager
+  when: (wazuh_package_install_mode | default('repository')) == 'direct-download'
+
 - name: Download and install Wazuh Manager via .deb (pre-release)
   when:
     - ansible_os_family == 'Debian'
     - wazuh_direct_download | default(false)
+    - (wazuh_package_install_mode | default('repository')) == 'repository'
   become: true
   block:
     - name: Create temp directory for packages
       ansible.builtin.file:
-        path: /tmp/wazuh-packages
+        path: "{{ wazuh_manager_package_download_path }}"
         state: directory
         mode: '0755'
 
     - name: Download Wazuh Manager .deb package
       ansible.builtin.get_url:
-        url: "{{ wazuh_repo_url_apt }}pool/main/w/wazuh-manager/wazuh-manager_{{ wazuh_version }}_amd64.deb"
-        dest: /tmp/wazuh-packages/wazuh-manager.deb
+        url: "{{ wazuh_manager_amd64_deb }}"
+        dest: "{{ wazuh_manager_package_download_path }}/wazuh-manager.deb"
+        checksum: "{{ wazuh_manager_amd64_deb_sha256 | default(omit) }}"
 
     - name: Install .deb package
       ansible.builtin.apt:
-        deb: /tmp/wazuh-packages/wazuh-manager.deb
+        deb: "{{ wazuh_manager_package_download_path }}/wazuh-manager.deb"
       notify: restart wazuh-manager
       register: wazuh_manager_install_deb
 
@@ -32,7 +46,7 @@
   become: true
   when:
     - ansible_os_family == 'Debian'
-    - not (wazuh_direct_download | default(false))
+    - (wazuh_package_install_mode | default('repository')) == 'repository'
   notify: restart wazuh-manager
   register: wazuh_manager_install_apt
 
@@ -40,22 +54,24 @@
   when:
     - ansible_os_family == 'RedHat'
     - wazuh_direct_download | default(false)
+    - (wazuh_package_install_mode | default('repository')) == 'repository'
   become: true
   block:
     - name: Create temp directory for packages
       ansible.builtin.file:
-        path: /tmp/wazuh-packages
+        path: "{{ wazuh_manager_package_download_path }}"
         state: directory
         mode: '0755'
 
     - name: Download Wazuh Manager .rpm package
       ansible.builtin.get_url:
-        url: "{{ wazuh_repo_url_yum }}wazuh-manager-{{ wazuh_version }}.x86_64.rpm"
-        dest: /tmp/wazuh-packages/wazuh-manager.rpm
+        url: "{{ wazuh_manager_x86_64_rpm }}"
+        dest: "{{ wazuh_manager_package_download_path }}/wazuh-manager.rpm"
+        checksum: "{{ wazuh_manager_x86_64_rpm_sha256 | default(omit) }}"
 
     - name: Install .rpm package
       ansible.builtin.dnf:
-        name: /tmp/wazuh-packages/wazuh-manager.rpm
+        name: "{{ wazuh_manager_package_download_path }}/wazuh-manager.rpm"
         state: present
         disable_gpg_check: true
       notify: restart wazuh-manager
@@ -68,7 +84,7 @@
   become: true
   when:
     - ansible_os_family == 'RedHat'
-    - not (wazuh_direct_download | default(false))
+    - (wazuh_package_install_mode | default('repository')) == 'repository'
   notify: restart wazuh-manager
   register: wazuh_manager_install_dnf
 

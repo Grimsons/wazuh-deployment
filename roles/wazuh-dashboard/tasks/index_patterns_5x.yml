@@ -1,0 +1,300 @@
+---
+# Wazuh Dashboard - Index Pattern Revalidation (Wazuh 5.x / OpenSearch Dashboards 3.x)
+#
+# This file creates nothing.
+#
+# Wazuh 5.0 provisions every default index pattern itself: a health-check
+# initialization task creates an `index-pattern` saved object whose id IS the
+# index name pattern (for example id "wazuh-events-v5*"), seeded from a bundled
+# known-fields JSON when no backing index exists yet. That happens on first
+# start, before any Ansible run, and the plugin owns those objects.
+#
+# So the only correct job for Ansible on 5.x is to prove the provisioned state
+# is what the dashboards will read:
+#   1. every expected pattern exists as a saved object
+#   2. its title matches its id (5.x makes them equal; a mismatch means the
+#      object was overwritten by a 4.x-era import)
+#   3. its time field matches, or is absent exactly where 5.x has no date field
+#   4. the indexer actually resolves a backing index or data stream
+#   5. defaultIndex points at a 5.x pattern, and is only set when unset
+#
+# Anything short of that is a failure, not a warning: a pattern that exists but
+# resolves to no data is exactly the "dashboards render nothing" failure this
+# phase exists to prevent. Every check below fails closed, and the failure
+# message names the offending pattern so the operator does not have to guess.
+
+- name: Read the index patterns the Wazuh 5.x plugin provisioned
+  ansible.builtin.uri:
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/api/saved_objects/_find?type=index-pattern&per_page=1000"
+    method: GET
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    headers:
+      osd-xsrf: "true"
+    status_code: [200]
+  register: dashboard_patterns_5x
+  no_log: true
+
+- name: Read back each expected 5.x index pattern
+  ansible.builtin.uri:
+    url: >-
+      https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/api/saved_objects/index-pattern/{{ item.id | urlencode }}
+    method: GET
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    headers:
+      osd-xsrf: "true"
+    status_code: [200, 404]
+  loop: "{{ wazuh_dashboard_5x_index_patterns }}"
+  loop_control:
+    label: "{{ item.id }}"
+  register: dashboard_pattern_reads_5x
+  no_log: true
+
+# A 4.x index pattern that survived the move is not harmless: saved objects
+# still point at it, and it makes the Wazuh index selector offer a data source
+# that will never be repopulated. Finding it here names the leftover instead of
+# leaving the operator to notice an empty entry in the dropdown.
+- name: List the 4.x index patterns still present on the 5.x dashboard
+  ansible.builtin.set_fact:
+    wazuh_dashboard_5x_leftover_4x_patterns: >-
+      {{ (dashboard_patterns_5x.json.saved_objects | default([]))
+         | map(attribute='id')
+         | intersect(wazuh_dashboard_4x_index_pattern_disposition | map(attribute='id') | list) }}
+
+- name: Refuse to revalidate against an indexer this role cannot address
+  ansible.builtin.fail:
+    msg: >-
+      wazuh_dashboard_5x_check_backing_index is enabled but wazuh_indexer_nodes
+      is not defined, so no pattern can be checked against real data. Define
+      wazuh_indexer_nodes, or set wazuh_dashboard_5x_check_backing_index=false
+      to accept the saved objects on trust.
+  when:
+    - wazuh_dashboard_5x_check_backing_index | default(true) | bool
+    - wazuh_indexer_nodes is not defined or wazuh_indexer_nodes | length == 0
+
+# Only patterns that exist are worth asking the indexer about; asking about a
+# missing pattern would report "no backing index" for something that is really
+# "no saved object", and the operator would be sent to the wrong system.
+- name: Ask the indexer which indices each provisioned 5.x pattern resolves to
+  ansible.builtin.uri:
+    url: >-
+      https://{{ wazuh_indexer_nodes[0].ip }}:{{ wazuh_indexer_http_port | default(9200) }}/_resolve/index/{{ item.item.id | urlencode }}
+    method: POST
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    body_format: json
+    body: {}
+    status_code: [200]
+  loop: "{{ dashboard_pattern_reads_5x.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.id }}"
+  when:
+    - item.status == 200
+    - wazuh_dashboard_5x_check_backing_index | default(true) | bool
+  register: dashboard_pattern_backing_5x
+  no_log: true
+
+- name: Record which 5.x patterns resolve to real data
+  ansible.builtin.set_fact:
+    wazuh_dashboard_5x_backed_ids: >-
+      {{ (wazuh_dashboard_5x_backed_ids | default([]))
+         + ([item.item.item.id]
+            if ((item.json.indices | default([]) | length) > 0
+                or (item.json.data_streams | default([]) | length) > 0)
+            else []) }}
+  loop: "{{ dashboard_pattern_backing_5x.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.item.id }}"
+
+# One record per expected pattern, so every failure below can name it. Built
+# with a loop rather than a set expression because the reader needs to be able
+# to follow which comparison produced which list.
+- name: Assess each 5.x index pattern against its expected state
+  ansible.builtin.set_fact:
+    wazuh_dashboard_5x_assessment: >-
+      {{ (wazuh_dashboard_5x_assessment | default([])) + [record] }}
+  vars:
+    record:
+      id: "{{ item.item.id }}"
+      found: "{{ item.status == 200 }}"
+      title: "{{ item.json.attributes.title | default('') }}"
+      title_ok: "{{ (item.json.attributes.title | default('')) == (item.item.id) }}"
+      time_field: "{{ item.json.attributes.timeFieldName | default('') }}"
+      expected_time_field: "{{ (item.item.time_field | default('')) or '' }}"
+      # A pattern with no expected time field must have none at all: leaving a
+      # 4.x `timestamp` on a state family is what breaks the Wazuh inventory
+      # panels, and "has some time field" is not a passing result.
+      time_field_ok: >-
+        {{ (item.json.attributes.timeFieldName | default(''))
+           == ((item.item.time_field | default('')) or '') }}
+      backed: "{{ item.item.id in (wazuh_dashboard_5x_backed_ids | default([])) }}"
+  loop: "{{ dashboard_pattern_reads_5x.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.id }}"
+
+- name: Split the assessment into the failure lists
+  ansible.builtin.set_fact:
+    wazuh_dashboard_5x_missing: >-
+      {{ wazuh_dashboard_5x_assessment | default([]) | selectattr('found', 'equalto', false) | map(attribute='id') | list }}
+    wazuh_dashboard_5x_title_mismatch: >-
+      {{ wazuh_dashboard_5x_assessment | default([])
+         | selectattr('found', 'equalto', true)
+         | rejectattr('title_ok', 'equalto', true)
+         | map(attribute='id') | list }}
+    wazuh_dashboard_5x_time_field_mismatch: >-
+      {{ wazuh_dashboard_5x_assessment | default([])
+         | selectattr('found', 'equalto', true)
+         | rejectattr('time_field_ok', 'equalto', true)
+         | map(attribute='id') | list }}
+    wazuh_dashboard_5x_unbacked: >-
+      {{ wazuh_dashboard_5x_assessment | default([])
+         | selectattr('found', 'equalto', true)
+         | selectattr('backed', 'equalto', false)
+         | map(attribute='id') | list }}
+    wazuh_dashboard_5x_correct: >-
+      {{ wazuh_dashboard_5x_assessment | default([])
+         | selectattr('found', 'equalto', true)
+         | selectattr('title_ok', 'equalto', true)
+         | selectattr('time_field_ok', 'equalto', true)
+         | selectattr('backed', 'equalto', true) | list }}
+
+- name: Report the 5.x index pattern revalidation result
+  ansible.builtin.debug:
+    msg: |
+      Wazuh 5.x index pattern revalidation ({{ wazuh_dashboard_5x_assessment | length }} patterns):
+        present and correct: {{ wazuh_dashboard_5x_correct | length }}
+        missing:             {{ wazuh_dashboard_5x_missing | length }}
+        title mismatch:      {{ wazuh_dashboard_5x_title_mismatch | length }}
+        time field mismatch: {{ wazuh_dashboard_5x_time_field_mismatch | length }}
+        no backing index:    {{ wazuh_dashboard_5x_unbacked | length }}
+        backing check:       {{ 'on' if (wazuh_dashboard_5x_check_backing_index | default(true) | bool) else 'off' }}
+        4.x patterns left:   {{ wazuh_dashboard_5x_leftover_4x_patterns | length }}
+
+- name: Fail when the 5.x plugin has not finished provisioning index patterns
+  ansible.builtin.fail:
+    msg: >-
+      {{ wazuh_dashboard_5x_missing | length }} of
+      {{ wazuh_dashboard_5x_assessment | length }} expected Wazuh 5.x index
+      patterns are missing: {{ wazuh_dashboard_5x_missing | join(', ') }}.
+      The 5.x Wazuh plugin creates these itself during its first-start health
+      check, in batches. Check /var/log/wazuh-dashboard/opensearch-dashboards.log
+      for "Some index patterns could not be initialized" and confirm the indexer
+      is reachable and serving before re-running. Ansible deliberately does not
+      create these on 5.x: overwriting plugin-owned index patterns breaks the
+      shipped dashboards.
+  when: wazuh_dashboard_5x_missing | length > 0
+
+- name: Fail when a 5.x index pattern title does not match its id
+  ansible.builtin.fail:
+    msg: >-
+      {{ wazuh_dashboard_5x_title_mismatch | length }} Wazuh 5.x index pattern(s)
+      have a title that does not match their saved object id:
+      {{ wazuh_dashboard_5x_title_mismatch | join(', ') }}.
+      In 5.x the plugin sets title = id = index name. A mismatch means a 4.x-era
+      index pattern was imported over a provisioned one. Delete the stale object
+      in Dashboard management > Saved objects and restart the dashboard so the
+      plugin re-provisions it.
+  when: wazuh_dashboard_5x_title_mismatch | length > 0
+
+- name: Fail when a 5.x index pattern lost its time field
+  ansible.builtin.fail:
+    msg: >-
+      {{ wazuh_dashboard_5x_time_field_mismatch | length }} Wazuh 5.x index
+      pattern(s) do not have the expected time field:
+      {{ wazuh_dashboard_5x_time_field_mismatch | join(', ') }}.
+      A pattern with no @timestamp time field cannot back a time-ranged panel,
+      and that is every default alerting dashboard. A 4.x import carries
+      `timestamp` as the time field and no @timestamp, so this is the expected
+      symptom of a cross-major import: re-point the object at the 5.x pattern
+      rather than editing its time field.
+  when: wazuh_dashboard_5x_time_field_mismatch | length > 0
+
+- name: Fail when a revalidated 5.x index pattern has no data behind it
+  ansible.builtin.fail:
+    msg: >-
+      {{ wazuh_dashboard_5x_unbacked | length }} revalidated Wazuh 5.x index
+      pattern(s) resolve to no index and no data stream:
+      {{ wazuh_dashboard_5x_unbacked | join(', ') }}.
+      The saved object exists but there is nothing to query, so every panel on it
+      renders empty. That is the indexer's contract, not the dashboard's: check
+      the ISM templates and bootstrap indices for the matching 5.x family before
+      re-running. Set wazuh_dashboard_5x_check_backing_index=false to downgrade
+      this to a warning while the indexer is still being provisioned.
+  when:
+    - wazuh_dashboard_5x_unbacked | length > 0
+    - wazuh_dashboard_5x_check_backing_index | default(true) | bool
+
+# Not a revalidation failure - the 5.x plugin provisioning everything correctly
+# is still a correct state - but it means the migration is half done, and it is
+# the one thing here that is cheap to notice now and expensive to diagnose from
+# an empty panel later.
+- name: Warn about 4.x index patterns left on the 5.x dashboard
+  ansible.builtin.debug:
+    msg: >-
+      {{ wazuh_dashboard_5x_leftover_4x_patterns | length }} 4.x index pattern(s)
+      are still saved on this dashboard:
+      {{ wazuh_dashboard_5x_leftover_4x_patterns | join(', ') }}.
+      Nothing writes to those indices on 5.x, so any saved object still pointing
+      at one renders empty. Delete them in Dashboard management > Saved objects
+      once `dashboard-saved-objects.sh resolve` has remapped every reference to
+      a 5.x pattern. See docs/operations/dashboard-migration-5.0.md.
+  when: wazuh_dashboard_5x_leftover_4x_patterns | length > 0
+
+- name: Read the current default index pattern
+  ansible.builtin.uri:
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/api/opensearch-dashboards/settings/defaultIndex"
+    method: GET
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    headers:
+      osd-xsrf: "true"
+    status_code: [200, 404]
+  register: dashboard_default_index_5x
+  no_log: true
+
+# The 5.x plugin only sets defaultIndex when it is still null, so a deliberate
+# operator choice survives restarts. Overwriting it on every Ansible run would
+# silently change a live dashboard's landing page. An unset value answers 200
+# with a null body here as well as 404, so both are "go ahead and set it".
+- name: Set the default index pattern only when the dashboard has none
+  ansible.builtin.uri:
+    url: "https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/api/opensearch-dashboards/settings/defaultIndex"
+    method: POST
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    headers:
+      osd-xsrf: "true"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      value: "{{ wazuh_dashboard_5x_default_index_pattern }}"
+    status_code: [200]
+  when:
+    - dashboard_default_index_5x.status == 404
+      or not (dashboard_default_index_5x.json.value | default('', true) | length > 0)
+  no_log: true
+
+- name: Warn when defaultIndex still points at a 4.x index pattern
+  ansible.builtin.debug:
+    msg: >-
+      Dashboard defaultIndex is "{{ dashboard_default_index_5x.json.value | default('') }}",
+      which is not {{ wazuh_dashboard_5x_default_index_pattern }}. Left alone
+      deliberately: the 5.x plugin only sets this when it is null, and an
+      operator who chose it should keep it. If it is stale from 4.x, clear it
+      once in Dashboard management > Advanced settings and the next dashboard
+      start will set {{ wazuh_dashboard_5x_default_index_pattern }}.
+  when:
+    - dashboard_default_index_5x.status == 200
+    - dashboard_default_index_5x.json.value | default('', true) | length > 0
+    - (dashboard_default_index_5x.json.value | default('')) != wazuh_dashboard_5x_default_index_pattern

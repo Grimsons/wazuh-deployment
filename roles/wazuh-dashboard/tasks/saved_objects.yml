@@ -1,0 +1,112 @@
+---
+# Wazuh Dashboard - Saved Object Reference Verification (Wazuh 5.x)
+#
+# Read-only. The 4.x -> 5.x saved object migration is manual by design (Wazuh
+# 5.0 "does not provide an automatic upgrade path from 4.x"), and it lives in
+# scripts/dashboard-saved-objects.sh. What is worth asserting on every run is
+# the state an incomplete migration leaves behind.
+#
+# An imported 4.x visualization keeps its literal reference to the 4.x index
+# pattern id. That pattern does not exist on a 5.x cluster, so the object is
+# still stored but every panel on it renders empty - and the saved object list
+# looks healthy, so nothing else catches it. This checks the references
+# themselves rather than the objects' existence.
+#
+# Wazuh-provided objects (description starts with "Provided by Wazuh") are
+# excluded: the 5.x plugin provisions them against 5.x patterns, and
+# re-importing them is what the Wazuh migration guide warns against.
+
+- name: List the 4.x index pattern ids that no longer exist on 5.x
+  ansible.builtin.set_fact:
+    wazuh_dashboard_4x_index_pattern_ids: >-
+      {{ wazuh_dashboard_4x_index_pattern_disposition | map(attribute='id') | list }}
+
+- name: Read every saved object on the 5.x dashboard
+  ansible.builtin.uri:
+    url: >-
+      https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/api/saved_objects/_find?type=dashboard,visualization,search&per_page=1000
+    method: GET
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_admin_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    headers:
+      osd-xsrf: "true"
+    status_code: [200]
+  register: dashboard_saved_objects_5x
+  no_log: true
+
+# _find returns attributes and references, so one call is enough. Index pattern
+# references are the only kind that can dangle across a major: dashboards point
+# at visualizations, and an unresolved visualization reference means the
+# dashboard was never stored at all.
+- name: Collect the index pattern references of every saved object
+  ansible.builtin.set_fact:
+    wazuh_dashboard_5x_saved_object_refs: >-
+      {{ (wazuh_dashboard_5x_saved_object_refs | default([])) + [ref] }}
+  vars:
+    ref:
+      type: "{{ item.type }}"
+      id: "{{ item.id }}"
+      title: "{{ item.attributes.title | default(item.id) }}"
+      wazuh_provided: >-
+        {{ wazuh_dashboard_wazuh_provided_description_prefix
+           in (item.attributes.description | default('')) }}
+      patterns: >-
+        {{ (item.references | default([]))
+           | selectattr('type', 'equalto', 'index-pattern')
+           | map(attribute='id') | list }}
+      dangling_4x: >-
+        {{ ((item.references | default([]))
+            | selectattr('type', 'equalto', 'index-pattern')
+            | map(attribute='id') | list)
+           | intersect(wazuh_dashboard_4x_index_pattern_ids) }}
+  loop: "{{ dashboard_saved_objects_5x.json.saved_objects | default([]) }}"
+  loop_control:
+    label: "{{ item.type }}/{{ item.id }}"
+
+- name: Split the collected references into the problem categories
+  ansible.builtin.set_fact:
+    wazuh_dashboard_5x_custom_objects: >-
+      {{ wazuh_dashboard_5x_saved_object_refs | default([])
+         | rejectattr('wazuh_provided', 'equalto', true) | list }}
+    wazuh_dashboard_5x_dangling_refs: >-
+      {{ wazuh_dashboard_5x_saved_object_refs | default([])
+         | rejectattr('wazuh_provided', 'equalto', true)
+         | rejectattr('dangling_4x', 'eq', []) | list }}
+    wazuh_dashboard_5x_patternless_objects: >-
+      {{ wazuh_dashboard_5x_saved_object_refs | default([])
+         | rejectattr('wazuh_provided', 'equalto', true)
+         | selectattr('patterns', 'eq', []) | list }}
+
+- name: Report the saved object reference state
+  ansible.builtin.debug:
+    msg: |
+      Wazuh 5.x saved objects ({{ wazuh_dashboard_5x_saved_object_refs | default([]) | length }} total):
+        custom:                        {{ wazuh_dashboard_5x_custom_objects | length }}
+        custom objects with a 4.x ref: {{ wazuh_dashboard_5x_dangling_refs | length }}
+        custom objects with no pattern: {{ wazuh_dashboard_5x_patternless_objects | length }}
+
+- name: Fail when a custom saved object still references a 4.x index pattern
+  ansible.builtin.fail:
+    msg: >-
+      {{ wazuh_dashboard_5x_dangling_refs | length }} custom saved object(s)
+      reference an index pattern that does not exist on a 5.x cluster:
+      {% for ref in wazuh_dashboard_5x_dangling_refs %}
+      {{ ref.type }}/{{ ref.id }} ("{{ ref.title }}") -> {{ ref.dangling_4x | join(', ') }}
+      {% endfor %}
+      4.x index names are not carried over: wazuh-alerts-* becomes
+      wazuh-findings-v5*, wazuh-monitoring-* becomes wazuh-metrics-agents*, and
+      wazuh-statistics-* becomes wazuh-agent-stats*. Re-run
+      `dashboard-saved-objects.sh resolve` against the 5.x dashboard to remap
+      them, then re-import the dashboards. Panels on these objects render empty
+      until that is done.
+  when: wazuh_dashboard_5x_dangling_refs | length > 0
+
+- name: Warn about custom saved objects that query no index pattern
+  ansible.builtin.debug:
+    msg: >-
+      {{ wazuh_dashboard_5x_patternless_objects | length }} custom saved object(s)
+      carry no index pattern reference at all:
+      {{ wazuh_dashboard_5x_patternless_objects | map(attribute='id') | join(', ') }}.
+      Expected only for saved searches that are not scoped to a data source.

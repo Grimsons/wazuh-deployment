@@ -12,7 +12,9 @@
 {% if item.config.syscheck.frequency is defined %}
     <frequency>{{ item.config.syscheck.frequency }}</frequency>
 {% endif %}
-{% if item.config.syscheck.scan_on_start is defined %}
+{% if item.config.syscheck.scan_on_start is defined and not wazuh_is_5x | default(false) | bool %}
+    <!-- Removed in 5.0: <syscheck><scan_on_start> is no longer a valid
+         element. FIM performs its first scan on <frequency>. -->
     <scan_on_start>{{ 'yes' if item.config.syscheck.scan_on_start else 'no' }}</scan_on_start>
 {% endif %}
 {% for dir in item.config.syscheck.directories | default([]) %}
@@ -89,7 +91,7 @@
     <hotfixes>{{ 'yes' if wodle.hotfixes else 'no' }}</hotfixes>
 {% endif %}
   </wodle>
-{% elif wodle.name == 'osquery' %}
+{% elif wodle.name == 'osquery' and not wazuh_is_5x | default(false) | bool %}
   <wodle name="osquery">
     <disabled>{{ 'no' if wodle.enabled | default(true) else 'yes' }}</disabled>
     <run_daemon>{{ 'yes' if wodle.run_daemon | default(true) else 'no' }}</run_daemon>
@@ -98,6 +100,11 @@
 {% endif %}
     <add_labels>{{ 'yes' if wodle.add_labels | default(true) else 'no' }}</add_labels>
   </wodle>
+{% elif wodle.name == 'osquery' and wazuh_is_5x | default(false) | bool %}
+  <!-- 5.0: the osquery wodle was removed. syscollector (IT Hygiene) above
+       covers the inventory categories; osquery SQL packs need a manual port to
+       <sca>, and dropping a pack on the floor would silently lose detections. -->
+  <!-- wazuh:OSQUERY_PACK_DROPPED {{ wodle.config_path | default('inline osquery config') }} -->
 {% elif wodle.name == 'docker-listener' %}
   <wodle name="docker-listener">
     <disabled>{{ 'no' if wodle.enabled | default(true) else 'yes' }}</disabled>
@@ -105,6 +112,18 @@
   </wodle>
 {% endif %}
 {% endfor %}
+{% endif %}
+
+{% if item.config.sca is defined and wazuh_is_5x | default(false) | bool %}
+  <!-- Software Composition Analysis (replaces cis-cat / open-scap) -->
+  <sca>
+    <disabled>{{ 'no' if item.config.sca.enabled | default(true) else 'yes' }}</disabled>
+    <interval>{{ item.config.sca.interval | default('12h') }}</interval>
+    <scan_on_start>{{ 'yes' if item.config.sca.scan_on_start | default(true) else 'no' }}</scan_on_start>
+{% for policy in item.config.sca.policies | default([]) %}
+    <policy>{{ policy }}</policy>
+{% endfor %}
+  </sca>
 {% endif %}
 
 {% if item.config.active_response is defined %}

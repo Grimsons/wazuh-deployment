@@ -6,6 +6,11 @@ wazuh_manager_package_name: "wazuh-manager"
 wazuh_manager_service_name: "wazuh-manager"
 wazuh_filebeat_service_name: "filebeat"
 
+# 5.x packages are resolved from the downloaded artifact manifest.  Keep the
+# legacy repository path for 4.x deployments.
+wazuh_direct_download: "{{ wazuh_is_prerelease | default(false) | bool }}"
+wazuh_manager_package_download_path: "/tmp/wazuh-manager"
+
 # Binary prefix for Wazuh binaries (e.g. "wazuh-"). All Wazuh 4.x and 5.x
 # manager binaries use this prefix (wazuh-analysisd, wazuh-keystore, etc.)
 wazuh_manager_binary_prefix: "wazuh-"
@@ -15,16 +20,16 @@ wazuh_manager_binary_prefix: "wazuh-"
 # Pre-release versions (e.g. 5.0.0-beta2) use packages-staging.xdrsiem.wazuh.info
 wazuh_repo_gpg_key: >-
   {{ 'https://packages-staging.xdrsiem.wazuh.info/key/GPG-KEY-WAZUH'
-     if (wazuh_version is search('-'))
+     if (wazuh_effective_version is search('-'))
      else 'https://packages.wazuh.com/key/GPG-KEY-WAZUH' }}
 wazuh_repo_url_apt: >-
-  {{ 'https://packages-staging.xdrsiem.wazuh.info/pre-release/' + (wazuh_version.split('.')[0] + '.x') + '/apt/'
-     if (wazuh_version is search('-'))
-     else 'https://packages.wazuh.com/' + (wazuh_version.split('.')[0] + '.x') + '/apt/' }}
+  {{ 'https://packages-staging.xdrsiem.wazuh.info/pre-release/' + (wazuh_effective_version.split('.')[0] + '.x') + '/apt/'
+     if (wazuh_effective_version is search('-'))
+     else 'https://packages.wazuh.com/' + (wazuh_effective_version.split('.')[0] + '.x') + '/apt/' }}
 wazuh_repo_url_yum: >-
-  {{ 'https://packages-staging.xdrsiem.wazuh.info/pre-release/' + (wazuh_version.split('.')[0] + '.x') + '/yum/'
-     if (wazuh_version is search('-'))
-     else 'https://packages.wazuh.com/' + (wazuh_version.split('.')[0] + '.x') + '/yum/' }}
+  {{ 'https://packages-staging.xdrsiem.wazuh.info/pre-release/' + (wazuh_effective_version.split('.')[0] + '.x') + '/yum/'
+     if (wazuh_effective_version is search('-'))
+     else 'https://packages.wazuh.com/' + (wazuh_effective_version.split('.')[0] + '.x') + '/yum/' }}
 
 # Manager configuration
 wazuh_manager_install_path: "{{ '/var/wazuh-manager' if (wazuh_is_5x | default(false) | bool) else '/var/ossec' }}"

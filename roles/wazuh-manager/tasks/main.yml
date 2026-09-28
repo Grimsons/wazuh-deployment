@@ -15,7 +15,17 @@
 
 - name: Configure Wazuh repository
   ansible.builtin.include_tasks: repository.yml
-  when: not wazuh_direct_download | default(false)
+  when: (wazuh_package_install_mode | default('repository')) == 'repository'
+
+- name: Fail closed when Wazuh 5.x lacks direct-download mode
+  ansible.builtin.fail:
+    msg: >-
+      Wazuh 5.x requires wazuh_package_install_mode=direct-download. Refusing
+      to configure an apt/yum repository or install from the wrong major.
+      Integrate the shared contract in roles/vars/main.yml.
+  when:
+    - wazuh_is_5x | default(false) | bool
+    - (wazuh_package_install_mode | default('repository')) != 'direct-download'
 
 - name: Install Wazuh Manager
   ansible.builtin.include_tasks: install.yml
@@ -28,7 +38,10 @@
 
 - name: Configure agent enrollment password
   ansible.builtin.include_tasks: agent_enrollment.yml
-  when: wazuh_authd_use_password | default(true)
+  # ossec-authd/authd.pass was removed in Wazuh 5.x; enrollment is token-based.
+  when:
+    - not (wazuh_is_5x | default(false) | bool)
+    - wazuh_authd_use_password | default(true)
 
 - name: Deploy custom rules and decoders
   ansible.builtin.include_tasks: custom_rules.yml
@@ -43,7 +56,11 @@
 
 - name: Configure cluster
   ansible.builtin.include_tasks: cluster.yml
-  when: wazuh_manager_cluster_enabled | default(false)
+  # Wazuh 5.x always runs as a cluster node. Its package owns the shipped
+  # cluster configuration; the legacy task remains opt-in for 4.x.
+  when:
+    - not (wazuh_is_5x | default(false) | bool)
+    - wazuh_manager_cluster_enabled | default(false)
 
 - name: Configure firewall
   ansible.builtin.include_tasks: firewall.yml

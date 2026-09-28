@@ -1,6 +1,6 @@
 ---
 # Wazuh Upgrade Playbook
-# Performs rolling upgrades of Wazuh components using standard package manager updates
+# Performs in-place upgrades of Wazuh components using standard package manager updates
 #
 # Supported distributions:
 #   - Debian/Ubuntu (apt)
@@ -12,6 +12,12 @@
 #   - Compares installed version against wazuh_version in group_vars/all/main.yml
 #   - Only stops/starts services if an upgrade is actually needed
 #   - Creates automatic backup before any changes
+#
+# NOT SUPPORTED: crossing a major version. A Wazuh indexer cannot be upgraded
+# from 4.x to 5.x in place, and its data cannot be migrated across that
+# boundary. This playbook refuses the combination; the indexer play below
+# explains why and points at the cutover procedure. Upgrade components within
+# a major here, and move majors with docs/operations/indexer-cutover-5x.md.
 #
 # Usage:
 #   # Check current versions only (no changes)
@@ -37,11 +43,13 @@
 # IMPORTANT:
 #   - Backup is created automatically before any upgrade
 #   - Upgrade order: Indexer → Manager → Dashboard → Agents
-#   - For clusters: Rolling upgrade one node at a time
+#   - For clusters: one node at a time, within the same major
 #   - Update wazuh_version in group_vars/all/main.yml to match target version
 #
 # Rollback:
 #   ansible-playbook playbooks/restore.yml -e "restore_from=pre-upgrade-TIMESTAMP"
+#   Rollback is same-major only; playbooks/restore.yml refuses a cross-major
+#   indexer restore.
 
 - name: Upgrade - Pre-flight Validation
   hosts: localhost
@@ -317,19 +325,51 @@
             mode: '0644'
 
 #
-# PHASE 1: UPGRADE WAZUH INDEXER (Rolling)
+# PHASE 1: UPGRADE WAZUH INDEXER (in-place, same major only)
 #
-- name: Upgrade - Wazuh Indexer (Rolling Update)
+# A rolling in-place upgrade is only possible within one major. A 4.x indexer
+# is OpenSearch 2.x and 5.x is OpenSearch 3.x: the engine reads Lucene segments
+# from its own and the immediately preceding major only, the cluster bootstrap
+# key was renamed, compatibility.override_main_response_version was removed, and
+# the 5.x index schemas have no 4.x counterpart. There is no in-place path
+# across that boundary and no way to migrate the data, so this play refuses the
+# combination instead of half-applying it node by node and leaving a cluster
+# with shards on two incompatible engines.
+#
+# Crossing majors is a blue/green replacement: build a new 5.x cluster, point
+# ingest at it, and keep the 4.x cluster read-only for historical queries. See
+# docs/operations/indexer-cutover-5x.md.
+- name: Upgrade - Wazuh Indexer (in-place, same major)
   hosts: wazuh_indexers
   become: true
   gather_facts: true
-  serial: 1  # One node at a time for rolling update
+  serial: 1  # One node at a time, so a bad package is caught before the rest
   tags: [indexer, upgrade]
   vars:
     target_version: "{{ hostvars['localhost']['upgrade_target_version'] }}"
     validate_after_upgrade: true
 
   tasks:
+    - name: Refuse a cross-major indexer upgrade
+      ansible.builtin.fail:
+        msg: >-
+          Refusing to upgrade the indexer from {{ current_indexer_version.stdout }}
+          to {{ target_version }} in place. A Wazuh indexer cannot be upgraded
+          across a major version: there is no in-place upgrade, no snapshot
+          restore and no _reindex, and the two majors run different OpenSearch
+          engines. Rolling this out node by node would leave the cluster with
+          shards it cannot reconcile.
+          Crossing from {{ current_indexer_version.stdout.split('.')[0] }}.x to
+          {{ target_version.split('.')[0] }}.x is a blue/green replacement, not
+          an upgrade: stand up a new {{ target_version.split('.')[0] }}.x
+          cluster and follow docs/operations/indexer-cutover-5x.md. Keep the old
+          cluster read-only if you still need historical data.
+      when:
+        - current_indexer_version.stdout is defined
+        - current_indexer_version.stdout is regex('^[0-9]+\.[0-9]+')
+        - current_indexer_version.stdout.split('.')[0] | int
+          != target_version.split('.')[0] | int
+
     - name: Check if upgrade needed
       ansible.builtin.set_fact:
         indexer_needs_upgrade: "{{ current_indexer_version.stdout | default('unknown') != target_version }}"

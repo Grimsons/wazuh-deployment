@@ -9,6 +9,8 @@
 #   -e "backup_indexer=false"          - Skip indexer backup
 #   -e "backup_manager=false"          - Skip manager backup
 #   -e "backup_dashboard=false"        - Skip dashboard backup
+#   -e "backup_legacy_4x=true"         - Write a compatibility archive below
+#                                        backup_dest/legacy-4x (4.x only)
 
 - name: Preflight — warn if snapshot destination may be unencrypted
   hosts: localhost
@@ -36,6 +38,22 @@
     - name: Set backup destination
       ansible.builtin.set_fact:
         backup_base_path: "{{ backup_dest | default(playbook_dir + '/../backups') }}"
+      run_once: true
+
+    - name: Require an explicit 4.x target for the legacy archive path
+      ansible.builtin.assert:
+        that:
+          - wazuh_version | default('') is match('^4\\.')
+        fail_msg: >-
+          backup_legacy_4x=true is only valid for Wazuh 4.x. A 4.x archive is
+          never a migration path into Wazuh 5.x; use a 5.x backup or the
+          documented indexer cutover procedure.
+      when: backup_legacy_4x | default(false) | bool
+
+    - name: Select the isolated legacy 4.x archive destination
+      ansible.builtin.set_fact:
+        backup_base_path: "{{ legacy_4x_backup_dest | default((backup_dest | default(playbook_dir + '/../backups')) + '/legacy-4x') }}"
+      when: backup_legacy_4x | default(false) | bool
       run_once: true
 
     - name: Create backup directory on controller
@@ -89,6 +107,23 @@
             dest: /tmp/wazuh-backup-{{ backup_timestamp }}/indexer-config.tar.gz
             format: gz
             mode: '0600'
+
+        # Records which major produced this archive. A 4.x opensearch.yml
+        # restored onto a 5.x node does not fail cleanly: it carries settings
+        # that OpenSearch 3.x removed, and the node refuses to start with an
+        # error that does not mention the restore. The marker lets restore.yml
+        # stop that before anything is overwritten.
+        - name: Record the indexer major that produced this backup
+          ansible.builtin.copy:
+            dest: >-
+              {{ backup_base_path }}/{{ backup_timestamp }}/indexer/{{ inventory_hostname
+              }}/indexer-major
+            content: |
+              major={{ wazuh_version | default('') | regex_replace('\\..*$', '') }}
+              version={{ wazuh_version | default('unknown') }}
+            mode: '0600'
+          delegate_to: localhost
+          become: false
 
         - name: Backup indexer certificates
           community.general.archive:

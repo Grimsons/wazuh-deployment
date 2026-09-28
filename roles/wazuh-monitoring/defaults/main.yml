@@ -11,8 +11,13 @@ wazuh_manager_exporter_enabled: true
 # OpenSearch/Indexer Prometheus Exporter
 # ─────────────────────────────────────────────────────────────────
 # The OpenSearch Prometheus exporter plugin version
-# Should match your OpenSearch version (Wazuh 4.x uses OpenSearch 2.x)
-wazuh_opensearch_prometheus_plugin_version: "2.11.1.0"
+# Wazuh 5.0.0-beta5 ships OpenSearch 3.x. Keep the 4.x value available only
+# for the compatibility path; never install a 2.x plugin on a 5.x indexer.
+wazuh_opensearch_prometheus_plugin_version: >-
+  {{ '3.0.0.0' if (wazuh_is_5x | default(false) | bool) else '2.11.1.0' }}
+
+# The custom exporters run in an isolated Python 3.12 virtualenv on 5.x.
+wazuh_monitoring_python_min_version: "3.12"
 
 # Port for the indexer metrics endpoint
 wazuh_indexer_metrics_port: 9114

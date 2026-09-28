@@ -1,0 +1,132 @@
+---
+# Wazuh Agent - 5.0 upgrade-path enforcement
+#
+# Wazuh 5.0.0 refuses to install over an agent older than 4.14.0. On Linux the
+# package pre-install validation prints "UPGRADE BLOCKED: Incompatible version
+# detected" and aborts; on macOS the PKG installer only reports a generic
+# "the upgrade failed" with no version in it. Either way the failure lands after
+# the package download and gives an operator nothing to act on.
+#
+# This runs before any package task so the failure names the actual installed
+# version and the required path.
+#
+# The version can be supplied instead of probed: set
+# wazuh_agent_installed_version_override to skip detection entirely, e.g. for an
+# agent installed by hand or from a source this role does not manage. (The
+# override has a different name from the probe's register var on purpose: a
+# skipped task still writes its register var, which would clobber the override.)
+
+- name: Read the installed Wazuh agent version (Linux)
+  ansible.builtin.shell: |
+    set -o pipefail
+    if command -v dpkg-query >/dev/null 2>&1; then
+      dpkg-query -W -f='${Version}' wazuh-agent 2>/dev/null || true
+    elif command -v rpm >/dev/null 2>&1; then
+      rpm -q --qf '%{VERSION}-%{RELEASE}' wazuh-agent 2>/dev/null || true
+    fi
+  args:
+    executable: /bin/bash
+  become: true
+  changed_when: false
+  failed_when: false
+  register: wazuh_agent_installed_pkg_version
+  when:
+    - ansible_system == 'Linux'
+    - wazuh_agent_installed_version_override is not defined
+
+- name: Read the installed Wazuh agent version (macOS)
+  ansible.builtin.command:
+    cmd: pkgutil --pkg-info com.wazuh.agent
+    strip_empty_ends: true
+  become: true
+  changed_when: false
+  failed_when: false
+  register: wazuh_agent_installed_pkg_version
+  when:
+    - ansible_system == 'Darwin'
+    - wazuh_agent_installed_version_override is not defined
+
+- name: Read the installed Wazuh agent version (Windows)
+  ansible.builtin.win_shell:
+    command: >-
+      (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Wazuh'
+       -ErrorAction SilentlyContinue).DisplayVersion
+    executable: powershell.exe
+  changed_when: false
+  failed_when: false
+  register: wazuh_agent_installed_pkg_version
+  when:
+    - ansible_os_family == 'Windows'
+    - wazuh_agent_installed_version_override is not defined
+
+# Package versions carry a distro revision suffix: "4.13.1-1", "4.14.5-1",
+# "5.0.0-beta5-1". Reduce to the leading dotted triple before comparing, and
+# treat anything unparseable as "unknown" rather than guessing.
+#
+# A single capture group on purpose: regex_search with a \1-style replacement
+# makes the filter expand the backreference and it raises on any string without
+# a match, so an uninstalled host would blow up here instead of being treated as
+# a fresh install.
+- name: Resolve the installed version and the target version
+  ansible.builtin.set_fact:
+    wazuh_agent_installed_version: >-
+      {{ (wazuh_agent_installed_version_override
+          | default(wazuh_agent_installed_pkg_version.stdout | default(''), true)) | trim
+         | regex_search('\d+\.\d+\.\d+') | default('', true) }}
+    wazuh_agent_target_version: >-
+      {{ (wazuh_effective_version | default(wazuh_version | default(''))) | trim
+         | regex_search('\d+\.\d+\.\d+') | default('', true) }}
+
+# Compare as integer lists so 4.14.0 sorts above 4.9.0 and 4.13.1 sorts below
+# 4.14.0. A string compare would get the 4.9/4.14 ordering wrong.
+- name: Fail when the installed agent cannot reach 5.0 directly
+  ansible.builtin.fail:
+    msg: |
+      ══════════════════════════════════════════════════════════════════════
+      UPGRADE BLOCKED: the Wazuh 5.0 agent cannot be installed over
+      {{ wazuh_agent_installed_version }}.
+      ══════════════════════════════════════════════════════════════════════
+
+      Installed agent: {{ wazuh_agent_installed_version }}
+      Target agent:    {{ wazuh_agent_target_version }}
+      Required floor:  {{ wazuh_agent_min_upgrade_source_version }}
+
+      Wazuh 5.0.0 requires the path  4.X  ->  4.14.X  ->  5.0.0.  The package
+      pre-install validation blocks a direct upgrade, and on macOS the PKG
+      installer reports only a generic failure with no version in it.
+
+      Do this instead, in two runs:
+
+        # 1. Move to the latest 4.14.x and confirm the agent starts cleanly
+        ansible-playbook site.yml -e wazuh_version=4.14.5
+        ! grep -E 'Invalid element|no longer supported' /var/ossec/logs/ossec.log
+
+        # 2. Then move to 5.0
+        ansible-playbook site.yml
+
+      To bypass this check: -e wazuh_agent_upgrade_path_enforced=false
+      ══════════════════════════════════════════════════════════════════════
+  when:
+    - wazuh_agent_installed_version | length > 0
+    - wazuh_agent_installed_version.split('.') | map('int') | list
+      < (wazuh_agent_min_upgrade_source_version.split('.') | map('int') | list)
+
+- name: Warn when the installed version could not be determined
+  ansible.builtin.debug:
+    msg: |
+      Could not determine the installed Wazuh agent version
+      (raw: {{ (wazuh_agent_installed_version_override
+                | default(wazuh_agent_installed_pkg_version.stdout | default(''), true))
+          | trim | default('not found', true) }}).
+      Treating this host as a fresh install of
+      {{ wazuh_agent_target_version }}; the {{ wazuh_agent_min_upgrade_source_version }}
+      upgrade-path floor could not be checked.
+  when: wazuh_agent_installed_version | length == 0
+
+- name: Record the resolved upgrade shape
+  ansible.builtin.set_fact:
+    wazuh_agent_is_upgrade: >-
+      {{ wazuh_agent_installed_version | length > 0
+         and wazuh_agent_installed_version != wazuh_agent_target_version }}
+    wazuh_agent_upgrade_from_version: "{{ wazuh_agent_installed_version | default('') }}"
+  tags: always

@@ -1,0 +1,45 @@
+---
+# Shared 5.x artifact installation. The manifest is authoritative: no apt/yum
+# repository is configured and an entry without a published checksum is fatal.
+
+- name: Resolve {{ wazuh_package_component }} artifact from the downloaded manifest
+  ansible.builtin.set_fact:
+    wazuh_resolved_package: >-
+      {{ (lookup('file', playbook_dir + '/roles/vars/' + urls_file) | from_yaml)
+         | wazuh_resolve_package(wazuh_package_component,
+             'deb' if ansible_os_family == 'Debian' else 'rpm',
+             'amd64' if ansible_os_family == 'Debian' else 'x86_64') }}
+  when: ansible_system == 'Linux'
+
+- name: Create temporary Wazuh package directory
+  ansible.builtin.file:
+    path: /tmp/wazuh-packages
+    state: directory
+    mode: '0755'
+  become: true
+  when: ansible_system == 'Linux'
+
+- name: Download checksummed {{ wazuh_package_component }} artifact
+  ansible.builtin.get_url:
+    url: "{{ wazuh_resolved_package.url }}"
+    dest: "/tmp/wazuh-packages/{{ wazuh_package_component }}.{{ 'deb' if ansible_os_family == 'Debian' else 'rpm' }}"
+    checksum: "{{ wazuh_resolved_package.checksum }}"
+    mode: '0644'
+  become: true
+  when: ansible_system == 'Linux'
+
+- name: Install checksummed {{ wazuh_package_component }} Debian artifact
+  ansible.builtin.apt:
+    deb: "/tmp/wazuh-packages/{{ wazuh_package_component }}.deb"
+  become: true
+  when: ansible_os_family == 'Debian'
+  notify: "{{ wazuh_package_notify_handler }}"
+
+- name: Install checksummed {{ wazuh_package_component }} RPM artifact
+  ansible.builtin.dnf:
+    name: "/tmp/wazuh-packages/{{ wazuh_package_component }}.rpm"
+    state: present
+    disable_gpg_check: true
+  become: true
+  when: ansible_os_family == 'RedHat'
+  notify: "{{ wazuh_package_notify_handler }}"

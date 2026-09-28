@@ -1,5 +1,17 @@
 ---
+
+- name: Load the artifact manifest for Wazuh 5.x
+  ansible.builtin.include_vars:
+    file: "../../vars/{{ urls_file }}"
+  when: wazuh_is_5x | default(false) | bool
 # Wazuh Agent - Linux Tasks
+
+- name: Install Wazuh Agent from the 5.x artifact manifest
+  ansible.builtin.include_tasks: ../../package-urls/tasks/direct-install.yml
+  vars:
+    wazuh_package_component: wazuh-agent
+    wazuh_package_notify_handler: restart wazuh-agent
+  when: (wazuh_package_install_mode | default('repository')) == 'direct-download'
 
 - name: Update apt cache
   ansible.builtin.apt:
@@ -8,7 +20,7 @@
   become: true
   when:
     - ansible_os_family == 'Debian'
-    - not (wazuh_direct_download | default(false))
+    - (wazuh_package_install_mode | default('repository')) == 'repository'
 
 - name: Ensure keyrings directory exists (Debian/Ubuntu)
   ansible.builtin.file:
@@ -18,7 +30,7 @@
   become: true
   when:
     - ansible_os_family == 'Debian'
-    - not (wazuh_direct_download | default(false))
+    - (wazuh_package_install_mode | default('repository')) == 'repository'
 
 - name: Download Wazuh GPG key (Debian/Ubuntu)
   ansible.builtin.get_url:
@@ -28,7 +40,7 @@
   become: true
   when:
     - ansible_os_family == 'Debian'
-    - not (wazuh_direct_download | default(false))
+    - (wazuh_package_install_mode | default('repository')) == 'repository'
 
 - name: Dearmor Wazuh GPG key if needed (Debian/Ubuntu)
   ansible.builtin.shell: |
@@ -46,7 +58,7 @@
   changed_when: "'dearmored' in dearmor_result.stdout"
   when:
     - ansible_os_family == 'Debian'
-    - not (wazuh_direct_download | default(false))
+    - (wazuh_package_install_mode | default('repository')) == 'repository'
 
 - name: Remove legacy apt-key entry if present (Debian/Ubuntu)
   ansible.builtin.apt_key:
@@ -55,7 +67,7 @@
   become: true
   when:
     - ansible_os_family == 'Debian'
-    - not (wazuh_direct_download | default(false))
+    - (wazuh_package_install_mode | default('repository')) == 'repository'
   ignore_errors: true
 
 - name: Add Wazuh repository with signed-by (Debian/Ubuntu)
@@ -67,7 +79,7 @@
   become: true
   when:
     - ansible_os_family == 'Debian'
-    - not (wazuh_direct_download | default(false))
+    - (wazuh_package_install_mode | default('repository')) == 'repository'
 
 - name: Import Wazuh GPG key (RHEL/CentOS)
   ansible.builtin.rpm_key:
@@ -95,6 +107,7 @@
   when:
     - ansible_os_family == 'Debian'
     - wazuh_direct_download | default(false)
+    - (wazuh_package_install_mode | default('repository')) == 'repository'
   become: true
   block:
     - name: Create temp directory for packages
@@ -105,12 +118,13 @@
 
     - name: Download Wazuh Agent .deb package
       ansible.builtin.get_url:
-        url: "{{ wazuh_repo_url_apt }}pool/main/w/wazuh-agent/wazuh-agent_{{ wazuh_version }}_amd64.deb"
-        dest: /tmp/wazuh-packages/wazuh-agent.deb
+        url: "{{ wazuh_agent_amd64_deb }}"
+        dest: "{{ wazuh_agent_package_download_path }}/wazuh-agent.deb"
+        checksum: "{{ wazuh_agent_amd64_deb_sha256 | default(omit) }}"
 
     - name: Install .deb package
       ansible.builtin.apt:
-        deb: /tmp/wazuh-packages/wazuh-agent.deb
+        deb: "{{ wazuh_agent_package_download_path }}/wazuh-agent.deb"
       environment:
         WAZUH_MANAGER: "{{ wazuh_manager_address }}"
       notify: restart wazuh-agent
@@ -126,13 +140,14 @@
     WAZUH_MANAGER: "{{ wazuh_manager_address }}"
   when:
     - ansible_os_family == 'Debian'
-    - not (wazuh_direct_download | default(false))
+    - (wazuh_package_install_mode | default('repository')) == 'repository'
   notify: restart wazuh-agent
 
 - name: Download and install Wazuh Agent via .rpm (pre-release)
   when:
     - ansible_os_family == 'RedHat'
     - wazuh_direct_download | default(false)
+    - (wazuh_package_install_mode | default('repository')) == 'repository'
   become: true
   block:
     - name: Create temp directory for packages
@@ -143,12 +158,13 @@
 
     - name: Download Wazuh Agent .rpm package
       ansible.builtin.get_url:
-        url: "{{ wazuh_repo_url_yum }}wazuh-agent-{{ wazuh_version }}.x86_64.rpm"
-        dest: /tmp/wazuh-packages/wazuh-agent.rpm
+        url: "{{ wazuh_agent_x86_64_rpm }}"
+        dest: "{{ wazuh_agent_package_download_path }}/wazuh-agent.rpm"
+        checksum: "{{ wazuh_agent_x86_64_rpm_sha256 | default(omit) }}"
 
     - name: Install .rpm package
       ansible.builtin.dnf:
-        name: /tmp/wazuh-packages/wazuh-agent.rpm
+        name: "{{ wazuh_agent_package_download_path }}/wazuh-agent.rpm"
         state: present
         disable_gpg_check: true
       environment:
@@ -164,7 +180,7 @@
     WAZUH_MANAGER: "{{ wazuh_manager_address }}"
   when:
     - ansible_os_family == 'RedHat'
-    - not (wazuh_direct_download | default(false))
+    - (wazuh_package_install_mode | default('repository')) == 'repository'
   notify: restart wazuh-agent
 
 # ─────────────────────────────────────────────────────────────
@@ -246,7 +262,10 @@
 - name: Deploy enrollment password file to agent
   ansible.builtin.copy:
     content: "{{ wazuh_agent_enrollment_password }}"
-    dest: /var/ossec/etc/authd.pass
+    # 5.0 deletes the compiled default authd.pass on package upgrade, so a
+    # 4.x-era file there is gone by the time the 5.0 agent starts. A path
+    # configured explicitly is operator-owned and survives the upgrade.
+    dest: "{{ wazuh_agent_authorization_pass_path if (wazuh_agent_is_5x | bool) else '/var/ossec/etc/authd.pass' }}"
     owner: root
     group: wazuh
     mode: '0640'
@@ -256,6 +275,19 @@
     - wazuh_authd_use_password | default(true)
     - wazuh_agent_enrollment_password is defined
     - wazuh_agent_enrollment_password | length > 0
+
+- name: Deploy the 5.0 enrollment token
+  ansible.builtin.copy:
+    content: "{{ wazuh_agent_enrollment_token }}"
+    dest: "{{ wazuh_agent_enrollment_token_path }}"
+    owner: root
+    group: wazuh
+    mode: '0600'
+  become: true
+  no_log: true
+  when:
+    - wazuh_agent_is_5x | bool
+    - wazuh_agent_enrollment_token | default('') | length > 0
 
 - name: Enable Wazuh Agent service
   ansible.builtin.systemd:

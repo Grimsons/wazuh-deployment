@@ -1,0 +1,85 @@
+---
+# Wazuh Indexer - 5.x ISM policy bodies
+#
+# Builds wazuh_5x_ism_bodies, one entry per family, and nothing else: no HTTP,
+# no cluster state. index_management_5x.yml applies them. Split so the policy
+# shape can be asserted without a live indexer
+# (see tests/lib/test_indexer_5x.bats).
+
+- name: Determine the cold state actions
+  ansible.builtin.set_fact:
+    # read_only and index_priority are separate ISM actions, so this is a list
+    # of single-key action dicts. It must be assembled by concatenation, not by
+    # Jinja's ~ operator, which stringifies dicts instead of merging them.
+    wazuh_cold_actions: >-
+      {{ [{'read_only': {}},
+          {'index_priority': {'priority': 0}}]
+         + ([{'close': {}}] if wazuh_close_cold_indices | default(true) else []) }}
+
+# The cold state is only reachable when retention outlasts it. A 7-day family
+# transitioned to cold at 30 days would sit in a state it can never reach, so
+# the state is dropped rather than left as dead configuration.
+- name: Build the 5.x ISM policy body for each family
+  vars:
+    family_key: "{{ family_item.key }}"
+    family_spec: "{{ family_item.value }}"
+    family_retention: "{{ family_spec.retention_days | int }}"
+    family_cold_after: "{{ wazuh_retention_cold_after_days | default(30) | int }}"
+    family_reaches_cold: "{{ family_retention | int > family_cold_after | int }}"
+    family_warm: >-
+      {{ {'name': 'warm',
+          'actions': [{'replica_count': {'number_of_replicas': 0}},
+                      {'force_merge': {'max_num_segments':
+                         wazuh_warm_force_merge_segments | default(1) | int}},
+                      {'index_priority': {'priority': 50}}],
+          'transitions': [
+            {'state_name': 'cold' if family_reaches_cold | bool else 'delete',
+             'conditions': {'min_rollover_age':
+               (family_cold_after if family_reaches_cold | bool
+                else family_retention) ~ 'd'}}]} }}
+  ansible.builtin.set_fact:
+    wazuh_5x_ism_bodies: >-
+      {{ (wazuh_5x_ism_bodies | default([])) + [{
+           'family': family_key,
+           'policy_id': 'wazuh-' ~ family_key ~ '-policy',
+           'index_patterns': [family_spec.pattern],
+           'alias': family_spec.alias,
+           'retention_days': family_retention | int,
+           'reaches_cold': family_reaches_cold | bool,
+           'body': {
+             'policy': {
+               'description': 'Wazuh ' ~ family_key ~
+                              ' index lifecycle with automatic rollover',
+               'default_state': 'hot',
+               'states': (
+                 [{'name': 'hot',
+                   'actions': [{'rollover': {
+                      'min_size': wazuh_rollover_max_size | default('30gb'),
+                      'min_index_age': wazuh_rollover_max_age | default('1d'),
+                      'min_doc_count':
+                        wazuh_rollover_max_docs | default(50000000) | int}}],
+                   'transitions': [{'state_name': 'warm',
+                                    'conditions': {'min_rollover_age':
+                                      (wazuh_retention_warm_after_days
+                                       | default(7) | int) ~ 'd'}}]}]
+                 + [family_warm]
+                 + ([{'name': 'cold',
+                      'actions': wazuh_cold_actions,
+                      'transitions': [{'state_name': 'delete',
+                                       'conditions': {'min_rollover_age':
+                                         family_retention ~ 'd'}}]}]
+                    if family_reaches_cold | bool else [])
+                 + [{'name': 'delete',
+                     'actions': [{'delete': {}}],
+                     'transitions': []}]
+               ),
+               'ism_template': [{'index_patterns': [family_spec.pattern],
+                                 'priority': 100}]
+             }
+           }
+         }] }}
+  loop: "{{ wazuh_indexer_5x_families | dict2items }}"
+  loop_control:
+    loop_var: family_item
+    label: "{{ family_item.key }}"
+  when: wazuh_retention_enabled | default(true)

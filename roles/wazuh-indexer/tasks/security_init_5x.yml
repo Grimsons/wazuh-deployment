@@ -1,0 +1,124 @@
+---
+# Wazuh Indexer - 5.x security initialization
+#
+# 5.x applies its security configuration with the script the package ships,
+# indexer-security-init.sh. The 4.x fallback that shells out to securityadmin.sh
+# with a hand-built -cd path is deliberately absent: 5.x moved the security
+# configuration tree and renamed whitelist.yml to allowlist.yml, so a 4.x
+# invocation points at a layout that no longer exists and, when it appears to
+# succeed, reports a security configuration that was never applied.
+#
+# Completion is verified against the cluster rather than against a flag file: a
+# touched marker survives a rebuilt security index, at which point the marker
+# says "done" and the cluster has no security configuration at all.
+
+- name: Wait for Indexer to be fully started
+  ansible.builtin.wait_for:
+    port: "{{ wazuh_indexer_http_port }}"
+    delay: 10
+    timeout: 120
+  become: true
+
+- name: Check if admin certificates exist
+  ansible.builtin.stat:
+    path: "{{ wazuh_indexer_cert_paths.http_cert | default(wazuh_indexer_certs_path ~ '/admin.pem') }}"
+  register: admin_cert_check
+  become: true
+
+- name: Check if admin key exists
+  ansible.builtin.stat:
+    path: "{{ wazuh_indexer_cert_paths.http_key | default(wazuh_indexer_certs_path ~ '/admin-key.pem') }}"
+  register: admin_key_check
+  become: true
+
+- name: Fail if admin certificates are missing
+  ansible.builtin.fail:
+    msg: >-
+      Admin certificates not found ({{ wazuh_indexer_cert_paths.http_cert
+      | default(wazuh_indexer_certs_path ~ '/admin.pem') }}).
+      Ensure certificates.yml ran successfully.
+  when: >-
+    not (admin_cert_check.stat.exists | default(false)) or
+    not (admin_key_check.stat.exists | default(false))
+
+- name: Apply the 5.x security configuration
+  ansible.builtin.command:
+    cmd: /usr/share/wazuh-indexer/bin/indexer-security-init.sh
+  become: true
+  register: security_init_5x
+  changed_when: true
+  failed_when: security_init_5x.rc != 0
+
+# The script exits 0 both when it initializes the security index and when the
+# index already exists, so the exit code cannot distinguish them. Ask the
+# cluster instead: the security index being mounted and resolvable is the thing
+# that actually has to be true before Filebeat or the Dashboard are pointed at
+# this node.
+- name: Confirm the security index is mounted
+  ansible.builtin.uri:
+    url: >-
+      https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port
+      }}/_cat/indices/.opendistro_security?format=json
+    method: GET
+    user: "{{ wazuh_indexer_admin_user }}"
+    password: "{{ wazuh_indexer_default_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    status_code: [200]
+    return_content: true
+  register: security_index_probe
+  retries: 10
+  delay: 5
+  until: security_index_probe.status | default(0) == 200
+  no_log: true
+  run_once: true
+
+- name: Refuse to continue when the security index did not mount
+  ansible.builtin.fail:
+    msg: >-
+      indexer-security-init.sh reported success but {{ item.item }} is not
+      readable. The security configuration was not applied; do not point
+      ingest or the dashboard at this cluster.
+  loop: "{{ security_index_probe.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item | default('') }}"
+  when: security_index_probe.status | default(0) != 200
+  run_once: true
+
+- name: Check which 5.x built-in users still accept their name as a password
+  ansible.builtin.uri:
+    url: >-
+      https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port }}/_cluster/health
+    method: GET
+    user: "{{ item }}"
+    password: "{{ item }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    status_code: [200, 401, 403]
+  loop: "{{ wazuh_indexer_5x_default_users }}"
+  loop_control:
+    label: "{{ item }}"
+  register: default_credentials
+  no_log: true
+  run_once: true
+
+# 403 means the credentials were accepted but the role is not allowed to read
+# cluster health; that is still a successful login, so it counts as "reachable
+# with the default password" just like a 200.
+- name: Refuse to finish while a built-in user keeps its shipped password
+  ansible.builtin.assert:
+    that:
+      - item.status == 401
+    fail_msg: >-
+      The 5.x indexer ships internal users whose password is their own name,
+      and this user '{{ item.item }}' still authenticates with it (HTTP
+      {{ item.status }}). Anyone who can reach the HTTP port has admin-level
+      access. Set a real password for it in
+      wazuh_indexer_5x_user_passwords, or set
+      wazuh_indexer_5x_require_rotated_defaults=false to accept the risk.
+    success_msg: "{{ item.item }} no longer accepts its own name as a password"
+  loop: "{{ default_credentials.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: wazuh_indexer_5x_require_rotated_defaults | default(true)
+  run_once: true

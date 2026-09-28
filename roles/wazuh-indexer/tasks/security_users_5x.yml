@@ -1,0 +1,158 @@
+---
+# Wazuh Indexer - 5.x internal user passwords
+#
+# 4.x rotates the admin password by hashing it, rewriting internal_users.yml
+# and re-applying it with securityadmin.sh. 5.x ships a supported tool for this
+# (wazuh-passwords-tool.sh) which also persists the change to
+# internal_users.yml, backs up the previous definitions and updates the manager
+# and dashboard keystores when they are co-located. Using the tool instead is
+# not just tidier: the hand-rewritten file and the running security index can
+# disagree, and indexer-security-init.sh would then reinstate the file's
+# contents on the next run, silently reverting the password.
+#
+# The tool's -a mode generates random passwords and cannot accept chosen ones,
+# so vault-provided passwords are set one user at a time with -u.
+
+# The tool authenticates with the admin certificate at fixed paths. If the
+# certificate was deployed somewhere else, every invocation would fail inside
+# the tool with an authentication error that says nothing about the cause.
+- name: Refuse to rotate passwords when the admin certificate is not where the tool looks
+  ansible.builtin.assert:
+    that:
+      - wazuh_indexer_cert_paths.http_cert == wazuh_indexer_5x_password_tool_admin_cert
+      - wazuh_indexer_cert_paths.http_key == wazuh_indexer_5x_password_tool_admin_key
+    fail_msg: >-
+      opensearch.yml places the admin certificate at
+      {{ wazuh_indexer_cert_paths.http_cert }} and its key at
+      {{ wazuh_indexer_cert_paths.http_key }}, but wazuh-passwords-tool.sh only
+      looks at {{ wazuh_indexer_5x_password_tool_admin_cert }} and
+      {{ wazuh_indexer_5x_password_tool_admin_key }} and cannot be told
+      otherwise. Either move the admin certificate to the path the tool
+      requires, or rotate the users by hand.
+    success_msg: "Admin certificate is at the path wazuh-passwords-tool.sh requires"
+
+# Checked before the tool runs so a rejected password names the rule instead of
+# only appearing in a log on the node.
+- name: Validate the configured 5.x passwords before calling the tool
+  ansible.builtin.assert:
+    that:
+      - item.value | length >= wazuh_indexer_5x_password_min_length | int
+      - item.value | length <= wazuh_indexer_5x_password_max_length | int
+      - item.value | regex_search('[A-Z]')
+      - item.value | regex_search('[a-z]')
+      - item.value | regex_search('[0-9]')
+      - item.value | regex_search('[' ~ (wazuh_indexer_5x_password_symbols | regex_escape) ~ ']')
+      # The tool explicitly cannot be used to set a password back to the
+      # username, so a value equal to the name is a configuration error.
+      - item.value != item.item
+    fail_msg: >-
+      The password configured for '{{ item.item }}' does not satisfy the 5.x
+      policy: 8-64 characters, at least one uppercase letter, one lowercase
+      letter, one digit, and one of the symbols
+      {{ wazuh_indexer_5x_password_symbols }}. It also must not equal the
+      username, which the tool refuses to set.
+    success_msg: "{{ item.item }} satisfies the 5.x password policy"
+  loop: "{{ wazuh_indexer_5x_user_passwords | dict2items }}"
+  loop_control:
+    label: "{{ item.item }}"
+  no_log: true
+  run_once: true
+
+- name: Change each configured 5.x internal user password
+  ansible.builtin.command:
+    cmd: >-
+      {{ wazuh_indexer_5x_password_tool }}
+      -u {{ item.item }} -p {{ item.value }}
+  become: true
+  loop: "{{ wazuh_indexer_5x_user_passwords | dict2items }}"
+  loop_control:
+    label: "{{ item.item }}"
+  register: password_change
+  changed_when: password_change.rc == 0
+  failed_when: password_change.rc != 0
+  no_log: true
+  run_once: true
+
+# A non-zero exit from the tool is a rejected password, not a cluster problem,
+# so name the likely cause rather than surfacing a bare exit code.
+- name: Explain a rejected password change
+  ansible.builtin.fail:
+    msg: >-
+      wazuh-passwords-tool.sh rejected the new password for '{{ item.item.item }}'
+      (exit {{ item.rc }}). See /var/log/wazuh-passwords-tool.log on the node.
+      The 5.x policy requires 8-64 characters, at least one uppercase letter,
+      one lowercase letter, one digit and one of the symbols
+      {{ wazuh_indexer_5x_password_symbols }}, and refuses a password equal to
+      the username.
+  loop: "{{ password_change.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.item | default('') }}"
+  when: item.rc | default(0) != 0
+  run_once: true
+
+- name: Confirm the new passwords are accepted
+  ansible.builtin.uri:
+    url: >-
+      https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port }}/_cluster/health
+    method: GET
+    user: "{{ item.item }}"
+    password: "{{ item.value }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    status_code: [200, 401, 403]
+  loop: "{{ wazuh_indexer_5x_user_passwords | dict2items }}"
+  loop_control:
+    label: "{{ item.item }}"
+  register: rotated_credentials
+  no_log: true
+  run_once: true
+
+# 403 is a successful login by a role that cannot read cluster health, so it
+# counts as accepted here just as it counted as a breach before rotation.
+- name: Fail when a rotated password is not in effect
+  ansible.builtin.assert:
+    that:
+      - item.status != 401
+    fail_msg: >-
+      The password was set for '{{ item.item }}' but the new one is rejected
+      (HTTP 401). The change did not reach the running cluster; do not treat
+      this user as rotated.
+    success_msg: "{{ item.item }} accepts its new password"
+  loop: "{{ rotated_credentials.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  run_once: true
+
+- name: Confirm the shipped passwords no longer work
+  ansible.builtin.uri:
+    url: >-
+      https://{{ wazuh_node_ip }}:{{ wazuh_indexer_http_port }}/_cluster/health
+    method: GET
+    user: "{{ item }}"
+    password: "{{ item }}"
+    force_basic_auth: true
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    status_code: [200, 401, 403]
+  loop: "{{ wazuh_indexer_5x_default_users }}"
+  loop_control:
+    label: "{{ item }}"
+  register: residual_defaults
+  no_log: true
+  run_once: true
+
+- name: Fail when a built-in user still accepts its own name as a password
+  ansible.builtin.assert:
+    that:
+      - item.status == 401
+    fail_msg: >-
+      '{{ item.item }}' still authenticates with its own name as the password
+      (HTTP {{ item.status }}). 5.x ships every built-in user with a
+      username-equals-password hash and nothing rotates it, so add a real
+      password for this user to wazuh_indexer_5x_user_passwords, or set
+      wazuh_indexer_5x_require_rotated_defaults=false to accept the risk.
+    success_msg: "{{ item.item }} no longer accepts its own name as a password"
+  loop: "{{ residual_defaults.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: wazuh_indexer_5x_require_rotated_defaults | default(true)
+  run_once: true

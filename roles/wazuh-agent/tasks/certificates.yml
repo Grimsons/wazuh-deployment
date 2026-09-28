@@ -3,17 +3,30 @@
 # Deploys Root CA certificate for TLS agent-to-manager communication.
 # Primary: copy from control node (wazuh_certs_path).
 # Fallback: fetch from first manager node (already has root-ca.pem deployed).
+#
+# Mode matters on 5.0: etc/certs/root-ca.pem is the agent's trust anchor and it
+# is read by the daemon as the wazuh user, so the file has to be 0640 root:wazuh.
+# At 0400 the group has no read and the agent treats the anchor exactly as if it
+# were absent - it then connects without verifying the manager and the 5.0
+# installer refuses the upgrade for the same reason.
+
+- name: Resolve the manager-side trust anchor path
+  ansible.builtin.set_fact:
+    manager_ca_path: >-
+      {{ '/var/wazuh-manager/etc/certs/root-ca.pem'
+         if (wazuh_is_5x | default(false) | bool)
+         else '/var/ossec/etc/certs/root-ca.pem' }}
 
 - name: Set certificate paths per platform
   ansible.builtin.set_fact:
     agent_certs_dir: >-
       {{ '/var/ossec/etc/certs' if ansible_system == 'Linux'
        else '/Library/Ossec/etc/certs' if ansible_system == 'Darwin'
-       else 'C:\\Program Files (x86)\\ossec-agent\\certs' }}
-    agent_ca_path: >-
-      {{ '/var/ossec/etc/certs/root-ca.pem' if ansible_system == 'Linux'
-       else '/Library/Ossec/etc/certs/root-ca.pem' if ansible_system == 'Darwin'
-       else 'C:\\Program Files (x86)\\ossec-agent\\certs\\root-ca.pem' }}
+       else 'C:\Program Files (x86)\ossec-agent\certs' }}
+    # Resolved once in defaults, so the deployed file and the path named in
+    # ossec.conf come from the same expression. (Not derived with | dirname:
+    # that mangles the backslashes in the Windows path.)
+    agent_ca_path: "{{ wazuh_agent_trust_anchor_path }}"
 
 - name: Create certificates directory (Linux/macOS)
   ansible.builtin.file:
@@ -37,7 +50,7 @@
     dest: "{{ agent_ca_path }}"
     owner: root
     group: wazuh
-    mode: '0400'
+    mode: '0640'
   become: true
   register: ca_copy_result
   ignore_errors: true
@@ -53,7 +66,7 @@
 
 - name: Fallback — slurp Root CA from first manager node
   ansible.builtin.slurp:
-    src: /var/ossec/etc/certs/root-ca.pem
+    src: "{{ manager_ca_path }}"
   register: ca_slurp
   delegate_to: "{{ wazuh_manager_nodes[0].name }}"
   ignore_errors: true
@@ -67,7 +80,7 @@
     dest: "{{ agent_ca_path }}"
     owner: root
     group: wazuh
-    mode: '0400'
+    mode: '0640'
   become: true
   when:
     - ansible_os_family != 'Windows'
@@ -77,7 +90,7 @@
 
 - name: Fallback — slurp Root CA from manager (Windows)
   ansible.builtin.slurp:
-    src: /var/ossec/etc/certs/root-ca.pem
+    src: "{{ manager_ca_path }}"
   register: ca_slurp_win
   delegate_to: "{{ wazuh_manager_nodes[0].name }}"
   ignore_errors: true
@@ -101,7 +114,7 @@
       WARNING: Root CA certificate could not be deployed to agent.
       Agent TLS will fail until root-ca.pem is manually placed at {{ agent_ca_path }}.
       Either run from the Ansible control node with certs in {{ wazuh_certs_path | default('files/certs') }},
-      or ensure the first manager node has /var/ossec/etc/certs/root-ca.pem deployed.
+      or ensure the first manager node has {{ manager_ca_path }} deployed.
   when:
     - ca_copy_result.failed | default(false) or ca_copy_win_result.failed | default(false)
     - ca_slurp.content is not defined and ca_slurp_win.content is not defined

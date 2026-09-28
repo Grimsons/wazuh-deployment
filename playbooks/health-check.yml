@@ -108,18 +108,6 @@
       ansible.builtin.set_fact:
         manager_service_status: "{{ 'HEALTHY' if manager_service.status.ActiveState == 'active' else 'UNHEALTHY' }}"
 
-    - name: Check Filebeat service status
-      ansible.builtin.systemd:
-        name: filebeat
-      register: filebeat_service
-      failed_when: false
-      when: wazuh_use_filebeat
-
-    - name: Record Filebeat service status
-      ansible.builtin.set_fact:
-        filebeat_service_status: "{{ 'HEALTHY' if filebeat_service.status.ActiveState | default('inactive') == 'active' else 'UNHEALTHY' }}"
-      when: wazuh_use_filebeat
-
     - name: Check Wazuh API health
       ansible.builtin.uri:
         url: "https://127.0.0.1:{{ wazuh_manager_api_port | default(55000) }}/"
@@ -175,7 +163,6 @@
           MANAGER HEALTH - {{ inventory_hostname }}
           ═══════════════════════════════════════════════════════════════
           Service Status:   {{ manager_service_status }}
-          Filebeat Status:  {{ filebeat_service_status | default('N/A (5.x)') }}
           API Status:       {{ api_status }}
           Active Agents:    {{ active_agents.stdout }} / {{ total_agents.stdout }}
           Recent Errors:    {{ recent_errors.stdout }} (last 100 log lines)
@@ -294,16 +281,6 @@
       run_once: true
       when: check_e2e | default(false) | bool
 
-    - name: "E2E: Check Filebeat is forwarding"
-      ansible.builtin.shell: |
-        filebeat test output 2>&1 | head -5
-      register: filebeat_test
-      changed_when: false
-      failed_when: false
-      when:
-        - check_e2e | default(false) | bool
-        - wazuh_use_filebeat
-
     - name: "E2E: Check manager event queue"
       ansible.builtin.shell: |
         {{ wazuh_manager_install_path }}/bin/{{ wazuh_manager_binary_prefix | default('wazuh-') }}control info 2>/dev/null | grep -E "events_dropped|events_received" || echo "Queue stats not available"
@@ -319,8 +296,6 @@
           END-TO-END DATA FLOW - {{ inventory_hostname }}
           ═══════════════════════════════════════════════════════════════
           Alert count in indexer: {{ alert_count.json.count | default('N/A') }}
-          Filebeat output test:  {{ 'OK' if (filebeat_test.rc | default(1) == 0 and wazuh_use_filebeat) else ('N/A (5.x)' if not wazuh_use_filebeat else 'ISSUE') }}
-          {{ filebeat_test.stdout | default('') }}
           Queue stats: {{ queue_stats.stdout | default('N/A') }}
           ═══════════════════════════════════════════════════════════════
       run_once: true

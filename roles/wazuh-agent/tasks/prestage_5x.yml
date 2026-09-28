@@ -1,0 +1,131 @@
+---
+# Wazuh Agent - 5.0 pre-staging
+#
+# Everything in this file has to happen BEFORE the package install, not after:
+#
+#   * A WPK upgrade from 4.14.X never rewrites ossec.conf, so the 5.0
+#     configuration is the one written by the role and read by the upgraded
+#     agent - it has to describe the 5.0 endpoint before the agent starts.
+#   * The 5.0 WPK installer aborts *before* the package manager runs when the OS
+#     trust store does not verify the manager and no CA is found at the default
+#     drop-in path (etc/certs/root-ca.pem). On-prem manager certificates are
+#     issued by the deployment's own CA, so the anchor has to be there already.
+#   * 5.0 declares group membership during enrollment and refuses the whole
+#     enrollment if any named group is unknown, so the group has to exist on
+#     the manager before the agent (re)enrolls.
+#
+# The 4.14.5 path does not include this file at all.
+
+- name: Deploy the manager trust anchor before the 5.0 install (WPK pre-check)
+  ansible.builtin.include_tasks: certificates.yml
+  when:
+    - wazuh_agent_trust_anchor_prestage | default(true) | bool
+    # On Windows the agent directory does not exist until the MSI has run, so
+    # there is nowhere to drop the anchor yet. certificates.yml (included at the
+    # end of main.yml) deploys it there; the pre-install Windows requirement is
+    # tracked as a known risk in docs/wazuh-5-agent-migration.md.
+    - ansible_os_family != 'Windows'
+
+- name: Resolve the enrollment group this agent will declare
+  ansible.builtin.set_fact:
+    wazuh_agent_declared_groups: >-
+      {{ wazuh_agent_enrollment_groups | default([])
+         | union([wazuh_agent_group] if wazuh_agent_group is defined else []) }}
+
+- name: Verify the declared enrollment group exists on the manager
+  ansible.builtin.uri:
+    url: >-
+      https://{{ wazuh_manager_address | default(wazuh_manager_nodes[0].ip, true) }}:{{ wazuh_manager_api_port | default(55000) }}/groups
+    method: GET
+    headers:
+      Authorization: "Bearer {{ wazuh_api_token }}"
+    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
+    return_content: true
+    status_code: [200, 401]
+  delegate_to: "{{ wazuh_manager_nodes[0].name }}"
+  register: wazuh_agent_manager_groups
+  failed_when: false
+  no_log: true
+  when:
+    - wazuh_agent_enrollment_group_check_enabled | default(true) | bool
+    - wazuh_agent_declared_groups | length > 0
+    - wazuh_api_token is defined
+
+- name: Fail when a declared enrollment group is missing on the manager
+  ansible.builtin.fail:
+    msg: |
+      ══════════════════════════════════════════════════════════════════════
+      The 5.0 manager will refuse this agent's enrollment.
+      ══════════════════════════════════════════════════════════════════════
+
+      Declared by this agent: {{ wazuh_agent_declared_groups | join(', ') }}
+      Known to the manager: {{ wazuh_agent_known_groups | default('unknown (API query failed)') }}
+
+      5.0 dropped remoted.guess_agent_group. The agent declares its group in
+      the enrollment handshake and the manager rejects the *whole* request when
+      one named group is unknown - the groups it does know are not applied
+      either. The agent then retries forever without registering.
+
+      Create the group on the manager first:
+        ansible-playbook site.yml --tags agent-groups
+      or
+        curl -k -X POST "https://<manager>:55000/groups" \
+             -H "Authorization: Bearer $TOKEN" \
+             -H "Content-Type: application/json" -d '{"group_id": "<group>"}'
+
+      Alternatively drop wazuh_agent_enrollment_groups / wazuh_agent_group and
+      let the agent fall back to the default group.
+      ══════════════════════════════════════════════════════════════════════
+  when:
+    - wazuh_agent_manager_groups is defined
+    - wazuh_agent_manager_groups.status | default(0) == 200
+    - wazuh_agent_declared_groups | difference(wazuh_agent_manager_groups.json.data.affected_items | default([]) | map(attribute='id') | list) | length > 0
+  vars:
+    wazuh_agent_known_groups: >-
+      {{ wazuh_agent_manager_groups.json.data.affected_items | default([])
+         | map(attribute='id') | list | join(', ') }}
+
+- name: Flag that the enrollment group check could not run
+  ansible.builtin.debug:
+    msg: |
+      Could not verify the declared enrollment group
+      ({{ wazuh_agent_declared_groups | join(', ') }}) against the manager API.
+      5.0 rejects the whole enrollment when a named group does not exist, so
+      confirm the group exists on {{ wazuh_manager_address | default(wazuh_manager_nodes[0].ip, true) }}
+      before this agent is upgraded.
+  when:
+    - wazuh_agent_declared_groups | length > 0
+    - not (wazuh_agent_enrollment_group_check_enabled | default(true) | bool)
+    - wazuh_api_token is defined
+
+- name: Warn that 5.0 removed server rotation
+  ansible.builtin.debug:
+    msg: |
+      Wazuh 5.0 honours only the first <manager> block, so the multi-manager
+      failover configured here cannot work on 5.0:
+
+        wazuh_manager_nodes: {{ wazuh_manager_nodes | map(attribute='ip') | list | join(', ') }}
+
+      Configured endpoint: {{ wazuh_manager_nodes[0].ip }}:{{ wazuh_agent_manager_port | default(1517) }}
+
+      Put a TLS-passthrough load balancer in front of the managers and point
+      every agent at it. See docs/wazuh-5-agent-migration.md.
+  when:
+    - not (wazuh_agent_multi_manager_supported | bool)
+    - wazuh_manager_nodes | length > 1
+
+- name: Report the resolved 5.0 upgrade path
+  ansible.builtin.debug:
+    msg: |
+      Wazuh 5.0 pre-stage
+      ─────────────────────────────────────────────────────────────────────
+      Source version  : {{ wazuh_agent_installed_version | default('not installed (fresh install)') }}
+      Manager endpoint: {{ wazuh_manager_nodes[0].ip }}:{{ wazuh_agent_manager_port | default(1517) }}
+      Trust anchor    : {{ agent_ca_path | default('deployed by certificates.yml') }}
+      Enrollment      : {{ 'token + operator password path'
+                           if wazuh_authd_use_password | default(true)
+                           else 'enrollment token'
+                           if wazuh_agent_enrollment_token is defined
+                           else 'agent-provided installer credentials' }}
+      Declared groups : {{ wazuh_agent_declared_groups | join(', ') | default('none (lands in default)') }}
+      TLS 1.3 ciphers : {{ wazuh_agent_tls_ciphers | default('manager default') }}

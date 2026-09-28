@@ -1,6 +1,9 @@
 ---
 # Wazuh Indexer Role - Default Variables
 
+wazuh_direct_download: "{{ wazuh_is_prerelease | default(false) | bool }}"
+wazuh_indexer_package_download_path: "/tmp/wazuh-indexer"
+
 # Package settings
 wazuh_indexer_package_name: "wazuh-indexer"
 wazuh_indexer_service_name: "wazuh-indexer"
@@ -42,6 +45,11 @@ wazuh_allowed_cluster_networks: []
 # Cluster settings
 wazuh_indexer_cluster_name: "wazuh-cluster"
 wazuh_indexer_cluster_initial_master_nodes: []
+# Keep the role renderable for standalone hosts and validation probes. A
+# multi-node deployment should override this with the complete cluster list.
+wazuh_indexer_nodes:
+  - name: indexer-1
+    ip: 127.0.0.1
 
 # ═══════════════════════════════════════════════════════════════
 # Authentication Settings
@@ -150,3 +158,140 @@ wazuh_statistics_alias: "wazuh-statistics"
 # Index retention overrides (specific to monitoring/statistics — overrides wazuh_retention_days)
 wazuh_monitoring_retention_days: 7
 wazuh_statistics_retention_days: 7
+
+# ═══════════════════════════════════════════════════════════════
+# Security-plugin system indices
+# ═══════════════════════════════════════════════════════════════
+# Which indices must be shielded depends on the plugins the indexer ships,
+# and that set differs by major. This list is a static setting: it is read at
+# boot, so it cannot be discovered at runtime like a certificate path can.
+# Override wazuh_indexer_system_indices if you add a plugin that owns indices.
+wazuh_indexer_system_indices: >-
+  {{ wazuh_indexer_system_indices_5x
+     if (wazuh_is_5x | bool) else wazuh_indexer_system_indices_4x }}
+
+# 4.x ships the OpenSearch 2.x plugin set (alerting, anomaly detection,
+# observability, notebooks, reports, asynchronous search).
+wazuh_indexer_system_indices_4x:
+  - .opendistro-alerting-config
+  - .opendistro-alerting-alert*
+  - .opendistro-anomaly-results*
+  - .opendistro-anomaly-detector*
+  - .opendistro-anomaly-checkpoints
+  - .opendistro-anomaly-detection-state
+  - .opendistro-reports-*
+  - .opendistro-notifications-*
+  - .opendistro-notebooks
+  - .opensearch-observability
+  - .opendistro-asynchronous-search-response*
+  - .replication-metadata-store
+
+# 5.x ships a different plugin set. The OpenSearch 2.x entries above are
+# gone: anomaly detection, asynchronous search, ML Commons, k-NN, SQL and
+# neural search are not part of the 5.x indexer distribution, so listing
+# their indices protects nothing. The Wazuh content-manager plugins do own
+# system indices and must be shielded.
+#
+# Do not add .wazuh-settings here. It is a normal index whose access is
+# granted explicitly by the wazuh_manager and wazuh_admin roles; declaring it
+# a system index would override those grants and make it unreadable by the
+# very components that are supposed to write it.
+wazuh_indexer_system_indices_5x:
+  - .wazuh-content-manager-resource-locks
+  - .wazuh-cti-consumers
+  - .wazuh-content-manager-jobs
+  - .wazuh-internal-state
+
+# ═══════════════════════════════════════════════════════════════
+# 5.x index families (OpenSearch 3.x, "v5" schemas)
+# ═══════════════════════════════════════════════════════════════
+# 4.x and 5.x index names are disjoint. 4.x is OpenSearch 2.x and its index
+# families (wazuh-alerts-*, wazuh-archives-*, wazuh-monitoring-*,
+# wazuh-statistics-*) are gone in 5.x; 5.x ships new schemas whose mappings
+# cannot be derived from the 4.x document shape. The four 4.x families map
+# onto the four 5.x families below. Do not create 4.x indices on a 5.x
+# cluster, and do not expect 5.x indices on a 4.x cluster.
+#
+# families.<name> is consumed by tasks/index_management_5x.yml, which creates
+# one ISM policy, one ISM template and one bootstrap index per family.
+wazuh_indexer_5x_families:
+  # The alert/event stream. Successor to 4.x wazuh-alerts-* + wazuh-archives-*
+  # (4.x archived alert copies have no separate 5.x family).
+  events:
+    pattern: "wazuh-events-v5*"
+    alias: "wazuh-events-v5"
+    retention_days: "{{ wazuh_retention_days }}"
+    primary_shards: 1
+    replica_shards: 0
+  # Successor to 4.x wazuh-archives-*: per-agent stateful data.
+  states:
+    pattern: "wazuh-states-*"
+    alias: "wazuh-states"
+    retention_days: 30
+    primary_shards: 1
+    replica_shards: 0
+  # Successor to 4.x wazuh-monitoring-*.
+  metrics:
+    pattern: "wazuh-metrics-*"
+    alias: "wazuh-metrics"
+    retention_days: "{{ wazuh_monitoring_retention_days }}"
+    primary_shards: 1
+    replica_shards: 0
+  # Successor to 4.x wazuh-statistics-*.
+  agent:
+    pattern: "wazuh-agent-*"
+    alias: "wazuh-agent"
+    retention_days: "{{ wazuh_statistics_retention_days }}"
+    primary_shards: 1
+    replica_shards: 0
+
+# 5.x index templates are composed with, not substituted for, the templates
+# the indexer ships for its own schemas. Creating a standalone template with
+# one of these patterns would shadow the shipped v5 mappings (only the
+# highest-priority matching template is applied), so the role resolves the
+# shipped template at runtime and composes on top of it.
+# Refuse to proceed rather than shadow a mapping set we have not inspected.
+wazuh_indexer_5x_require_shipped_template: true
+
+# ═══════════════════════════════════════════════════════════════
+# 5.x security
+# ═══════════════════════════════════════════════════════════════
+# 5.x ships its own set of internal users and "the bundled password hashes
+# decode to the username, and nothing rotates them during installation". That
+# leaves every one of them reachable with a guessable password unless this role
+# changes them or the operator accepts the risk explicitly.
+wazuh_indexer_5x_default_users:
+  - admin
+  - kibanaserver
+  - wazuh-manager
+  - wazuh-admin
+  - wazuh-demo
+  - wazuh-readonly
+
+# Refuse to finish a 5.x deployment while any of the above still accepts its
+# own name as its password. Set false to accept the shipped defaults, which is
+# only defensible on a cluster that is not reachable from anywhere untrusted.
+wazuh_indexer_5x_require_rotated_defaults: true
+
+# Passwords for the users above, from vault. Users absent from this mapping
+# are only checked, not changed.
+wazuh_indexer_5x_user_passwords: {}
+
+# wazuh-passwords-tool.sh enforces this and exits non-zero, but by then the
+# only feedback is a line in /var/log/wazuh-passwords-tool.log. Checked here
+# first so the failure names the rule.
+#
+# Note the symbol set is narrow: a password ending in '!' or '#' is rejected
+# even when it satisfies the length and character-class rules, so a 4.x vault
+# password cannot be reused unchanged.
+wazuh_indexer_5x_password_min_length: 8
+wazuh_indexer_5x_password_max_length: 64
+wazuh_indexer_5x_password_symbols: ".*+?-"
+
+# The tool authenticates with the admin certificate at a fixed path and offers
+# no way to override it, so those two paths are a hard requirement of the 5.x
+# password flow rather than a convention.
+wazuh_indexer_5x_password_tool_admin_cert: /etc/wazuh-indexer/certs/admin.pem
+wazuh_indexer_5x_password_tool_admin_key: /etc/wazuh-indexer/certs/admin-key.pem
+wazuh_indexer_5x_password_tool: >-
+  /usr/share/wazuh-indexer/plugins/opensearch-security/tools/wazuh-passwords-tool.sh

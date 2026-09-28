@@ -26,6 +26,69 @@ wazuh_filebeat_enabled_by_version: "{{ not (wazuh_is_5x | bool) }}"
 # one, at a different path and with a .yml extension.
 wazuh_artifact_urls_basename: "{{ 'artifact_urls.yaml' if (wazuh_is_5x | bool) else 'artifact_urls.yml' }}"
 
+# ── Indexer contract ───────────────────────────────────────────────────────
+# Wazuh indexer 5.x is OpenSearch 3.x. Two classes of setting are hard version
+# boundaries rather than tuning knobs, so they are derived once here:
+#
+#   1. OpenSearch 3.x renamed the cluster bootstrap key. Emitting the 4.x key
+#      on a 5.x node is an unknown setting and the node will not boot.
+#   2. 5.x ships new index schemas (the v5 suffix) with its own templates and
+#      mappings. 4.x index names have no 5.x counterpart.
+#
+# Do not re-derive these in the indexer role or its templates.
+wazuh_indexer_initial_nodes_setting: >-
+  {{ 'cluster.initial_cluster_manager_nodes'
+     if (wazuh_is_5x | bool) else 'cluster.initial_master_nodes' }}
+wazuh_indexer_index_schema: "{{ 'v5' if (wazuh_is_5x | bool) else 'v4' }}"
+
+# A 4.x indexer cluster cannot be upgraded in place and 4.x data cannot be
+# migrated: no in-place upgrade, no snapshot restore, no _reindex. Crossing
+# this boundary is a blue/green replacement, not an upgrade. See
+# docs/operations/indexer-cutover-5x.md.
+wazuh_indexer_cross_major_upgrade_supported: false
+
+# ═══════════════════════════════════════════════════════════════
+# Agent-side contract (roles/wazuh-agent consumes this)
+# ═══════════════════════════════════════════════════════════════
+# Verified against the 5.0.0-beta5 reference docs on 2026-09-26
+# (wazuh/wazuh@main: docs/ref/modules/client/configuration.md and
+# docs/guide/migration/upgrade-4x-to-5x.md). See
+# docs/wazuh-5-agent-migration.md for the per-claim register.
+wazuh_agent_is_5x: "{{ wazuh_is_5x | bool }}"
+
+# 5.0 replaced the 4.x cleartext/raw TCP transport on 1514 with HTTPS on 1517.
+# 1514 stays in the contract for 4.14.5 so that path is untouched.
+wazuh_agent_manager_port: "{{ 1517 if (wazuh_agent_is_5x | bool) else 1514 }}"
+
+# 5.0 enrollment reuses the same HTTPS channel as every other manager
+# endpoint: there is no separate address/port/CA/cipher block, so 1515 is not
+# dialled by a 5.0 agent. 4.x still enrolls on the 1515 authd listener.
+wazuh_agent_enrollment_port: "{{ 0 if (wazuh_agent_is_5x | bool) else 1515 }}"
+
+# 5.0 removed server rotation with the HTTPS transport: only the FIRST
+# <manager> block is honoured and a second one replaces it, so the
+# multi-manager failover our 4.x templates emit cannot work on 5.0.
+wazuh_agent_multi_manager_supported: "{{ not (wazuh_agent_is_5x | bool) }}"
+
+# 5.0.0 refuses to install over an agent older than 4.14.0. Pre-install
+# validation aborts with an opaque message on Linux, and on macOS the PKG
+# installer just reports a generic failure, so we gate it ourselves first.
+wazuh_agent_min_upgrade_source_version: "4.14.0"
+
+# The 5.0 manager's enrollment service (wazuh-authd) is pinned to TLS 1.3 and
+# validates <ciphers>/<ssl_cipher> against this fixed ciphersuite set. A 4.x
+# OpenSSL cipher string such as HIGH:!ADH:!EXP:@STRENGTH is rejected outright.
+# This is the upstream default; keep the list colon-separated.
+wazuh_agent_tls13_ciphersuites: >-
+  TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256
+
+# Upstream 5.0 Ansible support covers Linux, Windows and macOS only. Solaris,
+# AIX and HP-UX are out of scope and must not be silently configured.
+wazuh_agent_supported_systems:
+  - Linux
+  - Windows
+  - Darwin
+
 local_configs_path: "{{ playbook_dir }}/deployment-config-files"
 
 urls_file: "{{ wazuh_artifact_urls_basename }}"

@@ -1,6 +1,67 @@
 ---
 # Wazuh Agent Role - Main Tasks
 
+# The agent role must resolve the release contract on its own: site.yml applies
+# roles/package-urls (which includes this file) before the agents, but a
+# targeted `wazuh-agents.yml` / canary run does not. Same file, same contract.
+- name: Load the shared release contract
+  ansible.builtin.include_vars:
+    file: ../../vars/main.yml
+  tags: always
+
+- name: Fail if the resolved contract did not load
+  ansible.builtin.fail:
+    msg: |
+      CRITICAL: the shared Wazuh release contract (roles/vars/main.yml) did not
+      resolve, so the agent cannot tell 4.x from 5.0.
+
+      Expected variables: wazuh_is_5x, wazuh_agent_is_5x,
+      wazuh_agent_manager_port. Run the play from the repository root, or
+      include roles/vars/main.yml explicitly.
+  when: wazuh_agent_is_5x is not defined
+  tags: always
+
+- name: Fail closed when Wazuh 5.x lacks direct-download mode
+  ansible.builtin.fail:
+    msg: >-
+      Wazuh 5.x requires wazuh_package_install_mode=direct-download. Refusing
+      to configure an apt/yum repository or install from the wrong major.
+      Integrate the shared contract in roles/vars/main.yml.
+  when:
+    - wazuh_agent_is_5x | default(false) | bool
+    - (wazuh_package_install_mode | default('repository')) != 'direct-download'
+  tags: always
+
+- name: Fail if the host platform is out of scope for this release
+  ansible.builtin.fail:
+    msg: |
+      CRITICAL: {{ ansible_system }} is not a supported Wazuh agent platform.
+
+      Upstream Wazuh {{ wazuh_effective_version }} ships agents for Linux,
+      Windows and macOS only. Solaris, AIX and HP-UX have no 5.x package and no
+      upstream Ansible support, so there is nothing to deploy here.
+
+      Supported systems: {{ wazuh_agent_supported_systems | join(', ') }}.
+      Detected: {{ ansible_system }} ({{ ansible_distribution | default('unknown') }}).
+  when:
+    - ansible_system not in (wazuh_agent_supported_systems | default(['Linux', 'Windows', 'Darwin']))
+    - wazuh_effective_version is defined
+  tags: always
+
+- name: Enforce the Wazuh 5.0 upgrade path before touching packages
+  ansible.builtin.include_tasks: upgrade_path.yml
+  when: (wazuh_agent_is_5x | bool) and (wazuh_agent_upgrade_path_enforced | default(true) | bool)
+  tags: always
+
+# 5.0 pre-staging must precede every package task: the 5.0 installer aborts
+# before the package manager runs if the manager CA is not already at the
+# default trust-anchor path, and a WPK upgrade never rewrites ossec.conf, so
+# the 5.0 config has to be in place for the upgraded agent to read.
+- name: Pre-stage the Wazuh 5.0 upgrade (trust anchor, enrollment, groups)
+  ansible.builtin.include_tasks: prestage_5x.yml
+  when: wazuh_agent_is_5x | bool
+  tags: always
+
 - name: Include OS-specific variables
   ansible.builtin.include_vars: "{{ item }}"
   with_first_found:

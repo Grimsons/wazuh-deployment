@@ -36,10 +36,22 @@
     - wazuh_authd_use_password | default(true)
     - wazuh_agent_enrollment_password is not defined or wazuh_agent_enrollment_password | length == 0
 
+- name: Windows | Resolve the enrollment password path
+  ansible.builtin.set_fact:
+    # 5.0 removes the compiled default authd.pass at package-upgrade time, so
+    # the 4.x path cannot be relied on. Both the file and the
+    # <authorization_pass_path> in ossec.conf come from this one fact.
+    wazuh_agent_authorization_pass_path: >-
+      {{ 'C:\Program Files (x86)\ossec-agent\enrollment-auth.pass'
+         if (wazuh_agent_is_5x | bool)
+         else 'C:\Program Files (x86)\ossec-agent\authd.pass' }}
+
 - name: Windows | Deploy enrollment password file
   ansible.windows.win_copy:
     content: "{{ wazuh_agent_enrollment_password }}"
-    dest: 'C:\Program Files (x86)\ossec-agent\authd.pass'
+    # 5.0 removes the compiled default authd.pass at package-upgrade time;
+    # an explicitly configured path is operator-owned and survives.
+    dest: "{{ wazuh_agent_authorization_pass_path }}"
   no_log: true
   become: true
   when:
@@ -47,9 +59,9 @@
     - wazuh_agent_enrollment_password is defined
     - wazuh_agent_enrollment_password | length > 0
 
-- name: Windows | Restrict authd.pass ACL to SYSTEM and Administrators only
+- name: Windows | Restrict the enrollment password file ACL to SYSTEM and Administrators only
   community.windows.win_acl:
-    path: 'C:\Program Files (x86)\ossec-agent\authd.pass'
+    path: "{{ wazuh_agent_authorization_pass_path }}"
     user: "{{ item.user }}"
     rights: "{{ item.rights }}"
     type: allow
@@ -66,9 +78,9 @@
     - wazuh_agent_enrollment_password is defined
     - wazuh_agent_enrollment_password | length > 0
 
-- name: Windows | Remove inherited ACEs from authd.pass
+- name: Windows | Remove inherited ACEs from the enrollment password file
   community.windows.win_acl_inheritance:
-    path: 'C:\Program Files (x86)\ossec-agent\authd.pass'
+    path: "{{ wazuh_agent_authorization_pass_path }}"
     reorganize: true
     state: absent
   become: true
@@ -76,6 +88,27 @@
     - wazuh_authd_use_password | default(true)
     - wazuh_agent_enrollment_password is defined
     - wazuh_agent_enrollment_password | length > 0
+
+- name: Windows | Deploy the 5.0 enrollment token
+  ansible.windows.win_copy:
+    content: "{{ wazuh_agent_enrollment_token }}"
+    dest: 'C:\Program Files (x86)\ossec-agent\enrollment_token'
+  no_log: true
+  become: true
+  when:
+    - wazuh_agent_is_5x | bool
+    - wazuh_agent_enrollment_token | default('') | length > 0
+
+- name: Windows | Render the 5.0 agent configuration
+  ansible.windows.win_template:
+    src: ossec-windows.conf.j2
+    dest: 'C:\Program Files (x86)\ossec-agent\ossec.conf'
+    owner: SYSTEM
+    rights: '0640'
+  become: true
+  when: wazuh_agent_is_5x | bool
+  # No handler: the shared `restart wazuh-agent` handler is systemd, which does
+  # not exist on Windows. The explicit stop/start pair below applies the config.
 
 - name: Windows | Stop Wazuh agent service (if already running)
   ansible.windows.win_service:

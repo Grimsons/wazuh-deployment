@@ -49,6 +49,20 @@
     group: wazuh-dashboard
     mode: '0750'
   become: true
+  when: not (wazuh_is_5x | default(false) | bool)
+
+# Wazuh 5.0 moved the Wazuh plugin settings into opensearch_dashboards.yml
+# (wazuh_core.hosts and friends) and stopped reading wazuh.yml entirely. A file
+# full of 4.x keys that the plugin never reads is worse than no file: it looks
+# authoritative and every setting in it is inert. Removing it also makes the
+# rollback path honest - a 4.x rollback re-renders it from wazuh.yml.j2.
+- name: Remove the 4.x wazuh.yml that Wazuh 5.x no longer reads
+  ansible.builtin.file:
+    path: /usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml
+    state: absent
+  become: true
+  when: wazuh_is_5x | default(false) | bool
+  register: wazuh_dashboard_legacy_config_removed
 
 - name: Configure wazuh.yml from template
   ansible.builtin.template:
@@ -60,6 +74,7 @@
   become: true
   no_log: true
   notify: restart wazuh-dashboard
+  when: not (wazuh_is_5x | default(false) | bool)
 
 - name: Set correct ownership on wazuh plugin data directory
   ansible.builtin.file:

@@ -1,7 +1,7 @@
 ---
 # Wazuh Manager - Configuration
 
-- name: Deploy manager config from template
+- name: Deploy 4.x manager config from template
   ansible.builtin.template:
     src: ossec.conf.j2
     dest: "{{ wazuh_manager_config_file }}"
@@ -12,6 +12,24 @@
   become: true
   register: manager_config_deployed
   notify: restart wazuh-manager
+  when: not (wazuh_is_5x | default(false) | bool)
+
+- name: Verify the shipped 5.x manager config is present
+  ansible.builtin.stat:
+    path: "{{ wazuh_manager_config_file }}"
+  become: true
+  register: wazuh_5x_manager_config
+  when: wazuh_is_5x | default(false) | bool
+
+- name: Refuse to replace the shipped 5.x manager config
+  ansible.builtin.assert:
+    that:
+      - wazuh_5x_manager_config.stat.exists
+    fail_msg: >-
+      Wazuh 5.x must provide {{ wazuh_manager_config_file }}. The role edits
+      the package-shipped config in place; it does not render the 4.x
+      ossec.conf template against the 5.x schema.
+  when: wazuh_is_5x | default(false) | bool
 
 - name: Deploy local_internal_options.conf for performance tuning
   ansible.builtin.template:
@@ -49,7 +67,9 @@
     - name: Abort due to invalid configuration
       ansible.builtin.fail:
         msg: "Aborting: Wazuh manager configuration is invalid. Fix the errors shown above."
-  when: manager_config_deployed.changed
+  when:
+    - not (wazuh_is_5x | default(false) | bool)
+    - manager_config_deployed.changed | default(false)
 
 - name: Configure local rules directory
   ansible.builtin.file:

@@ -1,6 +1,19 @@
 ---
-# Wazuh Dashboard - Index Pattern Setup
-# Ensures index patterns are created and field lists are refreshed
+# Wazuh Dashboard - Index Pattern and Saved Object Setup
+#
+# Version branch. 4.x and 5.x are not variations of one another here: 4.x
+# provisions index patterns itself, 5.x refuses to and only revalidates the ones
+# the Wazuh plugin already created. Keeping both shapes in one file made the
+# difference invisible, so each lives in its own file and this file only decides
+# which one runs.
+#
+# Operator knobs (set in group_vars; all optional):
+#   wazuh_dashboard_skip_index_patterns      skip the whole block (default false)
+#   wazuh_dashboard_verify_saved_objects     assert that no saved object still
+#                                            references a 4.x index pattern
+#                                            (default false; read-only)
+#   wazuh_dashboard_5x_check_backing_index   require a real index behind each
+#                                            revalidated pattern (default true)
 
 - name: Wait for dashboard API to be fully available
   ansible.builtin.uri:
@@ -17,103 +30,31 @@
   delay: 10
   no_log: true
 
-- name: Define index patterns to create
-  ansible.builtin.set_fact:
-    wazuh_index_patterns:
-      - id: "wazuh-alerts-*"
-        title: "wazuh-alerts-*"
-        time_field: "timestamp"
-      - id: "wazuh-monitoring-*"
-        title: "wazuh-monitoring-*"
-        time_field: "timestamp"
-      - id: "wazuh-statistics-*"
-        title: "wazuh-statistics-*"
-        time_field: "timestamp"
+# ── 4.x ────────────────────────────────────────────────────────────────────
+# Create wazuh-alerts-*, wazuh-monitoring-* and wazuh-statistics-* with their
+# field lists. Unchanged behaviour; this is the verified 4.14.x baseline.
+- name: Configure index patterns for Wazuh 4.x
+  ansible.builtin.include_tasks: index_patterns_4x.yml
+  when: not (wazuh_is_5x | default(false) | bool)
 
-- name: Check existing index patterns
-  ansible.builtin.uri:
-    url: "https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/api/saved_objects/_find?type=index-pattern&per_page=100"
-    method: GET
-    user: "{{ wazuh_indexer_admin_user }}"
-    password: "{{ wazuh_indexer_admin_password }}"
-    force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
-    headers:
-      osd-xsrf: "true"
-    status_code: [200]
-  register: existing_patterns
-  no_log: true
+# ── 5.x ────────────────────────────────────────────────────────────────────
+# Never create. The 5.x plugin creates every default index pattern itself on
+# first start, with the index name as the saved object id, and re-creating them
+# here would overwrite plugin-owned objects. Revalidate instead.
+- name: Revalidate index patterns for Wazuh 5.x
+  ansible.builtin.include_tasks: index_patterns_5x.yml
+  when: wazuh_is_5x | default(false) | bool
 
-- name: Extract existing pattern IDs
-  ansible.builtin.set_fact:
-    existing_pattern_ids: "{{ existing_patterns.json.saved_objects | map(attribute='id') | list }}"
-
-- name: Get field list for each index pattern
-  ansible.builtin.uri:
-    url: "https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/api/index_patterns/_fields_for_wildcard?pattern={{ item.title }}&meta_fields=_source&meta_fields=_id&meta_fields=_type&meta_fields=_index&meta_fields=_score"
-    method: GET
-    user: "{{ wazuh_indexer_admin_user }}"
-    password: "{{ wazuh_indexer_admin_password }}"
-    force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
-    headers:
-      osd-xsrf: "true"
-    status_code: [200]
-  register: field_lists
-  loop: "{{ wazuh_index_patterns }}"
-  loop_control:
-    label: "{{ item.title }}"
-  ignore_errors: true
-  no_log: true
-
-- name: Create or update index patterns with field mappings
-  ansible.builtin.uri:
-    url: "https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/api/saved_objects/index-pattern/{{ item.0.id }}?overwrite=true"
-    method: POST
-    user: "{{ wazuh_indexer_admin_user }}"
-    password: "{{ wazuh_indexer_admin_password }}"
-    force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
-    headers:
-      osd-xsrf: "true"
-      Content-Type: "application/json"
-    body_format: json
-    body:
-      attributes:
-        title: "{{ item.0.title }}"
-        timeFieldName: "{{ item.0.time_field }}"
-        fields: "{{ item.1.json.fields | default([]) | to_json }}"
-    status_code: [200, 409]
-  loop: "{{ wazuh_index_patterns | zip(field_lists.results) | list }}"
-  loop_control:
-    label: "{{ item.0.title }}"
-  when: item.1.status is defined and item.1.status == 200
-  register: pattern_creation
-  ignore_errors: true
-  no_log: true
-
-- name: Set default index pattern to wazuh-alerts-*
-  ansible.builtin.uri:
-    url: "https://{{ wazuh_node_ip }}:{{ wazuh_dashboard_port }}/api/opensearch-dashboards/settings/defaultIndex"
-    method: POST
-    user: "{{ wazuh_indexer_admin_user }}"
-    password: "{{ wazuh_indexer_admin_password }}"
-    force_basic_auth: true
-    validate_certs: "{{ wazuh_ssl_verify_certificates | default(true) }}"
-    headers:
-      osd-xsrf: "true"
-      Content-Type: "application/json"
-    body_format: json
-    body:
-      value: "wazuh-alerts-*"
-    status_code: [200, 400]
-  ignore_errors: true
-  no_log: true
-
-- name: Display index pattern setup result
-  ansible.builtin.debug:
-    msg: |
-      Index patterns configured:
-      {% for pattern in wazuh_index_patterns %}
-        - {{ pattern.title }}
-      {% endfor %}
+# ── Saved object reference verification (5.x only) ──────────────────────────
+# Wazuh 5.0 provides no automatic upgrade path from 4.x; moving custom
+# dashboards across is a manual export/import (scripts/dashboard-saved-objects.sh,
+# docs/operations/dashboard-migration-5.0.md). The one thing that is worth
+# asserting on every run is that no object is still pointing at a 4.x index
+# pattern - that is the documented failure mode after an import, and it renders
+# panels empty. Off by default because it needs nothing from 4.x; turn it on once
+# the migration is done.
+- name: Verify saved object index pattern references for Wazuh 5.x
+  ansible.builtin.include_tasks: saved_objects.yml
+  when:
+    - wazuh_is_5x | default(false) | bool
+    - wazuh_dashboard_verify_saved_objects | default(false) | bool

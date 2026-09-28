@@ -1,6 +1,16 @@
 # Wazuh Upgrade Guide
 
-This document describes how to upgrade Wazuh deployments using the rolling upgrade playbook.
+This document describes how to upgrade Wazuh deployments within a single major
+version, using the upgrade playbook.
+
+**The indexer cannot be upgraded across a major version.** 4.x is OpenSearch 2.x
+and 5.x is OpenSearch 3.x; there is no in-place upgrade, no snapshot restore and
+no `_reindex`, and indexed data cannot be moved. `playbooks/upgrade.yml` refuses
+a 4.x to 5.x indexer upgrade rather than applying it node by node and leaving
+shards on two incompatible engines. To move the indexer to 5.x, follow
+[`indexer-cutover-5x.md`](./indexer-cutover-5x.md), which builds a new 5.x
+cluster and keeps 4.x read-only for history. The manager, dashboard and agents
+are unaffected by that boundary.
 
 ## Wazuh 5.0 compatibility boundary
 
@@ -59,7 +69,7 @@ and the residual risks.
 
 ## Overview
 
-The upgrade playbook (`playbooks/upgrade.yml`) performs rolling upgrades with:
+The upgrade playbook (`playbooks/upgrade.yml`) performs in-place upgrades with:
 - Zero-downtime for clustered deployments
 - Automatic pre-upgrade backups
 - Component-by-component upgrades
@@ -124,7 +134,7 @@ ansible-playbook playbooks/upgrade.yml -e "target_version=4.14.5" --limit agent_
 |----------|-------------|---------|
 | `target_version` | Target Wazuh version | `{{ wazuh_version }}` (optional) |
 | `create_backup` | Create backup before upgrade | `true` |
-| `rolling_upgrade` | Use rolling upgrade for clusters | `true` |
+| `rolling_upgrade` | Update one node at a time for clusters | `true` |
 | `agent_batch_size` | Agents to upgrade per batch | `10` |
 | `health_check_retries` | Health check retry attempts | `30` |
 | `health_check_delay` | Delay between retries (seconds) | `10` |
@@ -134,15 +144,20 @@ ansible-playbook playbooks/upgrade.yml -e "target_version=4.14.5" --limit agent_
 The playbook follows this order to minimize disruption:
 
 1. **Pre-upgrade backup** (all components)
-2. **Indexer cluster** (one node at a time, with shard allocation paused)
+2. **Indexer cluster** (one node at a time, with shard allocation paused;
+   same major only)
 3. **Manager cluster** (workers first, then master)
 4. **Dashboard**
 5. **Agents** (in batches)
 6. **Post-upgrade validation**
 
-## Rolling Upgrade Details
+## In-Place Upgrade Details
 
 ### Indexer Cluster
+
+Within one major only, one node at a time. The playbook refuses to start if the
+installed major differs from the target major; see the compatibility boundary
+above.
 
 1. Disable shard allocation
 2. Stop indexer node

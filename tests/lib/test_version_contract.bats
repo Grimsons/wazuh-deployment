@@ -141,6 +141,14 @@ resolved() {
         "packages.wazuh.com/production/5.x/artifact-urls/artifact_urls_5.0.0-beta5.yaml" ]
 }
 
+@test "the beta5 tag does not duplicate its stage in the manifest path" {
+    resolve_contract "5.0.0-beta5" "beta5"
+    [ "$(resolved is_5x)" = "true" ]
+    [ "$(resolved stage)" = "beta5" ]
+    [ "$(resolved manifest_prerelease)" = \
+        "packages-staging.xdrsiem.wazuh.info/pre-release/5.x/artifact-urls/artifact_urls_5.0.0-beta5.yaml" ]
+}
+
 @test "a 4.x pre-release still selects the pre-release channel" {
     resolve_contract "4.14.5-rc1" "rc1"
     [ "$(resolved is_5x)" = "false" ]
